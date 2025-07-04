@@ -40,3 +40,4 @@ fi
 ### ✅ Run CMD passed to container
 echo "🚀 Starting container with command: $@"
 exec "$@"
+
