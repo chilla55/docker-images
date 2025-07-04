@@ -16,9 +16,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Log in to GitHub Container Registry
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY -u ${{ github.actor }} --password-stdin
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Detect changed services (excluding README-only)
         id: changes
@@ -42,10 +48,10 @@ jobs:
       - name: Build & push nightly images
         run: |
           for service in ${{ steps.changes.outputs.changed }}; do
-            IMAGE_NAME=${{ env.REPO }}_${service}
-            NIGHTLY_TAG=${{ env.REGISTRY }}/$IMAGE_NAME:nightly
+            IMAGE_NAME="${{ env.REPO }}_${service}"
+            NIGHTLY_TAG="${{ env.REGISTRY }}/$IMAGE_NAME:nightly"
 
-            echo "Building $IMAGE_NAME → nightly"
+            echo "🔧 Building $IMAGE_NAME → nightly"
             docker build -t "$NIGHTLY_TAG" "$service"
             docker push "$NIGHTLY_TAG"
           done

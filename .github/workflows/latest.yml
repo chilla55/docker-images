@@ -16,31 +16,37 @@ jobs:
       REPO: ${{ github.repository }}
 
     steps:
-      - name: Log in to GitHub Container Registry
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY -u ${{ github.actor }} --password-stdin
+      - name: Checkout (optional but good for completeness)
+        uses: actions/checkout@v4
 
-      - name: Promote if digest differs
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote :nightly to :latest if digests differ
         run: |
           for service in ${{ github.event.inputs.services }}; do
-            IMAGE_NAME=${{ env.REPO }}_${service}
-            NIGHTLY_TAG=${{ env.REGISTRY }}/$IMAGE_NAME:nightly
-            LATEST_TAG=${{ env.REGISTRY }}/$IMAGE_NAME:latest
+            IMAGE_NAME="${{ env.REPO }}_${service}"
+            NIGHTLY_TAG="${{ env.REGISTRY }}/$IMAGE_NAME:nightly"
+            LATEST_TAG="${{ env.REGISTRY }}/$IMAGE_NAME:latest"
 
-            echo "Checking $IMAGE_NAME"
+            echo "🔍 Checking $IMAGE_NAME"
 
-            # Pull both tags (quietly)
             docker pull "$NIGHTLY_TAG" > /dev/null
-            docker pull "$LATEST_TAG" > /dev/null || true  # may not exist yet
 
-            # Get digests (image ID is the SHA256 digest if built from same layers)
+            docker pull "$LATEST_TAG" > /dev/null 2>&1 || true
+
             NIGHTLY_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$NIGHTLY_TAG" | cut -d@ -f2)
             LATEST_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$LATEST_TAG" 2>/dev/null | cut -d@ -f2 || true)
 
             if [ "$NIGHTLY_DIGEST" != "$LATEST_DIGEST" ]; then
-              echo "Digest differs — promoting $NIGHTLY_TAG to $LATEST_TAG"
+              echo "🚀 Promoting $NIGHTLY_TAG → $LATEST_TAG"
               docker tag "$NIGHTLY_TAG" "$LATEST_TAG"
               docker push "$LATEST_TAG"
             else
-              echo "No promotion needed — $NIGHTLY_TAG and $LATEST_TAG are the same"
+              echo "✅ No promotion needed — already up to date"
             fi
           done
