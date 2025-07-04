@@ -1,0 +1,46 @@
+name: Promote Nightly to Latest
+
+on:
+  workflow_dispatch:
+    inputs:
+      services:
+        description: 'Space-separated service names to promote (e.g. service1 service2)'
+        required: true
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+
+    env:
+      REGISTRY: ghcr.io
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY -u ${{ github.actor }} --password-stdin
+
+      - name: Promote if digest differs
+        run: |
+          for service in ${{ github.event.inputs.services }}; do
+            IMAGE_NAME=${{ env.REPO }}_${service}
+            NIGHTLY_TAG=${{ env.REGISTRY }}/$IMAGE_NAME:nightly
+            LATEST_TAG=${{ env.REGISTRY }}/$IMAGE_NAME:latest
+
+            echo "Checking $IMAGE_NAME"
+
+            # Pull both tags (quietly)
+            docker pull "$NIGHTLY_TAG" > /dev/null
+            docker pull "$LATEST_TAG" > /dev/null || true  # may not exist yet
+
+            # Get digests (image ID is the SHA256 digest if built from same layers)
+            NIGHTLY_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$NIGHTLY_TAG" | cut -d@ -f2)
+            LATEST_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$LATEST_TAG" 2>/dev/null | cut -d@ -f2 || true)
+
+            if [ "$NIGHTLY_DIGEST" != "$LATEST_DIGEST" ]; then
+              echo "Digest differs — promoting $NIGHTLY_TAG to $LATEST_TAG"
+              docker tag "$NIGHTLY_TAG" "$LATEST_TAG"
+              docker push "$LATEST_TAG"
+            else
+              echo "No promotion needed — $NIGHTLY_TAG and $LATEST_TAG are the same"
+            fi
+          done

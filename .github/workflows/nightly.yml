@@ -1,0 +1,51 @@
+name: Nightly Docker Build
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+
+    env:
+      REGISTRY: ghcr.io
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY -u ${{ github.actor }} --password-stdin
+
+      - name: Detect changed services (excluding README-only)
+        id: changes
+        run: |
+          git fetch origin main
+          CHANGED_SERVICES=()
+
+          for dir in */ ; do
+            if [ -f "$dir/Dockerfile" ]; then
+              changes=$(git diff --name-only HEAD~1 -- "$dir")
+              meaningful_changes=$(echo "$changes" | grep -viE '^'"$dir"'README\.md$' || true)
+
+              if [ -n "$meaningful_changes" ]; then
+                CHANGED_SERVICES+=("${dir%/}")
+              fi
+            fi
+          done
+
+          echo "changed=${CHANGED_SERVICES[*]}" >> $GITHUB_OUTPUT
+
+      - name: Build & push nightly images
+        run: |
+          for service in ${{ steps.changes.outputs.changed }}; do
+            IMAGE_NAME=${{ env.REPO }}_${service}
+            NIGHTLY_TAG=${{ env.REGISTRY }}/$IMAGE_NAME:nightly
+
+            echo "Building $IMAGE_NAME → nightly"
+            docker build -t "$NIGHTLY_TAG" "$service"
+            docker push "$NIGHTLY_TAG"
+          done
