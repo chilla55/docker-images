@@ -8,7 +8,7 @@ cd "$APP_DIR"
 if [ ! -f artisan ]; then
     echo "📥 Downloading latest Pterodactyl Panel..."
     curl -Lo /tmp/panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz
-    tar -xzf /tmp/panel.tar.gz -C "$APP_DIR" --strip-components=1
+    tar -xzf /tmp/panel.tar.gz -C "$APP_DIR" #--strip-components=1
     rm /tmp/panel.tar.gz
     echo "✅ Panel files extracted."
 else
