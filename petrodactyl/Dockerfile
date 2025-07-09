@@ -10,12 +10,15 @@ RUN apt-get update && apt-get install -y \
     && apt-get update && apt-get install -y \
     php8.3 php8.3-fpm php8.3-cli php8.3-mysql php8.3-mbstring php8.3-bcmath php8.3-gd \
     php8.3-zip php8.3-curl php8.3-xml php8.3-tokenizer \
-    mariadb-client redis \
+    mariadb-client redis supervisor \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Composer
 RUN curl -sS https://getcomposer.org/installer | php && \
     mv composer.phar /usr/local/bin/composer
+
+# Copy supervisord config
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Add healthcheck script
 COPY healthcheck.sh /usr/local/bin/healthcheck.sh
@@ -30,4 +33,4 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["php-fpm8.3", "-F"]
+CMD ["/usr/bin/supervisord"]
