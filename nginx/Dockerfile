@@ -57,10 +57,14 @@ RUN rm -rf /usr/src/* /root/.cache /var/cache/apk/* && \
 # ------------ Stage 2: Runtime ------------
 FROM alpine:3.20
 
+RUN apk add --no-cache brotli openssl pcre zlib curl jq
 RUN apk add --no-cache brotli openssl pcre zlib
 
 COPY --from=builder /usr/sbin/nginx /usr/sbin/nginx
 COPY --from=builder /etc/nginx /etc/nginx
+COPY update-cf-ips.sh /usr/local/bin/update-cf-ips.sh
+COPY healthcheck.sh /usr/local/bin/healthcheck.sh
+COPY entrypoint.sh /entrypoint.sh
 
 RUN mkdir -p \
     /etc/nginx/modules \
@@ -73,6 +77,13 @@ RUN mkdir -p \
     adduser -D -g 'nginx' nginx && \
     chown -R nginx:nginx /etc/nginx /var/cache/nginx /var/www
 
+RUN chmod +x /usr/local/bin/update-cf-ips.sh /usr/local/bin/healthcheck.sh /entrypoint.sh
+
 USER nginx
 
 CMD ["/usr/sbin/nginx", "-g", "daemon off;"]
+HEALTHCHECK --interval=5m --timeout=10s --retries=3 \
+  CMD /usr/local/bin/healthcheck.sh || exit 1
+
+USER nginx
+ENTRYPOINT ["/entrypoint.sh"]
