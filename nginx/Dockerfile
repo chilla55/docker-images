@@ -67,7 +67,8 @@ COPY --from=builder /etc/nginx /etc/nginx
 COPY update-cf-ips.sh /usr/local/bin/update-cf-ips.sh
 COPY healthcheck.sh   /usr/local/bin/healthcheck.sh
 COPY entrypoint.sh    /entrypoint.sh
-RUN chmod +x /usr/local/bin/update-cf-ips.sh /usr/local/bin/healthcheck.sh /entrypoint.sh
+COPY watch-cert-reload.sh   /usr/local/bin/watch-cert-reload.sh
+RUN chmod +x /usr/local/bin/update-cf-ips.sh /usr/local/bin/healthcheck.sh /usr/local/bin/watch-cert-reload.sh /entrypoint.sh
 
 # usual dirs/users (keep yours as-is)
 RUN mkdir -p \
