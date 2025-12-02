@@ -35,6 +35,10 @@ while :; do
 
     if [ "$MTIME" != "$LAST_MTIME" ]; then
       echo "[cert-watch] Certificate changed (mtime $LAST_MTIME → $MTIME)"
+      if [ -x /usr/local/bin/update-cf-ips.sh ]; then
+        echo "[nginx-pre-reload] Updating Cloudflare IP list..."
+        /usr/local/bin/update-cf-ips.sh || echo "[nginx-pre-reload] Cloudflare update failed"
+      fi
       if nginx -t >/dev/null 2>&1; then
         echo "[cert-watch] nginx -t OK, reloading..."
         nginx -s reload 2>/dev/null || kill -HUP 1 || echo "[cert-watch] reload failed"
