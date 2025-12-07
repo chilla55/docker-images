@@ -16,6 +16,8 @@ RUN apk add --no-cache \
     curl \
     ca-certificates \
     tar \
+    unzip \
+    git \
     php83 \
     php83-phar \
     php83-iconv \
@@ -25,11 +27,18 @@ RUN apk add --no-cache \
     php83-dom \
     php83-xml \
     php83-xmlwriter \
+    php83-xmlreader \
     php83-simplexml \
     php83-curl \
     php83-zip \
     php83-fileinfo \
-    php83-ctype
+    php83-ctype \
+    php83-pdo \
+    php83-pdo_mysql \
+    php83-session \
+    php83-posix \
+    php83-sodium \
+    php83-bcmath
 
 # Create php symlink
 RUN ln -sf /usr/bin/php83 /usr/bin/php
@@ -45,12 +54,12 @@ RUN echo "[BUILD] Downloading Pterodactyl ${PANEL_VERSION}..." && \
     rm /tmp/panel.tar.gz
 
 # Install production dependencies
-RUN composer install \
+RUN COMPOSER_ALLOW_SUPERUSER=1 composer install \
     --no-dev \
     --optimize-autoloader \
     --no-interaction \
-    --no-progress \
-    --prefer-dist && \
+    --prefer-dist \
+    --verbose && \
     composer clear-cache
 
 # Remove unnecessary files
@@ -77,49 +86,40 @@ LABEL maintainer="chilla55" \
       org.opencontainers.image.version="${PANEL_VERSION}" \
       org.opencontainers.image.source="https://github.com/chilla55/docker-images"
 
+# Enable community repository for Caddy
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories
+
 # Install runtime dependencies only
 RUN apk add --no-cache \
     bash \
     curl \
     ca-certificates \
     tzdata \
-    # PHP 8.3 runtime
     php83 \
     php83-fpm \
     php83-opcache \
     php83-session \
     php83-pdo \
     php83-pdo_mysql \
-    php83-mysqlnd \
     php83-curl \
     php83-mbstring \
     php83-bcmath \
     php83-gd \
     php83-zip \
     php83-xml \
-    php83-dom \
-    php83-xmlwriter \
-    php83-simplexml \
     php83-tokenizer \
     php83-fileinfo \
     php83-openssl \
     php83-ctype \
     php83-posix \
-    php83-pcntl \
-    # Web server
+    php83-sodium \
     caddy \
-    # Process manager
     supervisor \
-    # Database client for healthchecks
-    mariadb-client \
-    mariadb-connector-c && \
-    # Create symlinks
+    mariadb-client && \
     ln -sf /usr/bin/php83 /usr/bin/php && \
     ln -sf /usr/sbin/php-fpm83 /usr/sbin/php-fpm && \
-    # Create www-data user (matching nginx UID for consistency)
-    addgroup -g 82 -S www-data && \
-    adduser -u 82 -D -S -G www-data www-data && \
-    # Create necessary directories
+    addgroup -g 82 www-data 2>/dev/null || true && \
+    adduser -u 82 -D -S -G www-data www-data 2>/dev/null || true && \
     mkdir -p \
         ${APP_DIR} \
         /var/log/ptero \
