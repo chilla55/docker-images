@@ -25,7 +25,11 @@ RUN apk add --no-cache \
     php83-dom \
     php83-xml \
     php83-xmlwriter \
-    php83-simplexml
+    php83-simplexml \
+    php83-curl \
+    php83-zip \
+    php83-fileinfo \
+    php83-ctype
 
 # Create php symlink
 RUN ln -sf /usr/bin/php83 /usr/bin/php
