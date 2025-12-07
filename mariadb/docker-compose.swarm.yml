@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  mariadb-primary:
+    image: ${DOCKER_REGISTRY:-local}/mariadb-replication:${VERSION:-latest}
+    hostname: mariadb-primary
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-app_db}
+      MYSQL_USER: ${MYSQL_USER:-app_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REPLICATION_MODE: "master"
+      REPLICATION_USER: "replicator"
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      ENABLE_CONNECTIVITY_MONITOR: "true"
+      ENABLE_AUTO_RECOVERY: "true"
+      SECONDARY_HOST: "mariadb-secondary"
+      MAXSCALE_HOST: "maxscale"
+      CHECK_INTERVAL: "5"
+    volumes:
+      - mariadb-primary-data:/var/lib/mysql
+      - mariadb-primary-logs:/var/log/mysql
+    networks:
+      - mariadb-cluster
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.mariadb.node == node1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+  mariadb-secondary:
+    image: ${DOCKER_REGISTRY:-local}/mariadb-replication:${VERSION:-latest}
+    hostname: mariadb-secondary
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-app_db}
+      MYSQL_USER: ${MYSQL_USER:-app_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REPLICATION_MODE: "slave"
+      REPLICATION_USER: "replicator"
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      MASTER_HOST: "mariadb-primary"
+      MASTER_PORT: "3306"
+      ENABLE_CONNECTIVITY_MONITOR: "true"
+      PRIMARY_HOST: "mariadb-primary"
+      MAXSCALE_HOST: "maxscale"
+      CHECK_INTERVAL: "5"YSQL_PASSWORD}
+      REPLICATION_MODE: "slave"
+      REPLICATION_USER: "replicator"
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      MASTER_HOST: "mariadb-primary"
+      MASTER_PORT: "3306"
+    volumes:
+      - mariadb-secondary-data:/var/lib/mysql
+      - mariadb-secondary-logs:/var/log/mysql
+    networks:
+      - mariadb-cluster
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.mariadb.node == node2
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    ports:
+      - target: 3306
+        published: 3307
+        mode: host
+    depends_on:
+      - mariadb-primary
+
+  maxscale:
+    image: mariadb/maxscale:latest
+    hostname: maxscale
+    environment:
+      MAXSCALE_USER: ${MAXSCALE_USER:-admin}
+      MAXSCALE_PASSWORD: ${MAXSCALE_PASSWORD}
+    volumes:
+      - ./maxscale-replication.cnf:/etc/maxscale.cnf:ro
+      - maxscale-data:/var/lib/maxscale
+    networks:
+      - mariadb-cluster
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.mariadb.node == node3
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.2'
+          memory: 256M
+    ports:
+      - "4006:4006"  # Read-Write Split Router
+      - "4008:4008"  # Read Connection Router
+      - "8989:8989"  # MaxScale REST API
+    depends_on:
+      - mariadb-primary
+      - mariadb-secondary
+
+volumes:
+  mariadb-primary-data:
+    driver: local
+  mariadb-primary-logs:
+    driver: local
+  mariadb-secondary-data:
+    driver: local
+  mariadb-secondary-logs:
+    driver: local
+  maxscale-data:
+    driver: local
+
+networks:
+  mariadb-cluster:
+    driver: overlay
+    attachable: true
