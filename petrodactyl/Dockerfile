@@ -104,7 +104,6 @@ RUN apk add --no-cache \
     php83-fileinfo \
     php83-openssl \
     php83-ctype \
-    php83-json \
     php83-posix \
     php83-pcntl \
     # Web server
