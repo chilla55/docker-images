@@ -1,0 +1,38 @@
+# ============================================================================
+# .dockerignore - Exclude files from Docker build context
+# ============================================================================
+
+# Documentation
+README.md
+UPGRADE_GUIDE.md
+*.md
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Docker files
+docker-compose*.yml
+.dockerignore
+
+# Development files
+.env*
+.vscode/
+.idea/
+
+# Build artifacts
+*.log
+*.tar.gz
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp/
+temp/
