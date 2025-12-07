@@ -168,7 +168,7 @@ RUN sed -i \
     /etc/php83/php.ini
 
 # Set proper permissions
-    chown -R www-data:www-data \
+RUN chown -R www-data:www-data \
     ${APP_DIR}/storage \
     ${APP_DIR}/bootstrap/cache && \
     chmod -R 755 ${APP_DIR}/storage ${APP_DIR}/bootstrap/cache
