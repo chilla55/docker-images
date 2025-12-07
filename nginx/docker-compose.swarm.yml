@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: ghcr.io/chilla55/nginx:latest
+    networks:
+      - proxy
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    environment:
+      # Cloudflare Real IP updater
+      CF_REALIP_AUTO: "true"
+      CF_REALIP_INTERVAL: "21600"  # 6 hours
+      CF_REALIP_MAX_FAILS: "5"
+      
+      # Certificate watcher (optional - set path to watch)
+      CERT_WATCH_PATH: ""  # e.g., /etc/nginx/certs/fullchain.pem
+      CERT_WATCH_INTERVAL: "300"  # 5 minutes
+      CERT_WATCH_DEBUG: "0"
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/nginx.conf
+        mode: 0444
+    volumes:
+      # Certificate volume (if using Let's Encrypt via external source)
+      - nginx_certs:/etc/nginx/certs:ro
+      # Site configurations
+      - nginx_sites:/etc/nginx/sites-enabled:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  proxy:
+    external: true
+    name: proxy
+
+configs:
+  nginx_conf:
+    external: true
+    name: nginx_main_config
+
+volumes:
+  nginx_certs:
+    driver: local
+  nginx_sites:
+    driver: local

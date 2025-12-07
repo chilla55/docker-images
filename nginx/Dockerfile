@@ -6,7 +6,8 @@
 # ------------ Stage 1: Builder ------------
 FROM alpine:3.20 AS builder
 
-ENV NGINX_VERSION=1.29.0
+ARG NGINX_VERSION=1.29.0
+ENV NGINX_VERSION=${NGINX_VERSION}
 
 RUN apk add --no-cache \
     build-base \
