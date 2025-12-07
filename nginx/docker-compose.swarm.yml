@@ -1,10 +1,25 @@
 version: '3.8'
 
+# ──────────────────────────────────────────────────────────────────────────
+# Secrets
+# ──────────────────────────────────────────────────────────────────────────
+secrets:
+  storagebox_password:
+    external: true
+    name: storagebox_password
+
 services:
   nginx:
     image: ghcr.io/chilla55/nginx:latest
     networks:
       - proxy
+    
+    # Required for CIFS mount
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    devices:
+      - /dev/fuse
     deploy:
       mode: replicated
       replicas: 2
@@ -31,38 +46,43 @@ services:
       CF_REALIP_INTERVAL: "21600"  # 6 hours
       CF_REALIP_MAX_FAILS: "5"
       
-      # Certificate watcher (optional - set path to watch)
-      CERT_WATCH_PATH: ""  # e.g., /etc/nginx/certs/fullchain.pem
+      # Certificate watcher - watches for cert changes and reloads nginx
+      CERT_WATCH_PATH: "/etc/nginx/certs/live/example.com/fullchain.pem"  # Set to your domain
       CERT_WATCH_INTERVAL: "300"  # 5 minutes
       CERT_WATCH_DEBUG: "0"
+      
+      # Storage Box CIFS mount for certificates
+      STORAGE_BOX_CERTS_ENABLED: "true"
+      STORAGE_BOX_HOST: "u123456.your-storagebox.de"  # Change to your Storage Box
+      STORAGE_BOX_USER: "u123456"  # Change to your username
+      STORAGE_BOX_PASSWORD_FILE: "/run/secrets/storagebox_password"
+      STORAGE_BOX_CERTS_PATH: "/certs"
+      STORAGE_BOX_CERTS_MOUNT_POINT: "/etc/nginx/certs"
+      STORAGE_BOX_CERTS_MOUNT_OPTIONS: "vers=3.0,uid=0,gid=101,file_mode=0640,dir_mode=0750,ro"
+      
+      # Storage Box CIFS mount for site configurations
+      STORAGE_BOX_SITES_ENABLED: "true"
+      STORAGE_BOX_SITES_PATH: "/sites"
+      STORAGE_BOX_SITES_MOUNT_POINT: "/etc/nginx/sites-enabled"
+      STORAGE_BOX_SITES_MOUNT_OPTIONS: "vers=3.0,uid=0,gid=101,file_mode=0640,dir_mode=0750,ro"
+    
     configs:
       - source: nginx_conf
         target: /etc/nginx/nginx.conf
         mode: 0444
-    volumes:
-      # Certificate volume (if using Let's Encrypt via external source)
-      - nginx_certs:/etc/nginx/certs:ro
-      # Site configurations
-      - nginx_sites:/etc/nginx/sites-enabled:ro
+    
+    secrets:
+      - storagebox_password
+    
+    # Note: Both /etc/nginx/certs and /etc/nginx/sites-enabled are mounted from Storage Box via CIFS
+    
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-
-networks:
-  proxy:
-    external: true
-    name: proxy
 
 configs:
   nginx_conf:
     external: true
     name: nginx_main_config
-
-volumes:
-  nginx_certs:
-    driver: local
-  nginx_sites:
-    driver: local

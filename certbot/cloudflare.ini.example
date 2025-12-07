@@ -1,0 +1,18 @@
+# ============================================================================
+# Example Cloudflare API Credentials for Certbot
+# ============================================================================
+# Create this file and save it as a Docker secret:
+# docker secret create cloudflare_credentials cloudflare.ini
+# ============================================================================
+
+# Option 1: Cloudflare API Token (Recommended - more secure)
+# Create a token at: https://dash.cloudflare.com/profile/api-tokens
+# Required permissions:
+#   - Zone:DNS:Edit
+#   - Zone:Zone:Read
+dns_cloudflare_api_token = YOUR_CLOUDFLARE_API_TOKEN_HERE
+
+# Option 2: Cloudflare Global API Key (Legacy - less secure)
+# Only use this if you cannot use an API token
+# dns_cloudflare_email = your-email@example.com
+# dns_cloudflare_api_key = YOUR_CLOUDFLARE_GLOBAL_API_KEY_HERE
