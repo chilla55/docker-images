@@ -10,7 +10,7 @@ curl -fsSL https://raw.githubusercontent.com/chilla55/docker-images/main/deploy-
 ```
 
 This will:
-- Clone the repository to `/serverdata/docker`
+- Clone the repository to `/serverdata/docker-swarm`
 - Make all scripts executable
 - Show you the next steps
 
@@ -42,7 +42,7 @@ cat MIGRATION_STEPS.md
 The repository will be at `/serverdata/docker` with this structure:
 
 ```
-/serverdata/docker/
+/serverdata/docker-swarm/
 ├── scripts/
 │   ├── 00-check-prerequisites.sh
 │   ├── 01-setup-networks.sh
@@ -66,7 +66,7 @@ The repository will be at `/serverdata/docker` with this structure:
 ## Start Migration
 
 ```bash
-cd /serverdata/docker
+cd /serverdata/docker-swarm
 
 # Step 1: Create secrets
 ./scripts/03-setup-secrets.sh
@@ -116,4 +116,5 @@ git push origin main
 
 - **Repository**: https://github.com/chilla55/docker-images
 - **Branch**: `main`
-- **Deploy Location**: `/serverdata/docker`
+- **Deploy Location**: `/serverdata/docker-swarm`
+- **Old Compose Location**: `/serverdata/docker` (preserved)

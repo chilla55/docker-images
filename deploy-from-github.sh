@@ -19,7 +19,7 @@ echo "==========================================================================
 # Configuration
 REPO_URL="https://github.com/chilla55/docker-images.git"
 BRANCH="main"
-DEPLOY_DIR="/serverdata/docker"
+DEPLOY_DIR="/serverdata/docker-swarm"
 
 echo ""
 echo -e "${BLUE}This script will:${NC}"
@@ -50,6 +50,49 @@ if ! docker node ls &>/dev/null; then
 fi
 echo -e "${GREEN}✓ Running on Swarm manager${NC}"
 
+# Handle existing deployment directory
+if [ -d "$DEPLOY_DIR" ]; then
+    echo ""
+    echo -e "${YELLOW}Existing deployment found at: $DEPLOY_DIR${NC}"
+    echo ""
+    echo "Choose an action:"
+    echo "  1) Clean install (remove everything and clone fresh)"
+    echo "  2) Update (pull latest changes, preserve .env files)"
+    echo "  3) Cancel"
+    echo ""
+    read -p "Enter choice [1-3]: " choice
+    
+    case $choice in
+        1)
+            echo -e "${BLUE}Performing clean install...${NC}"
+            # Backup .env files if they exist
+            BACKUP_DIR="/tmp/docker-swarm-backup-$(date +%s)"
+            mkdir -p "$BACKUP_DIR"
+            find "$DEPLOY_DIR" -name ".env" -exec cp --parents {} "$BACKUP_DIR/" \; 2>/dev/null || true
+            
+            # Remove old directory
+            rm -rf "$DEPLOY_DIR"
+            mkdir -p "$DEPLOY_DIR"
+            
+            if [ -d "$BACKUP_DIR/serverdata/docker-swarm" ]; then
+                echo -e "${GREEN}✓ .env files backed up to: $BACKUP_DIR${NC}"
+                echo "  Restore them after deployment if needed"
+            fi
+            ;;
+        2)
+            echo -e "${BLUE}Updating existing deployment...${NC}"
+            ;;
+        3)
+            echo "Cancelled."
+            exit 0
+            ;;
+        *)
+            echo "Invalid choice. Cancelled."
+            exit 1
+            ;;
+    esac
+fi
+
 # Create deploy directory if it doesn't exist
 mkdir -p "$DEPLOY_DIR"
 cd "$DEPLOY_DIR"
@@ -63,11 +106,12 @@ if [ -d ".git" ]; then
     git pull origin "$BRANCH"
     echo -e "${GREEN}✓ Repository updated${NC}"
 else
-    echo -e "${BLUE}Cloning repository...${NC}"
-    cd ..
-    rm -rf docker
-    git clone -b "$BRANCH" "$REPO_URL" docker
-    cd docker
+    echo -e "${BLUE}Cloning repository to $DEPLOY_DIR...${NC}"
+    mkdir -p "$(dirname "$DEPLOY_DIR")"
+    cd "$(dirname "$DEPLOY_DIR")"
+    rm -rf "$(basename "$DEPLOY_DIR")"
+    git clone -b "$BRANCH" "$REPO_URL" "$(basename "$DEPLOY_DIR")"
+    cd "$DEPLOY_DIR"
     echo -e "${GREEN}✓ Repository cloned${NC}"
 fi
 

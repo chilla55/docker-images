@@ -14,7 +14,7 @@
 
 ```bash
 ssh root@mail
-cd /serverdata/docker
+cd /serverdata/docker-swarm
 
 # Create all secrets (will prompt for APP_KEY, Storage Box password, Cloudflare token)
 ./scripts/03-setup-secrets.sh
@@ -50,7 +50,7 @@ Should show all checks passed or minor warnings.
 ## Step 4: Deploy MariaDB Stack
 
 ```bash
-cd /serverdata/docker/mariadb
+cd /serverdata/docker-swarm/mariadb
 
 # Create .env file with passwords from secrets
 cat > .env <<'EOF'
@@ -81,7 +81,7 @@ Press Ctrl+C when you see:
 ## Step 5: Migrate Data from Old Container
 
 ```bash
-cd /serverdata/docker
+cd /serverdata/docker-swarm-swarm
 
 # Run migration script
 ./scripts/05-migrate-data.sh
@@ -102,7 +102,7 @@ cd /serverdata/docker
 ## Step 6: Deploy PostgreSQL (Optional)
 
 ```bash
-cd /serverdata/docker/postgresql
+cd /serverdata/docker-swarm/postgresql
 
 cat > .env <<'EOF'
 VERSION=latest
@@ -123,7 +123,7 @@ docker stack deploy -c docker-compose.swarm.yml postgresql
 ## Step 7: Deploy Redis
 
 ```bash
-cd /serverdata/docker/redis
+cd /serverdata/docker-swarm/redis
 
 cat > .env <<'EOF'
 VERSION=latest
@@ -138,7 +138,7 @@ docker stack deploy -c docker-compose.swarm.yml redis
 ## Step 8: Deploy Pterodactyl
 
 ```bash
-cd /serverdata/docker/petrodactyl
+cd /serverdata/docker-swarm/petrodactyl
 
 # Deploy (already configured with correct settings)
 docker stack deploy -c docker-compose.swarm.yml pterodactyl
@@ -154,7 +154,7 @@ Look for successful migration messages.
 ## Step 9: Deploy Vaultwarden
 
 ```bash
-cd /serverdata/docker/vaultwarden
+cd /serverdata/docker-swarm/vaultwarden
 
 # Edit docker-compose.swarm.yml if needed to set VAULTWARDEN_DOMAIN
 # Current: VAULTWARDEN_DOMAIN: ${VAULTWARDEN_DOMAIN:-https://vw.chilla55.de}
@@ -170,7 +170,7 @@ docker service logs -f vaultwarden_vaultwarden
 ## Step 10: Deploy Certbot
 
 ```bash
-cd /serverdata/docker/certbot
+cd /serverdata/docker-swarm/certbot
 
 # Edit docker-compose.swarm.yml to configure:
 # - CERT_EMAIL: your email
@@ -189,7 +189,7 @@ docker service logs -f certbot_certbot
 ## Step 11: Deploy Nginx
 
 ```bash
-cd /serverdata/docker/nginx
+cd /serverdata/docker-swarm/nginx
 
 # Edit docker-compose.swarm.yml to configure:
 # - CERT_WATCH_PATH: /etc/nginx/certs/live/your-domain.com/fullchain.pem
