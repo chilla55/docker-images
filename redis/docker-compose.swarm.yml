@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  redis:
+    image: ${DOCKER_REGISTRY:-local}/redis:${VERSION:-latest}
+    hostname: redis
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    networks:
+      - net_redis_pterodactyl
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.redis.node == node1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    ports:
+      - target: 6379
+        published: 6379
+        mode: host
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  net_redis_pterodactyl:
+    external: true
