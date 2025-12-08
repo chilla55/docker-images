@@ -9,7 +9,7 @@ services:
     volumes:
       - redis-data:/data
     networks:
-      - net_redis_pterodactyl
+      - redis-net
     deploy:
       mode: replicated
       replicas: 1
@@ -27,15 +27,11 @@ services:
         reservations:
           cpus: '0.5'
           memory: 256M
-    ports:
-      - target: 6379
-        published: 6379
-        mode: host
 
 volumes:
   redis-data:
     driver: local
 
 networks:
-  net_redis_pterodactyl:
+  redis-net:
     external: true

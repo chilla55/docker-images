@@ -10,9 +10,8 @@ version: "3.8"
 # Networks
 # ──────────────────────────────────────────────────────────────────────────
 networks:
-  proxy:
+  web-net:
     external: true
-    name: proxy  # External nginx reverse proxy network
 
 # ──────────────────────────────────────────────────────────────────────────
 # Secrets
@@ -51,7 +50,7 @@ services:
     hostname: certbot
     
     networks:
-      - proxy  # Access to Docker socket for nginx reload
+      - web-net
     
     # Required for CIFS mount
     cap_add:
@@ -95,6 +94,8 @@ services:
     
     # Note: /etc/letsencrypt is mounted from Storage Box via CIFS in entrypoint.sh
     # No Docker socket needed - nginx auto-reloads via certificate watcher
+    
+    deploy:
       mode: replicated
       replicas: 1
       placement:

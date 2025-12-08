@@ -18,7 +18,7 @@ services:
       - postgresql-primary-data:/var/lib/postgresql/data
       - postgresql-primary-logs:/var/log/postgresql
     networks:
-      - postgresql-cluster
+      - postgres-net
     deploy:
       mode: replicated
       replicas: 1
@@ -36,10 +36,6 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
-    ports:
-      - target: 5432
-        published: 5432
-        mode: host
 
   postgresql-secondary:
     image: ${DOCKER_REGISTRY:-local}/postgresql-replication:${VERSION:-latest}
@@ -59,7 +55,7 @@ services:
       - postgresql-secondary-data:/var/lib/postgresql/data
       - postgresql-secondary-logs:/var/log/postgresql
     networks:
-      - postgresql-cluster
+      - postgres-net
     deploy:
       mode: replicated
       replicas: 1
@@ -77,10 +73,6 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
-    ports:
-      - target: 5432
-        published: 5433
-        mode: host
     depends_on:
       - postgresql-primary
 
@@ -103,7 +95,7 @@ services:
     volumes:
       - pgpool-data:/bitnami/pgpool
     networks:
-      - postgresql-cluster
+      - postgres-net
     deploy:
       mode: replicated
       replicas: 1
@@ -122,9 +114,6 @@ services:
         reservations:
           cpus: '0.2'
           memory: 256M
-    ports:
-      - "5432:5432"  # PgPool connection (applications connect here)
-      - "9999:9999"  # PgPool admin interface
     depends_on:
       - postgresql-primary
       - postgresql-secondary
@@ -142,6 +131,5 @@ volumes:
     driver: local
 
 networks:
-  postgresql-cluster:
-    driver: overlay
-    attachable: true
+  postgres-net:
+    external: true

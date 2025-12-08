@@ -94,7 +94,6 @@ check_primary() {
         
         sleep "$CHECK_INTERVAL"
     done
-}   done
 }
 
 check_secondary() {

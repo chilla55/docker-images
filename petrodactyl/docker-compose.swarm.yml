@@ -10,17 +10,14 @@ version: "3.8"
 # Networks
 # ──────────────────────────────────────────────────────────────────────────
 networks:
-  proxy:
+  web-net:
     external: true
-    name: proxy  # External nginx reverse proxy network
   
-  database:
+  mariadb-net:
     external: true
-    name: database  # External MariaDB network
   
-  cache:
+  redis-net:
     external: true
-    name: cache  # External Redis network
 
 # ──────────────────────────────────────────────────────────────────────────
 # Secrets
@@ -62,9 +59,9 @@ services:
     hostname: pterodactyl-panel
     
     networks:
-      - proxy      # For nginx reverse proxy
-      - database   # For MariaDB access
-      - cache      # For Redis access
+      - web-net
+      - mariadb-net
+      - redis-net
     
     environment:
       # ──────────────────────────────────────────────────────────────────
@@ -185,7 +182,7 @@ services:
         - "com.pterodactyl.service=panel"
     
     healthcheck:
-      test: ["/healthcheck.sh"]
+      test: ["CMD", "/healthcheck.sh"]
       interval: 30s
       timeout: 5s
       retries: 3

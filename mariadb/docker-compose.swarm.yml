@@ -21,7 +21,7 @@ services:
       - mariadb-primary-data:/var/lib/mysql
       - mariadb-primary-logs:/var/log/mysql
     networks:
-      - mariadb-cluster
+      - mariadb-net
     deploy:
       mode: replicated
       replicas: 1
@@ -39,6 +39,7 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
+
   mariadb-secondary:
     image: ${DOCKER_REGISTRY:-local}/mariadb-replication:${VERSION:-latest}
     hostname: mariadb-secondary
@@ -55,17 +56,12 @@ services:
       ENABLE_CONNECTIVITY_MONITOR: "true"
       PRIMARY_HOST: "mariadb-primary"
       MAXSCALE_HOST: "maxscale"
-      CHECK_INTERVAL: "5"YSQL_PASSWORD}
-      REPLICATION_MODE: "slave"
-      REPLICATION_USER: "replicator"
-      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
-      MASTER_HOST: "mariadb-primary"
-      MASTER_PORT: "3306"
+      CHECK_INTERVAL: "5"
     volumes:
       - mariadb-secondary-data:/var/lib/mysql
       - mariadb-secondary-logs:/var/log/mysql
     networks:
-      - mariadb-cluster
+      - mariadb-net
     deploy:
       mode: replicated
       replicas: 1
@@ -83,10 +79,6 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
-    ports:
-      - target: 3306
-        published: 3307
-        mode: host
     depends_on:
       - mariadb-primary
 
@@ -100,7 +92,7 @@ services:
       - ./maxscale-replication.cnf:/etc/maxscale.cnf:ro
       - maxscale-data:/var/lib/maxscale
     networks:
-      - mariadb-cluster
+      - mariadb-net
     deploy:
       mode: replicated
       replicas: 1
@@ -119,10 +111,6 @@ services:
         reservations:
           cpus: '0.2'
           memory: 256M
-    ports:
-      - "4006:4006"  # Read-Write Split Router
-      - "4008:4008"  # Read Connection Router
-      - "8989:8989"  # MaxScale REST API
     depends_on:
       - mariadb-primary
       - mariadb-secondary
@@ -140,6 +128,5 @@ volumes:
     driver: local
 
 networks:
-  mariadb-cluster:
-    driver: overlay
-    attachable: true
+  mariadb-net:
+    external: true
