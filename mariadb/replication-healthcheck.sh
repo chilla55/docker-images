@@ -5,8 +5,8 @@ if [ -n "${MYSQL_ROOT_PASSWORD_FILE}" ] && [ -f "${MYSQL_ROOT_PASSWORD_FILE}" ];
     MYSQL_ROOT_PASSWORD="$(cat "${MYSQL_ROOT_PASSWORD_FILE}")"
 fi
 
-# Check if MariaDB is running
-if ! mysqladmin ping -h localhost --silent 2>/dev/null; then
+# Check if MariaDB is running (use root password if set)
+if ! mysqladmin ping -h localhost -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null; then
     echo "MariaDB is not responding"
     exit 1
 fi
