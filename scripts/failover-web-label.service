@@ -1,0 +1,15 @@
+[Unit]
+Description=Docker Swarm Web Label Failover Monitor
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+ExecStart=/usr/local/bin/failover-web-label.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

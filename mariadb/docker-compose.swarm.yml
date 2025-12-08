@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   mariadb-primary:
-    image: ${DOCKER_REGISTRY:-local}/mariadb-replication:${VERSION:-latest}
+    image: ghcr.io/chilla55/mariadb-replication:${VERSION:-latest}
     hostname: mariadb-primary
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -27,7 +27,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.mariadb.node == node1
+          - node.labels.mariadb.node == srv1
       restart_policy:
         condition: on-failure
         delay: 10s
@@ -41,7 +41,7 @@ services:
           memory: 1G
 
   mariadb-secondary:
-    image: ${DOCKER_REGISTRY:-local}/mariadb-replication:${VERSION:-latest}
+    image: ghcr.io/chilla55/mariadb-replication:${VERSION:-latest}
     hostname: mariadb-secondary
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -67,7 +67,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.mariadb.node == node2
+          - node.labels.mariadb.node == mail
       restart_policy:
         condition: on-failure
         delay: 10s
@@ -98,7 +98,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.mariadb.node == node3
+          - node.labels.mariadb.node == srv2
           - node.role == manager
       restart_policy:
         condition: on-failure

@@ -2,10 +2,10 @@ version: '3.8'
 
 services:
   redis:
-    image: ${DOCKER_REGISTRY:-local}/redis:${VERSION:-latest}
+    image: ghcr.io/chilla55/redis:${VERSION:-latest}
     hostname: redis
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PASSWORD: ""  # No password for Pterodactyl compatibility
     volumes:
       - redis-data:/data
     networks:
@@ -15,7 +15,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.redis.node == node1
+          - node.labels.redis.node == srv1
       restart_policy:
         condition: on-failure
         delay: 5s

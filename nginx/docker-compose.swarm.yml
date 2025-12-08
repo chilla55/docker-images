@@ -22,9 +22,10 @@ services:
       - /dev/fuse
     deploy:
       mode: replicated
-      replicas: 2
+      replicas: 1
       placement:
-        max_replicas_per_node: 1
+        constraints:
+          - node.labels.web.node == web
       update_config:
         parallelism: 1
         delay: 10s

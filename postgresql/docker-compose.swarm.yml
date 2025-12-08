@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgresql-primary:
-    image: ${DOCKER_REGISTRY:-local}/postgresql-replication:${VERSION:-latest}
+    image: ghcr.io/chilla55/postgresql-replication:${VERSION:-latest}
     hostname: postgresql-primary
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -24,7 +24,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.postgresql.node == node1
+          - node.labels.postgresql.node == srv1
       restart_policy:
         condition: on-failure
         delay: 10s
@@ -38,7 +38,7 @@ services:
           memory: 1G
 
   postgresql-secondary:
-    image: ${DOCKER_REGISTRY:-local}/postgresql-replication:${VERSION:-latest}
+    image: ghcr.io/chilla55/postgresql-replication:${VERSION:-latest}
     hostname: postgresql-secondary
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -61,7 +61,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.postgresql.node == node2
+          - node.labels.postgresql.node == mail
       restart_policy:
         condition: on-failure
         delay: 10s
@@ -101,7 +101,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.postgresql.node == node3
+          - node.labels.postgresql.node == srv2
           - node.role == manager
       restart_policy:
         condition: on-failure
