@@ -19,7 +19,7 @@ secrets:
 
 services:
   vaultwarden:
-    image: ${DOCKER_REGISTRY:-local}/vaultwarden:${VERSION:-latest}
+    image: ghcr.io/chilla55/vaultwarden:${VERSION:-latest}
     hostname: vaultwarden
     
     # Required for CIFS mount
@@ -138,7 +138,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.vaultwarden.node == node1
+          - node.labels.web.node == web
       restart_policy:
         condition: on-failure
         delay: 10s

@@ -142,7 +142,7 @@ services:
       # Placement constraints (optional - adjust for your needs)
       placement:
         constraints:
-          - node.role == worker
+          - node.labels.web.node == web
         preferences:
           - spread: node.labels.zone
       
