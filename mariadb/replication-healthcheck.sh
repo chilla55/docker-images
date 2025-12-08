@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Support Docker secrets for root password
+if [ -n "${MYSQL_ROOT_PASSWORD_FILE}" ] && [ -f "${MYSQL_ROOT_PASSWORD_FILE}" ]; then
+    MYSQL_ROOT_PASSWORD="$(cat "${MYSQL_ROOT_PASSWORD_FILE}")"
+fi
+
 # Check if MariaDB is running
 if ! mysqladmin ping -h localhost --silent 2>/dev/null; then
     echo "MariaDB is not responding"
