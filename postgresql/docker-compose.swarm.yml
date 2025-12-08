@@ -1,0 +1,147 @@
+version: '3.8'
+
+services:
+  postgresql-primary:
+    image: ${DOCKER_REGISTRY:-local}/postgresql-replication:${VERSION:-latest}
+    hostname: postgresql-primary
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-app_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      REPLICATION_MODE: "primary"
+      REPLICATION_USER: "replicator"
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      ENABLE_CONNECTIVITY_MONITOR: "true"
+      SECONDARY_HOST: "postgresql-secondary"
+      CHECK_INTERVAL: "5"
+    volumes:
+      - postgresql-primary-data:/var/lib/postgresql/data
+      - postgresql-primary-logs:/var/log/postgresql
+    networks:
+      - postgresql-cluster
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.postgresql.node == node1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    ports:
+      - target: 5432
+        published: 5432
+        mode: host
+
+  postgresql-secondary:
+    image: ${DOCKER_REGISTRY:-local}/postgresql-replication:${VERSION:-latest}
+    hostname: postgresql-secondary
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-app_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      REPLICATION_MODE: "replica"
+      REPLICATION_USER: "replicator"
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      PRIMARY_HOST: "postgresql-primary"
+      PRIMARY_PORT: "5432"
+      ENABLE_CONNECTIVITY_MONITOR: "true"
+      CHECK_INTERVAL: "5"
+    volumes:
+      - postgresql-secondary-data:/var/lib/postgresql/data
+      - postgresql-secondary-logs:/var/log/postgresql
+    networks:
+      - postgresql-cluster
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.postgresql.node == node2
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    ports:
+      - target: 5432
+        published: 5433
+        mode: host
+    depends_on:
+      - postgresql-primary
+
+  pgpool:
+    image: bitnami/pgpool:latest
+    hostname: pgpool
+    environment:
+      PGPOOL_BACKEND_NODES: "0:postgresql-primary:5432,1:postgresql-secondary:5432"
+      PGPOOL_SR_CHECK_USER: "${REPLICATION_USER}"
+      PGPOOL_SR_CHECK_PASSWORD: "${REPLICATION_PASSWORD}"
+      PGPOOL_POSTGRES_USERNAME: "${POSTGRES_USER:-postgres}"
+      PGPOOL_POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      PGPOOL_ADMIN_USERNAME: "${PGPOOL_ADMIN_USER:-admin}"
+      PGPOOL_ADMIN_PASSWORD: "${PGPOOL_ADMIN_PASSWORD}"
+      PGPOOL_ENABLE_LOAD_BALANCING: "yes"
+      PGPOOL_AUTO_FAILBACK: "yes"
+      PGPOOL_FAILOVER_ON_BACKEND_ERROR: "yes"
+      PGPOOL_NUM_INIT_CHILDREN: "32"
+      PGPOOL_MAX_POOL: "4"
+    volumes:
+      - pgpool-data:/bitnami/pgpool
+    networks:
+      - postgresql-cluster
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.postgresql.node == node3
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.2'
+          memory: 256M
+    ports:
+      - "5432:5432"  # PgPool connection (applications connect here)
+      - "9999:9999"  # PgPool admin interface
+    depends_on:
+      - postgresql-primary
+      - postgresql-secondary
+
+volumes:
+  postgresql-primary-data:
+    driver: local
+  postgresql-primary-logs:
+    driver: local
+  postgresql-secondary-data:
+    driver: local
+  postgresql-secondary-logs:
+    driver: local
+  pgpool-data:
+    driver: local
+
+networks:
+  postgresql-cluster:
+    driver: overlay
+    attachable: true
