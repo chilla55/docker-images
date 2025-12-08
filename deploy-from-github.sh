@@ -18,7 +18,7 @@ echo "==========================================================================
 
 # Configuration
 REPO_URL="https://github.com/chilla55/docker-images.git"
-BRANCH="docker-swarm"
+BRANCH="main"
 DEPLOY_DIR="/serverdata/docker"
 
 echo ""

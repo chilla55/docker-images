@@ -6,7 +6,7 @@
 
 ```bash
 ssh root@mail
-curl -fsSL https://raw.githubusercontent.com/chilla55/docker-images/docker-swarm/deploy-from-github.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chilla55/docker-images/main/deploy-from-github.sh | bash
 ```
 
 This will:
@@ -24,7 +24,7 @@ ssh root@mail
 # Clone repository
 cd /serverdata
 rm -rf docker  # Remove old if exists
-git clone -b docker-swarm https://github.com/chilla55/docker-images.git docker
+git clone -b main https://github.com/chilla55/docker-images.git docker
 cd docker
 
 # Make scripts executable
@@ -84,7 +84,7 @@ cat MIGRATION_STEPS.md
 
 ```bash
 cd /serverdata/docker
-git pull origin docker-swarm
+git pull origin main
 chmod +x scripts/*.sh
 ```
 
@@ -107,7 +107,7 @@ git add .
 git commit -m "Updated configuration for production deployment"
 
 # Push (if you have write access)
-git push origin docker-swarm
+git push origin main
 ```
 
 ---
@@ -115,5 +115,5 @@ git push origin docker-swarm
 ## Branch Information
 
 - **Repository**: https://github.com/chilla55/docker-images
-- **Branch**: `docker-swarm`
+- **Branch**: `main`
 - **Deploy Location**: `/serverdata/docker`
