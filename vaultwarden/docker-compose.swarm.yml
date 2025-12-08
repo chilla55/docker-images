@@ -1,0 +1,169 @@
+version: '3.8'
+
+secrets:
+  vaultwarden_admin_token:
+    external: true
+    name: vaultwarden_admin_token
+  
+  vaultwarden_db_password:
+    external: true
+    name: vaultwarden_db_password
+  
+  vaultwarden_smtp_password:
+    external: true
+    name: vaultwarden_smtp_password
+  
+  vaultwarden_storagebox_password:
+    external: true
+    name: storagebox_password
+
+services:
+  vaultwarden:
+    image: ${DOCKER_REGISTRY:-local}/vaultwarden:${VERSION:-latest}
+    hostname: vaultwarden
+    
+    # Required for CIFS mount
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    devices:
+      - /dev/fuse
+    
+    environment:
+      DOMAIN: ${VAULTWARDEN_DOMAIN:-https://vw.chilla55.de}
+      
+      # Database configuration - built from env vars and secret
+      DB_TYPE: ${DB_TYPE:-mysql}
+      DB_HOST: ${DB_HOST:-maxscale}
+      DB_PORT: ${DB_PORT:-4006}
+      DB_USER: ${DB_USER:-vaultwarden}
+      DB_NAME: ${DB_NAME:-vaultwarden}
+      DATABASE_PASSWORD_FILE: /run/secrets/vaultwarden_db_password
+      
+      # Admin token from secret
+      ADMIN_TOKEN_FILE: /run/secrets/vaultwarden_admin_token
+      
+      # Signup and invitation settings
+      SIGNUPS_ALLOWED: ${SIGNUPS_ALLOWED:-true}
+      SIGNUPS_VERIFY: ${SIGNUPS_VERIFY:-false}
+      SIGNUPS_VERIFY_RESEND_TIME: ${SIGNUPS_VERIFY_RESEND_TIME:-3600}
+      SIGNUPS_VERIFY_RESEND_LIMIT: ${SIGNUPS_VERIFY_RESEND_LIMIT:-6}
+      INVITATIONS_ALLOWED: ${INVITATIONS_ALLOWED:-true}
+      INVITATION_ORG_NAME: ${INVITATION_ORG_NAME:-Vaultwarden}
+      
+      # Security settings
+      SHOW_PASSWORD_HINT: ${SHOW_PASSWORD_HINT:-false}
+      PASSWORD_HINTS_ALLOWED: ${PASSWORD_HINTS_ALLOWED:-true}
+      PASSWORD_ITERATIONS: ${PASSWORD_ITERATIONS:-600000}
+      INCOMPLETE_2FA_TIME_LIMIT: ${INCOMPLETE_2FA_TIME_LIMIT:-3}
+      DISABLE_2FA_REMEMBER: ${DISABLE_2FA_REMEMBER:-false}
+      REQUIRE_DEVICE_EMAIL: ${REQUIRE_DEVICE_EMAIL:-false}
+      
+      # Feature toggles
+      SENDS_ALLOWED: ${SENDS_ALLOWED:-true}
+      EMERGENCY_ACCESS_ALLOWED: ${EMERGENCY_ACCESS_ALLOWED:-true}
+      EMAIL_CHANGE_ALLOWED: ${EMAIL_CHANGE_ALLOWED:-true}
+      DISABLE_ICON_DOWNLOAD: ${DISABLE_ICON_DOWNLOAD:-false}
+      WEB_VAULT_ENABLED: ${WEB_VAULT_ENABLED:-true}
+      
+      # Icon settings
+      ICON_REDIRECT_CODE: ${ICON_REDIRECT_CODE:-302}
+      ICON_CACHE_TTL: ${ICON_CACHE_TTL:-2592000}
+      ICON_CACHE_NEGTTL: ${ICON_CACHE_NEGTTL:-259200}
+      ICON_DOWNLOAD_TIMEOUT: ${ICON_DOWNLOAD_TIMEOUT:-10}
+      
+      # Network security
+      IP_HEADER: ${IP_HEADER:-X-Real-IP}
+      HTTP_REQUEST_BLOCK_NON_GLOBAL_IPS: ${HTTP_REQUEST_BLOCK_NON_GLOBAL_IPS:-true}
+      
+      # Admin settings
+      ADMIN_SESSION_LIFETIME: ${ADMIN_SESSION_LIFETIME:-20}
+      
+      # Logging
+      LOG_TIMESTAMP_FORMAT: ${LOG_TIMESTAMP_FORMAT:-%Y-%m-%d %H:%M:%S.%3f}
+      
+      # SMTP configuration (optional)
+      SMTP_HOST: ${SMTP_HOST:-mail.chilla55.de}
+      SMTP_FROM: ${SMTP_FROM:-noreply@chilla55.de}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Vaultwarden}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+      SMTP_USERNAME: ${SMTP_USERNAME:-noreply@chilla55.de}
+      SMTP_PASSWORD_FILE: /run/secrets/vaultwarden_smtp_password
+      SMTP_TIMEOUT: ${SMTP_TIMEOUT:-15}
+      SMTP_EMBED_IMAGES: ${SMTP_EMBED_IMAGES:-true}
+      SMTP_ACCEPT_INVALID_CERTS: ${SMTP_ACCEPT_INVALID_CERTS:-false}
+      SMTP_ACCEPT_INVALID_HOSTNAMES: ${SMTP_ACCEPT_INVALID_HOSTNAMES:-false}
+      
+      # 2FA Email settings
+      EMAIL_TOKEN_SIZE: ${EMAIL_TOKEN_SIZE:-6}
+      EMAIL_EXPIRATION_TIME: ${EMAIL_EXPIRATION_TIME:-600}
+      EMAIL_ATTEMPTS_LIMIT: ${EMAIL_ATTEMPTS_LIMIT:-3}
+      EMAIL_2FA_AUTO_FALLBACK: ${EMAIL_2FA_AUTO_FALLBACK:-false}
+      EMAIL_2FA_ENFORCE_ON_VERIFIED_INVITE: ${EMAIL_2FA_ENFORCE_ON_VERIFIED_INVITE:-false}
+      
+      # Yubico/Duo (enable if needed)
+      ENABLE_YUBICO: ${ENABLE_YUBICO:-true}
+      ENABLE_DUO: ${ENABLE_DUO:-true}
+      ENABLE_SMTP: ${ENABLE_SMTP:-true}
+      
+      # Security
+      ROCKET_LIMITS: "{json=10485760}"
+      INCREASE_NOTE_SIZE_LIMIT: ${INCREASE_NOTE_SIZE_LIMIT:-false}
+      
+      # Storage Box configuration
+      STORAGE_BOX_KEYS_ENABLED: ${STORAGE_BOX_KEYS_ENABLED:-true}
+      STORAGE_BOX_HOST: ${STORAGE_BOX_HOST:-u123456.your-storagebox.de}
+      STORAGE_BOX_USER: ${STORAGE_BOX_USER:-u123456}
+      STORAGE_BOX_PASSWORD_FILE: /run/secrets/vaultwarden_storagebox_password
+      STORAGE_BOX_KEYS_PATH: ${STORAGE_BOX_KEYS_PATH:-/vaultwarden/keys}
+      STORAGE_BOX_KEYS_MOUNT_POINT: ${STORAGE_BOX_KEYS_MOUNT_POINT:-/data/keys}
+      STORAGE_BOX_KEYS_MOUNT_OPTIONS: ${STORAGE_BOX_KEYS_MOUNT_OPTIONS:-vers=3.0,uid=0,gid=0,file_mode=0600,dir_mode=0700}
+    
+    secrets:
+      - vaultwarden_admin_token
+      - vaultwarden_db_password
+      - vaultwarden_smtp_password
+      - vaultwarden_storagebox_password
+    
+    volumes:
+      - vaultwarden-data:/data
+    
+    networks:
+      - web-net
+      - mariadb-net
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.vaultwarden.node == node1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  vaultwarden-data:
+    driver: local
+
+networks:
+  web-net:
+    external: true
+  mariadb-net:
+    external: true
