@@ -5,13 +5,13 @@ services:
     image: ghcr.io/chilla55/mariadb-replication:${VERSION:-latest}
     hostname: mariadb-primary
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
       MYSQL_DATABASE: ${MYSQL_DATABASE:-app_db}
       MYSQL_USER: ${MYSQL_USER:-app_user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_user_password
       REPLICATION_MODE: "master"
       REPLICATION_USER: "replicator"
-      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
       ENABLE_CONNECTIVITY_MONITOR: "true"
       ENABLE_AUTO_RECOVERY: "true"
       SECONDARY_HOST: "mariadb-secondary"
@@ -22,6 +22,10 @@ services:
       - mariadb-primary-logs:/var/log/mysql
     networks:
       - mariadb-net
+    secrets:
+      - mysql_root_password
+      - mysql_user_password
+      - replication_password
     deploy:
       mode: replicated
       replicas: 1
@@ -44,13 +48,13 @@ services:
     image: ghcr.io/chilla55/mariadb-replication:${VERSION:-latest}
     hostname: mariadb-secondary
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
       MYSQL_DATABASE: ${MYSQL_DATABASE:-app_db}
       MYSQL_USER: ${MYSQL_USER:-app_user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_user_password
       REPLICATION_MODE: "slave"
       REPLICATION_USER: "replicator"
-      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
       MASTER_HOST: "mariadb-primary"
       MASTER_PORT: "3306"
       ENABLE_CONNECTIVITY_MONITOR: "true"
@@ -62,6 +66,10 @@ services:
       - mariadb-secondary-logs:/var/log/mysql
     networks:
       - mariadb-net
+    secrets:
+      - mysql_root_password
+      - mysql_user_password
+      - replication_password
     deploy:
       mode: replicated
       replicas: 1
@@ -87,12 +95,14 @@ services:
     hostname: maxscale
     environment:
       MAXSCALE_USER: ${MAXSCALE_USER:-admin}
-      MAXSCALE_PASSWORD: ${MAXSCALE_PASSWORD}
+      MAXSCALE_PASSWORD_FILE: /run/secrets/maxscale_password
     volumes:
       - ./maxscale-replication.cnf:/etc/maxscale.cnf:ro
       - maxscale-data:/var/lib/maxscale
     networks:
       - mariadb-net
+    secrets:
+      - maxscale_password
     deploy:
       mode: replicated
       replicas: 1
@@ -129,4 +139,14 @@ volumes:
 
 networks:
   mariadb-net:
+    external: true
+
+secrets:
+  mysql_root_password:
+    external: true
+  mysql_user_password:
+    external: true
+  replication_password:
+    external: true
+  maxscale_password:
     external: true

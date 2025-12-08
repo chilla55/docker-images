@@ -10,6 +10,11 @@ SECONDARY_HOST="${SECONDARY_HOST:-mariadb-secondary}"
 MAXSCALE_HOST="${MAXSCALE_HOST:-maxscale}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-5}"
 
+# Support Docker secrets - read password from file if _FILE variable is set
+if [ -n "${MYSQL_ROOT_PASSWORD_FILE}" ] && [ -f "${MYSQL_ROOT_PASSWORD_FILE}" ]; then
+    MYSQL_ROOT_PASSWORD="$(cat "${MYSQL_ROOT_PASSWORD_FILE}")"
+fi
+
 log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] [$ROLE] $1"
 }
