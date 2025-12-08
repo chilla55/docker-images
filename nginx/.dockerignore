@@ -1,0 +1,10 @@
+*.md
+.git
+.github
+.gitignore
+docker-compose*.yml
+Makefile
+LICENSE
+*.log
+.env*
+.DS_Store

@@ -1,0 +1,73 @@
+# ============================================================================
+# Caddyfile for Pterodactyl Panel
+# ============================================================================
+# Serves static files on port 8080
+# PHP requests are handled by external nginx → PHP-FPM (port 9000)
+# ============================================================================
+
+{
+    # Global options
+    admin off
+    auto_https off
+    log {
+        output stdout
+        format console
+        level WARN
+    }
+}
+
+:80 {
+    # Document root
+    root * /var/www/pterodactyl/public
+
+    # Enable file server for static assets
+    file_server {
+        hide .htaccess .env
+    }
+
+    # Security headers
+    header {
+        # Remove server identification
+        -Server
+        
+        # Security headers (X-Frame-Options handled by nginx reverse proxy)
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "same-origin"
+        
+        # Cache control for static assets
+        Cache-Control "public, max-age=31536000, immutable" {
+            @static {
+                path *.css *.js *.svg *.png *.jpg *.jpeg *.gif *.ico *.woff *.woff2 *.ttf *.eot
+            }
+        }
+    }
+
+    # Logging
+    log {
+        output stdout
+        format console {
+            time_format "2006-01-02T15:04:05Z07:00"
+        }
+        level INFO
+    }
+
+    # Compression
+    encode gzip zstd
+
+    # Handle static files efficiently
+    @static {
+        path *.css *.js *.svg *.png *.jpg *.jpeg *.gif *.ico *.woff *.woff2 *.ttf *.eot *.pdf *.zip
+    }
+    
+    # Disable access logging for static assets to reduce noise
+    @static {
+        log {
+            output discard
+        }
+    }
+
+    # Basic health check endpoint for Caddy
+    respond /caddy-health 200 {
+        body "OK"
+    }
+}

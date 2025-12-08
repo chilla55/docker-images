@@ -1,0 +1,160 @@
+# ============================================================================
+# GitHub Actions Workflow: Build and Push Certbot Docker Image
+# ============================================================================
+# Automatically builds new versions when changes are made to certbot/
+# Supports multi-platform builds (amd64, arm64)
+# Part of monorepo with multiple Docker images
+# ============================================================================
+
+name: Build Certbot Image
+
+on:
+  push:
+    branches:
+      - main  # Production branch - builds and pushes to registry
+      - docker-swarm  # Development branch
+      - '*'   # All other branches - build and push as nightly
+    paths:
+      - 'certbot/**'
+      - '.github/workflows/build-certbot.yml'
+    tags:
+      - 'certbot-v*.*.*'  # Trigger on certbot-specific tags
+  
+  pull_request:
+    branches:
+      - main
+      - docker-swarm
+    paths:
+      - 'certbot/**'
+      - '.github/workflows/build-certbot.yml'
+  
+  workflow_dispatch:
+    inputs:
+      certbot_version:
+        description: 'Certbot version to build (e.g., latest, 2.8.0)'
+        required: false
+        default: 'latest'
+      push_image:
+        description: 'Push image to registry'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/certbot-storagebox
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Detect Certbot Version
+  # ──────────────────────────────────────────────────────────────────────────
+  detect-version:
+    name: Detect Version
+    runs-on: ubuntu-latest
+    outputs:
+      certbot_version: ${{ steps.version.outputs.certbot_version }}
+      image_tags: ${{ steps.version.outputs.image_tags }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ -n "${{ github.event.inputs.certbot_version }}" ]]; then
+            CERTBOT_VERSION="${{ github.event.inputs.certbot_version }}"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            # Extract version from tag (e.g., certbot-v2.8.0 -> 2.8.0)
+            CERTBOT_VERSION="${{ github.ref_name }}"
+            CERTBOT_VERSION="${CERTBOT_VERSION#certbot-v}"
+          else
+            # Read from VERSION file in repository
+            CERTBOT_VERSION=$(cat certbot/VERSION)
+          fi
+          
+          echo "certbot_version=${CERTBOT_VERSION}" >> $GITHUB_OUTPUT
+          
+          # Generate image tags
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            # Main branch: version + latest
+            TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${CERTBOT_VERSION}"
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          elif [[ "${{ github.ref }}" == "refs/heads/docker-swarm" ]]; then
+            # Development branch: dev tag
+            TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            # Tagged release: version + latest
+            TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${CERTBOT_VERSION}"
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          else
+            # Other branches: nightly only
+            TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly"
+          fi
+          
+          echo "image_tags=${TAGS}" >> $GITHUB_OUTPUT
+          
+          echo "📦 Building Certbot with Storage Box support (base: ${CERTBOT_VERSION})"
+          echo "🏷️  Tags: ${TAGS}"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Build and Push Multi-Platform Image
+  # ──────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    needs: detect-version
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request' && (github.event.inputs.push_image != 'false')
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./certbot
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push_image != 'false') }}
+          tags: ${{ needs.detect-version.outputs.image_tags }}
+          labels: |
+            org.opencontainers.image.title=Certbot with Hetzner Storage Box
+            org.opencontainers.image.description=Certbot with Cloudflare DNS and Hetzner Storage Box CIFS mount support
+            org.opencontainers.image.version=${{ needs.detect-version.outputs.certbot_version }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Summary
+        run: |
+          echo "### 🎉 Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Certbot Version:** ${{ needs.detect-version.outputs.certbot_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tags:** ${{ needs.detect-version.outputs.image_tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms:** linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Features:**" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Cloudflare DNS-01 challenge" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Hetzner Storage Box CIFS mount" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Automatic certificate renewal" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Wildcard certificate support" >> $GITHUB_STEP_SUMMARY

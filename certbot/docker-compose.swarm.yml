@@ -1,0 +1,122 @@
+# ============================================================================
+# Docker Swarm Stack for Certbot with Hetzner Storage Box
+# ============================================================================
+# Deploy: docker stack deploy -c docker-compose.swarm.yml certbot
+# ============================================================================
+
+version: "3.8"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Networks
+# ──────────────────────────────────────────────────────────────────────────
+networks:
+  web-net:
+    external: true
+
+# ──────────────────────────────────────────────────────────────────────────
+# Secrets
+# ──────────────────────────────────────────────────────────────────────────
+secrets:
+  cloudflare_credentials:
+    external: true
+    name: cloudflare_credentials
+  
+  storagebox_password:
+    external: true
+    name: storagebox_password
+
+# ──────────────────────────────────────────────────────────────────────────
+# Volumes
+# ──────────────────────────────────────────────────────────────────────────
+# Note: No volumes needed - certificates stored directly on Storage Box mount
+
+# ──────────────────────────────────────────────────────────────────────────
+# Services
+# ──────────────────────────────────────────────────────────────────────────
+services:
+  # ────────────────────────────────────────────────────────────────────────
+  # Certbot with Cloudflare DNS and Storage Box Sync
+  # ────────────────────────────────────────────────────────────────────────
+  # Certbot with Cloudflare DNS and Storage Box CIFS Mount
+  # ────────────────────────────────────────────────────────────────────────
+  certbot:
+    image: ghcr.io/chilla55/certbot-storagebox:latest
+    
+    # Build configuration (for local development)
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    
+    hostname: certbot
+    
+    networks:
+      - web-net
+    
+    # Required for CIFS mount
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    devices:
+      - /dev/fuse
+    
+    environment:
+      # ──────────────────────────────────────────────────────────────────
+      # Certificate Configuration
+      # ──────────────────────────────────────────────────────────────────
+      CERT_EMAIL: admin@example.com
+      CERT_DOMAINS: example.com,*.example.com
+      RENEW_INTERVAL: 12h  # Check for renewals every 12 hours
+      
+      # ──────────────────────────────────────────────────────────────────
+      # Cloudflare DNS Settings
+      # ──────────────────────────────────────────────────────────────────
+      CLOUDFLARE_CREDENTIALS: /run/secrets/cloudflare_credentials
+      
+      # ──────────────────────────────────────────────────────────────────
+      # Hetzner Storage Box CIFS/Samba Mount Settings
+      # ──────────────────────────────────────────────────────────────────
+      STORAGE_BOX_ENABLED: "true"
+      STORAGE_BOX_HOST: u123456.your-storagebox.de  # Your Storage Box hostname
+      STORAGE_BOX_USER: u123456  # Your Storage Box username
+      STORAGE_BOX_PASSWORD_FILE: /run/secrets/storagebox_password
+      STORAGE_BOX_PATH: /certs  # Path on Storage Box (creates backup.tar.gz in this folder)
+      # CIFS mount options: vers=3.0, uid=root(0), gid=nginx(1001), file perms for nginx group read
+      STORAGE_BOX_MOUNT_OPTIONS: "vers=3.0,uid=0,gid=1001,file_mode=0640,dir_mode=0750"
+      
+      # ──────────────────────────────────────────────────────────────────
+      # Debug Settings
+      # ──────────────────────────────────────────────────────────────────
+      DEBUG: "false"
+    
+    secrets:
+      - cloudflare_credentials
+      - storagebox_password
+    
+    # Note: /etc/letsencrypt is mounted from Storage Box via CIFS in entrypoint.sh
+    # No Docker socket needed - nginx auto-reloads via certificate watcher
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager  # Need manager for Docker socket access
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    
+    healthcheck:
+      test: ["CMD", "/scripts/healthcheck.sh"]
+      interval: 6h
+      timeout: 30s
+      retries: 3
+      start_period: 1m

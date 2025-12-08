@@ -1,0 +1,19 @@
+# Ignore actual configuration files (keep examples only)
+cloudflare.ini
+storagebox.txt
+
+# Ignore temporary files
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# Ignore IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Ignore test data
+test-data/

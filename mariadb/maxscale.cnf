@@ -1,0 +1,117 @@
+# MaxScale Configuration for Master-Slave Replication with Automatic Failover
+
+[maxscale]
+threads=auto
+log_info=true
+log_warning=true
+log_notice=true
+
+# Primary Server
+[mariadb-primary]
+type=server
+address=mariadb-primary
+port=3306
+protocol=MariaDBBackend
+
+# Secondary Server
+[mariadb-secondary]
+type=server
+address=mariadb-secondary
+port=3306
+protocol=MariaDBBackend
+
+# Monitor for Master-Slave Replication with Automatic Failover
+[MariaDB-Monitor]
+type=monitor
+module=mariadbmon
+servers=mariadb-primary,mariadb-secondary
+user=maxscale
+password=${MAXSCALE_PASSWORD}
+monitor_interval=2000
+
+# Automatic failover settings
+auto_failover=true
+auto_rejoin=true
+enforce_read_only_slaves=true
+
+# Cooperative failover - verify from multiple perspectives
+failcount=3
+failover_timeout=90s
+switchover_timeout=90s
+
+# Both nodes must confirm failure before action
+# - Primary must fail to reach Secondary AND MaxScale
+# - Secondary must fail to reach Primary
+# - MaxScale must fail to reach Primary
+verify_master_failure=true
+master_failure_timeout=30s
+
+# Require consensus before failover
+cooperative_monitoring_locks=majority_of_all
+
+# Primary fencing - Primary goes read-only if isolated
+# Only happens when Primary can't reach Secondary + MaxScale
+replication_master_timeout=30s
+
+# Read-Write Split Service (Primary gets all writes, Secondary for reads)
+[Read-Write-Service]
+type=service
+router=readwritesplit
+servers=mariadb-primary,mariadb-secondary
+user=maxscale
+password=${MAXSCALE_PASSWORD}
+
+# Master handles writes, slave handles reads
+master_accept_reads=false
+strict_multi_stmt=false
+strict_sp_calls=false
+
+# Connection settings
+master_reconnection=true
+master_failure_mode=fail_instantly
+
+# Transaction replay for failed queries
+transaction_replay=true
+transaction_replay_max_size=1Mi
+transaction_replay_attempts=3
+
+# Delayed retry for temporary failures
+delayed_retry=true
+delayed_retry_timeout=60s
+
+# Read Connection Router (read-only queries, load balanced)
+[Read-Only-Service]
+type=service
+router=readconnroute
+router_options=slave
+servers=mariadb-primary,mariadb-secondary
+user=maxscale
+password=${MAXSCALE_PASSWORD}
+
+# Listener for Read-Write Split (Applications connect here)
+[Read-Write-Listener]
+type=listener
+service=Read-Write-Service
+protocol=MariaDBClient
+port=4006
+address=0.0.0.0
+
+# Listener for Read-Only
+[Read-Only-Listener]
+type=listener
+service=Read-Only-Service
+protocol=MariaDBClient
+port=4008
+address=0.0.0.0
+
+# REST API for monitoring and manual failover
+[REST-API]
+type=service
+router=rest
+
+[REST-Listener]
+type=listener
+service=REST-API
+protocol=http
+port=8989
+address=0.0.0.0

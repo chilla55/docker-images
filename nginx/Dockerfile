@@ -6,7 +6,8 @@
 # ------------ Stage 1: Builder ------------
 FROM alpine:3.20 AS builder
 
-ENV NGINX_VERSION=1.29.0
+ARG NGINX_VERSION=1.29.0
+ENV NGINX_VERSION=${NGINX_VERSION}
 
 RUN apk add --no-cache \
     build-base \
@@ -57,8 +58,8 @@ RUN rm -rf /usr/src/* /root/.cache /var/cache/apk/* && \
 # ------------ Stage 2: Runtime ------------
 FROM alpine:3.20
 
-# tools for updater/healthcheck
-RUN apk add --no-cache brotli openssl pcre zlib curl jq
+# tools for updater/healthcheck/cifs mounting
+RUN apk add --no-cache brotli openssl pcre zlib curl jq cifs-utils bash su-exec
 
 COPY --from=builder /usr/sbin/nginx /usr/sbin/nginx
 COPY --from=builder /etc/nginx /etc/nginx
@@ -78,14 +79,15 @@ RUN mkdir -p \
     /etc/nginx/sites-enabled \
     /etc/nginx/logs \
     /etc/nginx/client_body_temp \
+    /etc/nginx/certs \
     /var/www && \
     adduser -D -g 'nginx' nginx && \
-    chown -R nginx:nginx /etc/nginx /var/cache/nginx /var/www
-
+    chown -R nginx:nginx /etc/nginx /var/cache/nginx /var/www && \
+    chmod -R 755 /etc/nginx/logs
 # healthcheck
 HEALTHCHECK --interval=5m --timeout=10s --retries=3 \
   CMD /usr/local/bin/healthcheck.sh || exit 1
 
-# run nginx via our entrypoint (which also runs the updater)
-USER nginx
+# Need to run as root for CIFS mount, then drop to nginx user
+USER root
 ENTRYPOINT ["/entrypoint.sh"]
