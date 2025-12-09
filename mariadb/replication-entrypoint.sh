@@ -44,4 +44,4 @@ elif [ "${REPLICATION_MODE}" = "slave" ]; then
 fi
 
 # Execute the original MariaDB entrypoint
-exec docker-entrypoint.sh "$@"
+exec /usr/local/bin/docker-entrypoint.sh "$@"

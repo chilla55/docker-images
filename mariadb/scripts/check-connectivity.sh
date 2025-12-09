@@ -36,12 +36,12 @@ check_mysql() {
     local host=$1
     
     if [ -n "${MYSQL_ROOT_PASSWORD}" ]; then
-        if mysqladmin ping -h "$host" -u root -p"${MYSQL_ROOT_PASSWORD}" --connect-timeout=3 --silent 2>/dev/null; then
+        if mariadb-admin ping -h "$host" -u root -p"${MYSQL_ROOT_PASSWORD}" --connect-timeout=3 --silent 2>/dev/null; then
             return 0
         fi
     else
         # Try without password for initial connection test
-        if mysqladmin ping -h "$host" --connect-timeout=3 --silent 2>/dev/null; then
+        if mariadb-admin ping -h "$host" --connect-timeout=3 --silent 2>/dev/null; then
             return 0
         fi
     fi
@@ -179,14 +179,14 @@ while true; do
     
     # Try to connect with root password if available
     if [ -n "${MYSQL_ROOT_PASSWORD}" ]; then
-        if mysqladmin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" --connect-timeout=3 --silent 2>/dev/null; then
+        if mariadb-admin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" --connect-timeout=3 --silent 2>/dev/null; then
             break
         fi
     else
         # Fallback: just check if socket/port is responsive
         if nc -z localhost 3306 2>/dev/null; then
             sleep 2  # Give it a moment more
-            if mysqladmin ping -h localhost --connect-timeout=3 --silent 2>/dev/null; then
+            if mariadb-admin ping -h localhost --connect-timeout=3 --silent 2>/dev/null; then
                 break
             fi
         fi
