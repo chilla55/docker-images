@@ -38,15 +38,14 @@ elif [ "${REPLICATION_MODE}" = "slave" ]; then
     while true; do
         RESOLVED=$(getent hosts ${MASTER_HOST} | awk '{print $1}' | paste -sd ',' - || true)
         log "Master DNS: ${MASTER_HOST} -> ${RESOLVED:-<unresolved>}"
-        NC_OUT=$(nc -vz -w3 ${MASTER_HOST} ${MASTER_PORT} 2>&1) || NC_STATUS=$?
-        if [ -z "${NC_STATUS:-}" ]; then NC_STATUS=0; fi
-        log "nc result (code=${NC_STATUS}): ${NC_OUT}"
-        if [ "${NC_STATUS}" -eq 0 ]; then
+        
+        # Try to ping the master with mariadb-admin (app-level check, more reliable than nc)
+        if mariadb-admin ping -h "${MASTER_HOST}" -P "${MASTER_PORT}" --connect-timeout=3 --silent 2>/dev/null; then
             log "Master is ready!"
             break
+        else
+            log "Master not ready (ping failed), waiting..."
         fi
-        log "Master not ready, waiting..."
-        NC_STATUS=
         sleep 2
     done
     
