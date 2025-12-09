@@ -35,11 +35,16 @@ elif [ "${REPLICATION_MODE}" = "slave" ]; then
     
     # Wait for master to be ready
     log "Waiting for master to be ready (host=${MASTER_HOST} port=${MASTER_PORT})..."
-    until nc -z -w3 ${MASTER_HOST} ${MASTER_PORT}; do
+    while true; do
+        RESOLVED=$(getent hosts ${MASTER_HOST} | awk '{print $1}' | paste -sd ',' - || true)
+        log "Master DNS: ${MASTER_HOST} -> ${RESOLVED:-<unresolved>}"
+        if nc -vz -w3 ${MASTER_HOST} ${MASTER_PORT}; then
+            log "Master is ready!"
+            break
+        fi
         log "Master not ready, waiting..."
         sleep 2
     done
-    log "Master is ready!"
     
     # Start connectivity monitor in background
     if [ "${ENABLE_CONNECTIVITY_MONITOR}" = "true" ]; then
