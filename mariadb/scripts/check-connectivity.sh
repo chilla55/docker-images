@@ -67,14 +67,26 @@ check_primary() {
     local can_reach_secondary=0
     local can_reach_maxscale=0
     local consecutive_failures=0
+    local startup_grace_seconds=120  # Allow 2 minutes for secondary to boot and connect
+    local startup_time=$(date +%s)
     
     while true; do
+        local current_time=$(date +%s)
+        local elapsed=$((current_time - startup_time))
+        local in_grace_period=0
+        
+        if [ $elapsed -lt $startup_grace_seconds ]; then
+            in_grace_period=1
+        fi
+        
         # Check connectivity to Secondary
         if check_host "$SECONDARY_HOST" 3306; then
             can_reach_secondary=1
         else
             can_reach_secondary=0
-            log "WARNING: Cannot reach Secondary at $SECONDARY_HOST"
+            if [ $in_grace_period -eq 0 ]; then
+                log "WARNING: Cannot reach Secondary at $SECONDARY_HOST"
+            fi
         fi
         
         # Check connectivity to MaxScale (orchestrator)
@@ -82,18 +94,27 @@ check_primary() {
             can_reach_maxscale=1
         else
             can_reach_maxscale=0
-            log "WARNING: Cannot reach MaxScale at $MAXSCALE_HOST"
+            if [ $in_grace_period -eq 0 ]; then
+                log "WARNING: Cannot reach MaxScale at $MAXSCALE_HOST"
+            fi
         fi
         
         # Decision logic for Primary
         if [ $can_reach_secondary -eq 0 ] && [ $can_reach_maxscale -eq 0 ]; then
             # Isolated from both Secondary and MaxScale
-            consecutive_failures=$((consecutive_failures + 1))
-            log "ISOLATED: Cannot reach Secondary OR MaxScale (attempt $consecutive_failures/3)"
-            
-            if [ $consecutive_failures -ge 3 ]; then
-                log "CRITICAL: Primary is isolated from cluster. Entering READ-ONLY mode to prevent split-brain."
-                set_read_only
+            if [ $in_grace_period -eq 1 ]; then
+                # During startup grace period, stay writable to allow secondary to replicate
+                log "Startup grace period active ($elapsed/$startup_grace_seconds seconds). Staying read-write for secondary bootstrap."
+                consecutive_failures=0
+            else
+                # Grace period expired, apply isolation logic
+                consecutive_failures=$((consecutive_failures + 1))
+                log "ISOLATED: Cannot reach Secondary OR MaxScale (attempt $consecutive_failures/3)"
+                
+                if [ $consecutive_failures -ge 3 ]; then
+                    log "CRITICAL: Primary is isolated from cluster. Entering READ-ONLY mode to prevent split-brain."
+                    set_read_only
+                fi
             fi
         elif [ $can_reach_maxscale -eq 1 ] && [ $can_reach_secondary -eq 0 ]; then
             # Can reach MaxScale but not Secondary
