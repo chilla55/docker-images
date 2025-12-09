@@ -9,14 +9,14 @@ log_notice=true
 # Primary Server
 [mariadb-primary]
 type=server
-address=Mariadb_mariadb-primary
+address=mariadb-primary
 port=3306
 protocol=MariaDBBackend
 
 # Secondary Server
 [mariadb-secondary]
 type=server
-address=Mariadb_mariadb-secondary
+address=mariadb-secondary
 port=3306
 protocol=MariaDBBackend
 
