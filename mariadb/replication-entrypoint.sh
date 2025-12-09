@@ -20,9 +20,10 @@ if [ "${REPLICATION_MODE}" = "master" ]; then
     sed -i "s/server-id.*/server-id = ${SERVER_ID}/" /etc/mysql/conf.d/mariadb-master.cnf
     
     # Start connectivity monitor in background
+    # Delay startup by 90 seconds to allow secondary to bootstrap and connect during grace period
     if [ "${ENABLE_CONNECTIVITY_MONITOR}" = "true" ]; then
-        log "Starting connectivity monitor for Primary..."
-        /usr/local/bin/check-connectivity.sh &
+        echo "Starting connectivity monitor for Primary (delayed 90 seconds for secondary bootstrap)..."
+        (sleep 90 && /usr/local/bin/check-connectivity.sh) &
     fi
     
 elif [ "${REPLICATION_MODE}" = "slave" ]; then
