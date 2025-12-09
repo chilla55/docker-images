@@ -38,11 +38,15 @@ elif [ "${REPLICATION_MODE}" = "slave" ]; then
     while true; do
         RESOLVED=$(getent hosts ${MASTER_HOST} | awk '{print $1}' | paste -sd ',' - || true)
         log "Master DNS: ${MASTER_HOST} -> ${RESOLVED:-<unresolved>}"
-        if nc -vz -w3 ${MASTER_HOST} ${MASTER_PORT}; then
+        NC_OUT=$(nc -vz -w3 ${MASTER_HOST} ${MASTER_PORT} 2>&1) || NC_STATUS=$?
+        if [ -z "${NC_STATUS:-}" ]; then NC_STATUS=0; fi
+        log "nc result (code=${NC_STATUS}): ${NC_OUT}"
+        if [ "${NC_STATUS}" -eq 0 ]; then
             log "Master is ready!"
             break
         fi
         log "Master not ready, waiting..."
+        NC_STATUS=
         sleep 2
     done
     
