@@ -35,11 +35,17 @@ check_host() {
 check_mysql() {
     local host=$1
     
-    if mysqladmin ping -h "$host" --connect-timeout=3 --silent 2>/dev/null; then
-        return 0
+    if [ -n "${MYSQL_ROOT_PASSWORD}" ]; then
+        if mysqladmin ping -h "$host" -u root -p"${MYSQL_ROOT_PASSWORD}" --connect-timeout=3 --silent 2>/dev/null; then
+            return 0
+        fi
     else
-        return 1
+        # Try without password for initial connection test
+        if mysqladmin ping -h "$host" --connect-timeout=3 --silent 2>/dev/null; then
+            return 0
+        fi
     fi
+    return 1
 }
 
 # Set node to read-only mode
@@ -158,10 +164,37 @@ check_secondary() {
 # Main
 log "Starting connectivity monitor for $ROLE node"
 
-# Wait for MariaDB to be ready
-while ! mysqladmin ping -h localhost --silent 2>/dev/null; do
-    log "Waiting for MariaDB to be ready..."
-    sleep 2
+# Wait longer for MariaDB to be fully ready (give it time to start)
+log "Waiting for MariaDB to be ready..."
+sleep 15  # Initial delay to let MariaDB start after initialization
+
+# Now wait for actual connectivity with proper authentication
+MAX_WAIT=120
+WAITED=0
+while true; do
+    if [ $WAITED -ge $MAX_WAIT ]; then
+        log "ERROR: MariaDB did not become ready within ${MAX_WAIT}s, exiting monitor"
+        exit 1
+    fi
+    
+    # Try to connect with root password if available
+    if [ -n "${MYSQL_ROOT_PASSWORD}" ]; then
+        if mysqladmin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" --connect-timeout=3 --silent 2>/dev/null; then
+            break
+        fi
+    else
+        # Fallback: just check if socket/port is responsive
+        if nc -z localhost 3306 2>/dev/null; then
+            sleep 2  # Give it a moment more
+            if mysqladmin ping -h localhost --connect-timeout=3 --silent 2>/dev/null; then
+                break
+            fi
+        fi
+    fi
+    
+    log "Still waiting for MariaDB to be ready... (${WAITED}s/${MAX_WAIT}s)"
+    sleep 5
+    WAITED=$((WAITED + 5))
 done
 
 log "MariaDB is ready, starting connectivity checks"
