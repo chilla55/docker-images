@@ -37,15 +37,12 @@ elif [ "${REPLICATION_MODE}" = "slave" ]; then
     # Wait for master to be ready
     log "Waiting for master to be ready (host=${MASTER_HOST} port=${MASTER_PORT})..."
     while true; do
-        RESOLVED=$(getent hosts ${MASTER_HOST} | awk '{print $1}' | paste -sd ',' - || true)
-        log "Master DNS: ${MASTER_HOST} -> ${RESOLVED:-<unresolved>}"
-        
-        # Try to ping the master with mariadb-admin (app-level check, more reliable than nc)
-        if mariadb-admin ping -h "${MASTER_HOST}" -P "${MASTER_PORT}" --connect-timeout=3 --silent 2>/dev/null; then
+        # Use nc with extended timeout (10 sec) to check if port is open
+        if timeout 10 bash -c "echo > /dev/tcp/${MASTER_HOST}/${MASTER_PORT}" 2>/dev/null; then
             log "Master is ready!"
             break
         else
-            log "Master not ready (ping failed), waiting..."
+            log "Master not ready, waiting..."
         fi
         sleep 2
     done
