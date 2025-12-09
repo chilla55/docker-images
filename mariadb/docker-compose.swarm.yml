@@ -14,8 +14,8 @@ services:
       REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
       ENABLE_CONNECTIVITY_MONITOR: "true"
       ENABLE_AUTO_RECOVERY: "true"
-      SECONDARY_HOST: "mariadb-secondary"
-      MAXSCALE_HOST: "maxscale"
+      SECONDARY_HOST: "Mariadb_mariadb-secondary"
+      MAXSCALE_HOST: "Mariadb_maxscale"
       CHECK_INTERVAL: "5"
     volumes:
       - mariadb-primary-data:/var/lib/mysql
@@ -55,11 +55,11 @@ services:
       REPLICATION_MODE: "slave"
       REPLICATION_USER: "replicator"
       REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
-      MASTER_HOST: "mariadb-primary"
+      MASTER_HOST: "Mariadb_mariadb-primary"
       MASTER_PORT: "3306"
       ENABLE_CONNECTIVITY_MONITOR: "true"
-      PRIMARY_HOST: "mariadb-primary"
-      MAXSCALE_HOST: "maxscale"
+      PRIMARY_HOST: "Mariadb_mariadb-primary"
+      MAXSCALE_HOST: "Mariadb_maxscale"
       CHECK_INTERVAL: "5"
     volumes:
       - mariadb-secondary-data:/var/lib/mysql
@@ -97,8 +97,11 @@ services:
       MAXSCALE_USER: ${MAXSCALE_USER:-admin}
       MAXSCALE_PASSWORD_FILE: /run/secrets/maxscale_password
     volumes:
-      - ./maxscale-replication.cnf:/etc/maxscale.cnf:ro
       - maxscale-data:/var/lib/maxscale
+    configs:
+      - source: maxscale_config
+        target: /etc/maxscale.cnf
+        mode: 0444
     networks:
       - mariadb-net
     secrets:
@@ -150,3 +153,7 @@ secrets:
     external: true
   maxscale_password:
     external: true
+
+configs:
+  maxscale_config:
+    file: ./maxscale.cnf
