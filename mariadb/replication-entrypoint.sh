@@ -5,9 +5,14 @@ set -eo pipefail
 mkdir -p /var/log/mysql
 chown -R mysql:mysql /var/log/mysql
 
+# Helper to log with timestamp when stdout/stderr are quiet
+log() {
+    echo "$(date -Iseconds) $1" | tee -a /var/log/mysql/replication.log
+}
+
 # Determine which config to use based on replication mode
 if [ "${REPLICATION_MODE}" = "master" ]; then
-    echo "Configuring as MASTER server..."
+    log "Configuring as MASTER server..."
     rm -f /etc/mysql/conf.d/mariadb-slave.cnf
     
     # Set server ID based on hostname/IP
@@ -16,12 +21,12 @@ if [ "${REPLICATION_MODE}" = "master" ]; then
     
     # Start connectivity monitor in background
     if [ "${ENABLE_CONNECTIVITY_MONITOR}" = "true" ]; then
-        echo "Starting connectivity monitor for Primary..."
+        log "Starting connectivity monitor for Primary..."
         /usr/local/bin/check-connectivity.sh &
     fi
     
 elif [ "${REPLICATION_MODE}" = "slave" ]; then
-    echo "Configuring as SLAVE server..."
+    log "Configuring as SLAVE server..."
     rm -f /etc/mysql/conf.d/mariadb-master.cnf
     
     # Set server ID
@@ -29,19 +34,20 @@ elif [ "${REPLICATION_MODE}" = "slave" ]; then
     sed -i "s/server-id.*/server-id = ${SERVER_ID}/" /etc/mysql/conf.d/mariadb-slave.cnf
     
     # Wait for master to be ready
-    echo "Waiting for master to be ready..."
-    until nc -z ${MASTER_HOST} ${MASTER_PORT}; do
-        echo "Master not ready, waiting..."
+    log "Waiting for master to be ready (host=${MASTER_HOST} port=${MASTER_PORT})..."
+    until nc -z -w3 ${MASTER_HOST} ${MASTER_PORT}; do
+        log "Master not ready, waiting..."
         sleep 2
     done
-    echo "Master is ready!"
+    log "Master is ready!"
     
     # Start connectivity monitor in background
     if [ "${ENABLE_CONNECTIVITY_MONITOR}" = "true" ]; then
-        echo "Starting connectivity monitor for Secondary..."
+        log "Starting connectivity monitor for Secondary..."
         /usr/local/bin/check-connectivity.sh &
     fi
 fi
 
-# Execute the original MariaDB entrypoint
+# Execute the original MariaDB entrypoint with logging note
+log "Starting MariaDB entrypoint"
 exec /usr/local/bin/docker-entrypoint.sh "$@"
