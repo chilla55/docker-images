@@ -21,7 +21,11 @@ services:
       - mariadb-primary-data:/var/lib/mysql
       - mariadb-primary-logs:/var/log/mysql
     networks:
-      - mariadb-net
+      mariadb-net:
+        aliases:
+          - mariadb-primary
+          - Mariadb_mariadb-primary
+          - mariadb_mariadb-primary
     secrets:
       - mysql_root_password
       - mysql_user_password
@@ -65,7 +69,11 @@ services:
       - mariadb-secondary-data:/var/lib/mysql
       - mariadb-secondary-logs:/var/log/mysql
     networks:
-      - mariadb-net
+      mariadb-net:
+        aliases:
+          - mariadb-secondary
+          - Mariadb_mariadb-secondary
+          - mariadb_mariadb-secondary
     secrets:
       - mysql_root_password
       - mysql_user_password
@@ -103,7 +111,11 @@ services:
         target: /etc/maxscale.cnf
         mode: 0444
     networks:
-      - mariadb-net
+      mariadb-net:
+        aliases:
+          - maxscale
+          - Mariadb_maxscale
+          - mariadb_maxscale
     secrets:
       - maxscale_password
     deploy:
