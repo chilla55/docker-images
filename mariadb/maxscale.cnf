@@ -104,14 +104,3 @@ protocol=MariaDBClient
 port=4008
 address=0.0.0.0
 
-# REST API for monitoring and manual failover
-[REST-API]
-type=service
-router=rest
-
-[REST-Listener]
-type=listener
-service=REST-API
-protocol=http
-port=8989
-address=0.0.0.0
