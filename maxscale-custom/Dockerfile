@@ -5,7 +5,12 @@ FROM mariadb/maxscale:latest
 RUN dnf -y install procps-ng \
     && dnf clean all
 
-# Run MaxScale as the dedicated user and bypass base entrypoint (rsyslog)
+# Create entrypoint script to substitute secrets before starting MaxScale
+RUN mkdir -p /usr/local/bin
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Run MaxScale as the dedicated user
 USER maxscale
-ENTRYPOINT ["/usr/bin/maxscale"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["-d"]

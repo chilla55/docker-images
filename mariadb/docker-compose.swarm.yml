@@ -104,6 +104,7 @@ services:
     environment:
       MAXSCALE_USER: ${MAXSCALE_USER:-admin}
       MAXSCALE_PASSWORD_FILE: /run/secrets/maxscale_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
     volumes:
       - maxscale-data:/var/lib/maxscale
     configs:
