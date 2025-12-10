@@ -118,6 +118,7 @@ services:
           - mariadb_maxscale
     secrets:
       - maxscale_password
+      - mysql_root_password
     deploy:
       mode: replicated
       replicas: 1
