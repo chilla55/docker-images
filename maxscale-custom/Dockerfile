@@ -5,8 +5,7 @@ FROM mariadb/maxscale:latest
 RUN dnf -y install procps-ng \
     && dnf clean all
 
-# Run MaxScale as the dedicated user
+# Run MaxScale as the dedicated user and bypass base entrypoint (rsyslog)
 USER maxscale
-
-# Start MaxScale in daemon mode
-CMD ["/usr/bin/maxscale", "-d"]
+ENTRYPOINT ["/usr/bin/maxscale"]
+CMD ["-d"]
