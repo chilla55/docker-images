@@ -101,8 +101,6 @@ services:
   maxscale:
     image: ghcr.io/chilla55/maxscale:latest
     hostname: maxscale-node
-    command: >-
-      sh -c "dnf -y install procps-ng && exec su -s /bin/sh maxscale -c '/usr/bin/maxscale -d'"
     environment:
       MAXSCALE_USER: ${MAXSCALE_USER:-admin}
       MAXSCALE_PASSWORD_FILE: /run/secrets/maxscale_password
