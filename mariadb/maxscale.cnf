@@ -26,8 +26,8 @@ protocol=MariaDBBackend
 type=monitor
 module=mariadbmon
 servers=mariadb-primary,mariadb-secondary
-user=maxscale
-password=${MAXSCALE_PASSWORD}
+user=root
+password=${MYSQL_ROOT_PASSWORD}
 monitor_interval=2s
 
 # Automatic failover settings
@@ -58,8 +58,8 @@ cooperative_monitoring_locks=majority_of_all
 type=service
 router=readwritesplit
 servers=mariadb-primary,mariadb-secondary
-user=maxscale
-password=${MAXSCALE_PASSWORD}
+user=root
+password=${MYSQL_ROOT_PASSWORD}
 
 # Master handles writes, slave handles reads
 master_accept_reads=false
@@ -85,8 +85,8 @@ type=service
 router=readconnroute
 router_options=slave
 servers=mariadb-primary,mariadb-secondary
-user=maxscale
-password=${MAXSCALE_PASSWORD}
+user=root
+password=${MYSQL_ROOT_PASSWORD}
 
 # Listener for Read-Write Split (Applications connect here)
 [Read-Write-Listener]
