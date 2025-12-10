@@ -1,7 +1,6 @@
 # MaxScale Configuration for Master-Slave Replication with Automatic Failover
 
 [maxscale]
-user=maxscale
 threads=auto
 log_info=true
 log_warning=true
