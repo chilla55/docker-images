@@ -102,7 +102,7 @@ services:
     image: mariadb/maxscale:latest
     hostname: maxscale-node
     command: >-
-      sh -c "apt-get update && apt-get install -y procps && exec /usr/bin/maxscale -d"
+      sh -c "dnf -y install procps-ng && exec /usr/bin/maxscale -d"
     environment:
       MAXSCALE_USER: ${MAXSCALE_USER:-admin}
       MAXSCALE_PASSWORD_FILE: /run/secrets/maxscale_password
