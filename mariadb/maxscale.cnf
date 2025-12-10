@@ -5,6 +5,7 @@ threads=auto
 log_info=true
 log_warning=true
 log_notice=true
+query_classifier_cache_size=75Mi
 
 # Primary Server
 [mariadb-primary]
@@ -27,7 +28,6 @@ module=mariadbmon
 servers=mariadb-primary,mariadb-secondary
 user=maxscale
 password=${MAXSCALE_PASSWORD}
-monitor_interval=2000
 monitor_interval=2s
 
 # Automatic failover settings
@@ -52,7 +52,6 @@ cooperative_monitoring_locks=majority_of_all
 
 # Primary fencing - Primary goes read-only if isolated
 # Only happens when Primary can't reach Secondary + MaxScale
-replication_master_timeout=30s
 
 # Read-Write Split Service (Primary gets all writes, Secondary for reads)
 [Read-Write-Service]
