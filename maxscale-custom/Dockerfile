@@ -10,7 +10,6 @@ RUN mkdir -p /usr/local/bin
 COPY entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Run MaxScale as the dedicated user
-USER maxscale
+# Run entrypoint as root (it will drop to maxscale user)
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["-d"]

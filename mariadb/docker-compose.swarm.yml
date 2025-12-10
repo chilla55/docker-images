@@ -109,7 +109,7 @@ services:
       - maxscale-data:/var/lib/maxscale
     configs:
       - source: maxscale_config
-        target: /etc/maxscale.cnf
+        target: /tmp/maxscale.cnf
         mode: 0444
     networks:
       mariadb-net:
