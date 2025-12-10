@@ -28,6 +28,7 @@ servers=mariadb-primary,mariadb-secondary
 user=maxscale
 password=${MAXSCALE_PASSWORD}
 monitor_interval=2000
+monitor_interval=2s
 
 # Automatic failover settings
 auto_failover=true
