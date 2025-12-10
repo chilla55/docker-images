@@ -89,7 +89,7 @@ services:
       DEBUG: "false"
     
     secrets:
-      - cloudflare_credentials
+      - cloudflare_api_token
       - storagebox_password
     
     # Note: /etc/letsencrypt is mounted from Storage Box via CIFS in entrypoint.sh
