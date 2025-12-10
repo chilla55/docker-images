@@ -16,7 +16,7 @@ set -e
 # ──────────────────────────────────────────────────────────────────────────
 CERT_EMAIL="${CERT_EMAIL:-admin@example.com}"
 CERT_DOMAINS="${CERT_DOMAINS:-example.com,*.example.com}"
-CLOUDFLARE_CREDENTIALS="${CLOUDFLARE_CREDENTIALS:-/run/secrets/cloudflare_credentials}"
+CLOUDFLARE_CREDENTIALS_FILE="${CLOUDFLARE_CREDENTIALS_FILE:-/run/secrets/cloudflare_api_token}"
 RENEW_INTERVAL="${RENEW_INTERVAL:-12h}"
 
 # Storage Box CIFS/Samba settings
@@ -52,14 +52,22 @@ log_error() {
 setup_cloudflare() {
     log "Setting up Cloudflare credentials..."
     
-    if [ -f "$CLOUDFLARE_CREDENTIALS" ]; then
-        log_debug "Cloudflare credentials found"
-        chmod 600 "$CLOUDFLARE_CREDENTIALS"
-        log "Cloudflare credentials configured"
-    else
-        log_error "Cloudflare credentials not found at $CLOUDFLARE_CREDENTIALS"
+    if [ ! -f "$CLOUDFLARE_CREDENTIALS_FILE" ]; then
+        log_error "Cloudflare API token not found at $CLOUDFLARE_CREDENTIALS_FILE"
         exit 1
     fi
+    
+    # Create cloudflare.ini from token
+    local cf_dir="/etc/letsencrypt/.secrets/certbot"
+    mkdir -p "$cf_dir"
+    
+    local token=$(cat "$CLOUDFLARE_CREDENTIALS_FILE")
+    cat > "$cf_dir/cloudflare.ini" <<EOF
+dns_cloudflare_api_token = $token
+EOF
+    
+    chmod 600 "$cf_dir/cloudflare.ini"
+    log "Cloudflare credentials configured"
 }
 
 mount_storage_box() {
@@ -141,7 +149,7 @@ obtain_certificate() {
     log "Obtaining new certificate for: ${CERT_DOMAINS}"
     certbot certonly \
         --dns-cloudflare \
-        --dns-cloudflare-credentials "$CLOUDFLARE_CREDENTIALS" \
+        --dns-cloudflare-credentials /etc/letsencrypt/.secrets/certbot/cloudflare.ini \
         --email "$CERT_EMAIL" \
         --agree-tos \
         --non-interactive \
@@ -163,7 +171,7 @@ renew_certificates() {
     
     certbot renew \
         --dns-cloudflare \
-        --dns-cloudflare-credentials "$CLOUDFLARE_CREDENTIALS" \
+        --dns-cloudflare-credentials /etc/letsencrypt/.secrets/certbot/cloudflare.ini \
         --quiet \
         --non-interactive \
         --deploy-hook "/scripts/entrypoint.sh post-renew"

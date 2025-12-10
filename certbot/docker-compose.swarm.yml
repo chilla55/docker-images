@@ -17,9 +17,9 @@ networks:
 # Secrets
 # ──────────────────────────────────────────────────────────────────────────
 secrets:
-  cloudflare_credentials:
+  cloudflare_api_token:
     external: true
-    name: cloudflare_credentials
+    name: cloudflare_api_token
   
   storagebox_password:
     external: true
@@ -63,21 +63,21 @@ services:
       # ──────────────────────────────────────────────────────────────────
       # Certificate Configuration
       # ──────────────────────────────────────────────────────────────────
-      CERT_EMAIL: admin@example.com
-      CERT_DOMAINS: example.com,*.example.com
+      CERT_EMAIL: admin@chilla55.de
+      CERT_DOMAINS: chilla55.de,*.chilla55.de
       RENEW_INTERVAL: 12h  # Check for renewals every 12 hours
       
       # ──────────────────────────────────────────────────────────────────
       # Cloudflare DNS Settings
       # ──────────────────────────────────────────────────────────────────
-      CLOUDFLARE_CREDENTIALS: /run/secrets/cloudflare_credentials
+      CLOUDFLARE_CREDENTIALS_FILE: /run/secrets/cloudflare_api_token
       
       # ──────────────────────────────────────────────────────────────────
       # Hetzner Storage Box CIFS/Samba Mount Settings
       # ──────────────────────────────────────────────────────────────────
       STORAGE_BOX_ENABLED: "true"
-      STORAGE_BOX_HOST: u123456.your-storagebox.de  # Your Storage Box hostname
-      STORAGE_BOX_USER: u123456  # Your Storage Box username
+      STORAGE_BOX_HOST: u515899.your-storagebox.de
+      STORAGE_BOX_USER: u515899
       STORAGE_BOX_PASSWORD_FILE: /run/secrets/storagebox_password
       STORAGE_BOX_PATH: /certs  # Path on Storage Box (creates backup.tar.gz in this folder)
       # CIFS mount options: vers=3.0, uid=root(0), gid=nginx(1001), file perms for nginx group read
