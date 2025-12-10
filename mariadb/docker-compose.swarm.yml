@@ -99,7 +99,7 @@ services:
       - mariadb-primary
 
   maxscale:
-    image: mariadb/maxscale:latest
+    image: ghcr.io/chilla55/maxscale:latest
     hostname: maxscale-node
     command: >-
       sh -c "dnf -y install procps-ng && exec su -s /bin/sh maxscale -c '/usr/bin/maxscale -d'"
