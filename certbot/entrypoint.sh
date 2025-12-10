@@ -91,8 +91,8 @@ mount_storage_box() {
     
     log_debug "Mounting $remote_path to $mount_point"
     
-    # Check if already mounted
-    if mountpoint -q "$mount_point"; then
+    # Check if already mounted by looking at mount table
+    if mount | grep -q "on $mount_point type cifs"; then
         log "Storage Box already mounted at $mount_point"
         return 0
     fi
