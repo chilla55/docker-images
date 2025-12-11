@@ -80,26 +80,39 @@ mount_storage_box() {
         return 0
     fi
     
-    # Try SMB3 first (newer protocol)
-    log "Attempting to mount Storage Box via SMB3..."
-    if mount_storage_box_smb3; then
+    local mount_point="/etc/letsencrypt"
+    
+    # Check if already mounted
+    if mount | grep -q "on $mount_point type"; then
+        log "Storage Box already mounted at $mount_point"
         return 0
     fi
     
-    # Fall back to SSHFS with password
-    log "SMB3 failed, attempting SSHFS with password..."
+    # Try SSHFS first (more reliable in containers with FUSE)
+    log "Attempting to mount Storage Box via SSHFS..."
     if mount_storage_box_sshfs; then
         return 0
     fi
     
+    # Try SMB3
+    log "SSHFS failed, attempting SMB3..."
+    if mount_storage_box_smb3; then
+        return 0
+    fi
+    
     # Last resort: CIFS
-    log "SSHFS failed, attempting CIFS..."
-    mount_storage_box_cifs
-    return $?
+    log "SMB3 failed, attempting CIFS..."
+    if mount_storage_box_cifs; then
+        return 0
+    fi
+    
+    # Fallback to local storage
+    log "All mount attempts failed, using local storage"
+    return 0
 }
 
 mount_storage_box_smb3() {
-    log "Attempting SMB3 mount (known to fail in Docker containers)..."
+    log_debug "Attempting SMB3 mount..."
     
     if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
         log_debug "Storage Box password file not found, skipping SMB3"
@@ -133,9 +146,19 @@ mount_storage_box_sshfs() {
     log "Mounting Hetzner Storage Box via SSHFS (port $STORAGE_BOX_SSH_PORT)..."
     
     if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
-        log_error "Storage Box password file not found at $STORAGE_BOX_PASSWORD_FILE"
-        log "Falling back to local storage"
-        STORAGE_BOX_ENABLED="false"
+        log_debug "Storage Box password file not found, skipping SSHFS"
+        return 1
+    fi
+    
+    # Try to load FUSE module (required for SSHFS in containers)
+    if ! grep -q "^fuse" /proc/filesystems 2>/dev/null; then
+        log_debug "Loading FUSE kernel module..."
+        modprobe fuse 2>/dev/null || true
+    fi
+    
+    # Check if FUSE is available
+    if ! grep -q "^fuse" /proc/filesystems 2>/dev/null; then
+        log_debug "FUSE kernel module not available, skipping SSHFS"
         return 1
     fi
     
@@ -143,38 +166,31 @@ mount_storage_box_sshfs() {
     local mount_point="/etc/letsencrypt"
     local remote_path="${STORAGE_BOX_USER}@${STORAGE_BOX_HOST}:${STORAGE_BOX_PATH}"
     
-    log_debug "Mounting $remote_path to $mount_point via SSHFS (password auth)"
-    
     # Check if already mounted
     if mount | grep -q "on $mount_point type fuse.sshfs"; then
         log "Storage Box already mounted at $mount_point (SSHFS)"
         return 0
     fi
     
-    # Create mount point if it doesn't exist
     mkdir -p "$mount_point"
     
     # Mount via SSHFS with password (using sshpass)
+    # Simplified options: just allow_other and auto_unmount
     if command -v sshpass &> /dev/null; then
-        # SSHFS-specific options: umask for permissions, not dir_mode/file_mode
         if sshpass -p "$password" sshfs -p "$STORAGE_BOX_SSH_PORT" \
-            -o "StrictHostKeyChecking=accept-new,allow_other,umask=0027,uid=0,gid=1001,auto_unmount" \
-            "$remote_path" "$mount_point"; then
-            log "Successfully mounted Storage Box at $mount_point via SSHFS (password)"
+            -o "StrictHostKeyChecking=accept-new,allow_other,auto_unmount" \
+            "$remote_path" "$mount_point" 2>/dev/null; then
+            log "Successfully mounted Storage Box at $mount_point via SSHFS"
             return 0
         fi
     fi
     
-    log_error "Failed to mount Storage Box via SSHFS"
-    log_error "Remote: $remote_path (port $STORAGE_BOX_SSH_PORT)"
-    log_error "Ensure sshpass is installed and password is correct"
-    log "Falling back to local storage"
-    STORAGE_BOX_ENABLED="false"
+    log_debug "Failed to mount Storage Box via SSHFS"
     return 1
 }
 
 mount_storage_box_cifs() {
-    log "Attempting CIFS mount (known to fail in Docker containers)..."
+    log_debug "Attempting CIFS mount..."
     
     if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
         log_debug "Storage Box password file not found, skipping CIFS"

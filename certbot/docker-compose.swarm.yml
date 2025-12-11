@@ -52,10 +52,11 @@ services:
     networks:
       - web-net
     
-    # Required for CIFS mount (minimal capabilities, not privileged)
+    # Required for mounting (SMB3/CIFS/SSHFS)
     cap_add:
-      - SYS_ADMIN
-      - DAC_READ_SEARCH
+      - SYS_ADMIN      # For mount syscalls
+      - SYS_MODULE     # For modprobe (FUSE module loading)
+      - DAC_READ_SEARCH  # For mount permission checks
     security_opt:
       - apparmor:unconfined
     
@@ -93,8 +94,8 @@ services:
       - cloudflare_api_token
       - storagebox_password
     
-    # Note: /etc/letsencrypt is mounted from Storage Box via CIFS in entrypoint.sh
-    # No Docker socket needed - nginx auto-reloads via certificate watcher
+    # Storage Box will be mounted directly in container via SSHFS/SMB3/CIFS
+    # Fallback to local /etc/letsencrypt if all mounts fail
     
     deploy:
       mode: replicated
