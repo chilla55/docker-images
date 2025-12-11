@@ -20,10 +20,6 @@ secrets:
   cloudflare_api_token:
     external: true
     name: cloudflare_api_token
-  
-  storagebox_password:
-    external: true
-    name: storagebox_password
 
 # ──────────────────────────────────────────────────────────────────────────
 # Volumes
@@ -52,14 +48,6 @@ services:
     networks:
       - web-net
     
-    # Required for mounting (SMB3/CIFS/SSHFS)
-    cap_add:
-      - SYS_ADMIN      # For mount syscalls
-      - SYS_MODULE     # For modprobe (FUSE module loading)
-      - DAC_READ_SEARCH  # For mount permission checks
-    security_opt:
-      - apparmor:unconfined
-    
     environment:
       # ──────────────────────────────────────────────────────────────────
       # Certificate Configuration
@@ -67,23 +55,12 @@ services:
       CERT_EMAIL: admin@chilla55.de
       CERT_DOMAINS: chilla55.de,*.chilla55.de
       RENEW_INTERVAL: 12h  # Check for renewals every 12 hours
+      CERTBOT_DRY_RUN: "true"   # Use Let's Encrypt staging / dry-run
       
       # ──────────────────────────────────────────────────────────────────
       # Cloudflare DNS Settings
       # ──────────────────────────────────────────────────────────────────
       CLOUDFLARE_CREDENTIALS_FILE: /run/secrets/cloudflare_api_token
-      
-      # ──────────────────────────────────────────────────────────────────
-      # Hetzner Storage Box Settings (SMB3 primary, SSHFS fallback)
-      # ──────────────────────────────────────────────────────────────────
-      STORAGE_BOX_ENABLED: "true"
-      STORAGE_BOX_HOST: u515899.your-storagebox.de
-      STORAGE_BOX_USER: u515899
-      STORAGE_BOX_SSH_PORT: "23"
-      STORAGE_BOX_PATH: /backup
-      # Mount options for SMB3/CIFS
-      STORAGE_BOX_MOUNT_OPTIONS: "vers=3.0,seal,nodfs,noserverino,nounix,uid=0,gid=1001,file_mode=0640,dir_mode=0750"
-      CERTBOT_DRY_RUN: "true"   # Use Let's Encrypt staging / dry-run
       
       # ──────────────────────────────────────────────────────────────────
       # Debug Settings
@@ -92,7 +69,6 @@ services:
     
     secrets:
       - cloudflare_api_token
-      - storagebox_password
     
     volumes:
       # Bind-mount host's Storage Box certs directory to container

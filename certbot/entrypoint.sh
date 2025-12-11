@@ -1,12 +1,11 @@
 #!/bin/bash
 # ============================================================================
-# Certbot Entrypoint Script with Hetzner Storage Box (CIFS Mount)
+# Certbot Entrypoint Script with Host-Mounted Storage Box
 # ============================================================================
 # This script:
-# 1. Mounts Hetzner Storage Box via CIFS/Samba to /etc/letsencrypt
+# 1. Verifies Storage Box is mounted via host bind-mount
 # 2. Obtains/renews Let's Encrypt certificates using Cloudflare DNS
-# 3. Certificates are directly written to Storage Box mount
-# 4. Optionally signals nginx to reload via Docker API
+# 3. Certificates are written to /etc/letsencrypt (host-mounted)
 # ============================================================================
 
 set -e
@@ -19,17 +18,6 @@ CERT_DOMAINS="${CERT_DOMAINS:-example.com,*.example.com}"
 CLOUDFLARE_CREDENTIALS_FILE="${CLOUDFLARE_CREDENTIALS_FILE:-/run/secrets/cloudflare_api_token}"
 RENEW_INTERVAL="${RENEW_INTERVAL:-12h}"
 CERTBOT_DRY_RUN="${CERTBOT_DRY_RUN:-false}"
-
-# Storage Box settings (SMB3 primary, SSHFS fallback with password)
-STORAGE_BOX_ENABLED="${STORAGE_BOX_ENABLED:-true}"
-STORAGE_BOX_HOST="${STORAGE_BOX_HOST:-u123456.your-storagebox.de}"
-STORAGE_BOX_USER="${STORAGE_BOX_USER:-u123456}"
-STORAGE_BOX_PASSWORD_FILE="${STORAGE_BOX_PASSWORD_FILE:-/run/secrets/storagebox_password}"
-STORAGE_BOX_SSH_KEY_FILE="${STORAGE_BOX_SSH_KEY_FILE:-/run/secrets/storagebox_ssh_key}"
-STORAGE_BOX_SSH_PORT="${STORAGE_BOX_SSH_PORT:-23}"
-STORAGE_BOX_PATH="${STORAGE_BOX_PATH:-/backup}"
-STORAGE_BOX_MOUNT_OPTIONS="${STORAGE_BOX_MOUNT_OPTIONS:-vers=3.0,seal,nodfs,noserverino,nounix,uid=0,gid=1001,file_mode=0640,dir_mode=0750}"
-STORAGE_BOX_USE_SSHFS="${STORAGE_BOX_USE_SSHFS:-false}"
 
 DEBUG="${DEBUG:-false}"
 
@@ -74,30 +62,19 @@ EOF
     log "Cloudflare credentials configured"
 }
 
-mount_storage_box() {
-    if [ "$STORAGE_BOX_ENABLED" != "true" ]; then
-        log "Storage Box mounting is disabled, using local storage"
-        return 0
-    fi
-    
+verify_storage_mount() {
     local mount_point="/etc/letsencrypt"
     
-    # Check if already mounted (bind-mount from host or direct mount)
-    if mount | grep -q "on $mount_point type"; then
-        log "Storage Box already mounted at $mount_point"
+    # Check if Storage Box is mounted (bind-mount from host)
+    if mount | grep -q "on $mount_point"; then
+        log "✓ Storage Box mounted at $mount_point"
+        mount | grep "on $mount_point" | head -1
+        return 0
+    else
+        log "Warning: No mount detected at $mount_point (using local storage)"
         return 0
     fi
-    
-    log "Storage Box mount not found at $mount_point, using local storage"
-    return 0
 }
-
-mount_storage_box_smb3() {
-    log_debug "Attempting SMB3 mount..."
-    
-    if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
-        log_debug "Storage Box password file not found, skipping SMB3"
-        return 1
     fi
     
     local password=$(cat "$STORAGE_BOX_PASSWORD_FILE")
@@ -121,91 +98,6 @@ mount_storage_box_smb3() {
     
     log_debug "SMB3 mount failed (expected in Docker containers)"
     return 1
-}
-
-mount_storage_box_sshfs() {
-    log "Mounting Hetzner Storage Box via SSHFS (port $STORAGE_BOX_SSH_PORT)..."
-    
-    if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
-        log_debug "Storage Box password file not found, skipping SSHFS"
-        return 1
-    fi
-    
-    # Try to load FUSE module (required for SSHFS in containers)
-    if ! grep -q "^fuse" /proc/filesystems 2>/dev/null; then
-        log_debug "Loading FUSE kernel module..."
-        modprobe fuse 2>/dev/null || true
-    fi
-    
-    # Check if FUSE is available
-    if ! grep -q "^fuse" /proc/filesystems 2>/dev/null; then
-        log_debug "FUSE kernel module not available, skipping SSHFS"
-        return 1
-    fi
-    
-    local password=$(cat "$STORAGE_BOX_PASSWORD_FILE")
-    local mount_point="/etc/letsencrypt"
-    local remote_path="${STORAGE_BOX_USER}@${STORAGE_BOX_HOST}:${STORAGE_BOX_PATH}"
-    
-    # Check if already mounted
-    if mount | grep -q "on $mount_point type fuse.sshfs"; then
-        log "Storage Box already mounted at $mount_point (SSHFS)"
-        return 0
-    fi
-    
-    mkdir -p "$mount_point"
-    
-    # Mount via SSHFS with password (using sshpass)
-    # Simplified options: just allow_other and auto_unmount
-    if command -v sshpass &> /dev/null; then
-        if sshpass -p "$password" sshfs -p "$STORAGE_BOX_SSH_PORT" \
-            -o "StrictHostKeyChecking=accept-new,allow_other,auto_unmount" \
-            "$remote_path" "$mount_point" 2>/dev/null; then
-            log "Successfully mounted Storage Box at $mount_point via SSHFS"
-            return 0
-        fi
-    fi
-    
-    log_debug "Failed to mount Storage Box via SSHFS"
-    return 1
-}
-
-mount_storage_box_cifs() {
-    log_debug "Attempting CIFS mount..."
-    
-    if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
-        log_debug "Storage Box password file not found, skipping CIFS"
-        return 1
-    fi
-    
-    local password=$(cat "$STORAGE_BOX_PASSWORD_FILE")
-    local mount_point="/etc/letsencrypt"
-    local remote_path="//${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
-    
-    # Check if already mounted
-    if mount | grep -q "on $mount_point type cifs"; then
-        log "Storage Box already mounted at $mount_point (CIFS)"
-        return 0
-    fi
-    
-    mkdir -p "$mount_point"
-    
-    # Try CIFS - will likely fail in Docker but worth attempting
-    if mount -t cifs "$remote_path" "$mount_point" \
-        -o "user=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}" 2>/dev/null; then
-        log "Successfully mounted Storage Box at $mount_point via CIFS"
-        return 0
-    fi
-    
-    log_debug "CIFS mount failed (expected in Docker containers)"
-    return 1
-}
-
-unmount_storage_box() {
-    if [ "$STORAGE_BOX_ENABLED" = "true" ]; then
-        log "Unmounting Storage Box..."
-        umount /etc/letsencrypt 2>/dev/null || true
-    fi
 }
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -320,27 +212,22 @@ convert_interval_to_seconds() {
 
 cleanup() {
     log "Received termination signal, cleaning up..."
-    unmount_storage_box
     exit 0
 }
 
 main() {
     log "=========================================="
-    log "Certbot with Hetzner Storage Box (CIFS)"
+    log "Certbot with Host-Mounted Storage Box"
     log "=========================================="
     log "Email: $CERT_EMAIL"
     log "Domains: $CERT_DOMAINS"
     log "Renew Interval: $RENEW_INTERVAL"
-    log "Storage Box Enabled: $STORAGE_BOX_ENABLED"
-    if [ "$STORAGE_BOX_ENABLED" = "true" ]; then
-        log "Storage Box: //${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
-    fi
     log "Dry Run (staging only): $CERTBOT_DRY_RUN"
     log "=========================================="
     
     # Setup
     setup_cloudflare
-    mount_storage_box || true
+    verify_storage_mount
 
     # Optional dry-run to just validate mounting/credentials without hitting ACME
     if [ "${SKIP_CERTS:-false}" = "true" ]; then

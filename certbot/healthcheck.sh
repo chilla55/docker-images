@@ -2,10 +2,19 @@
 # ============================================================================
 # Certbot Health Check Script
 # ============================================================================
-# Verifies that certificates exist and are valid
+# Verifies that:
+# 1. Storage Box is mounted (if not using local storage)
+# 2. Certificates exist and are valid
 # ============================================================================
 
 set -e
+
+# Check if /etc/letsencrypt is mounted from host
+if mount | grep -q "on /etc/letsencrypt"; then
+    echo "✓ Storage Box mounted at /etc/letsencrypt"
+else
+    echo "WARNING: No mount detected at /etc/letsencrypt (using local storage)"
+fi
 
 # Get the first domain from CERT_DOMAINS
 FIRST_DOMAIN=$(echo "${CERT_DOMAINS:-example.com}" | cut -d',' -f1)

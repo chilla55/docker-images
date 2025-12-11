@@ -1,27 +1,23 @@
 # ============================================================================
-# Certbot with Cloudflare DNS and Hetzner Storage Box Support
+# Certbot with Cloudflare DNS and Host-Mounted Storage Box
 # ============================================================================
-# This image extends the official certbot/dns-cloudflare image with CIFS/Samba
-# support for mounting Hetzner Storage Box directly
+# This image extends the official certbot/dns-cloudflare image
+# Certificates are stored on host-mounted Storage Box at /etc/letsencrypt
 # ============================================================================
 
 FROM certbot/dns-cloudflare:latest
 
 LABEL maintainer="chilla55"
-LABEL description="Certbot with Cloudflare DNS and Hetzner Storage Box (CIFS/Samba) support"
+LABEL description="Certbot with Cloudflare DNS for host-mounted Hetzner Storage Box"
 
-# Install cifs-utils, sshfs, and sshpass for mounting Storage Box
+# Install bash and curl for scripting
 RUN apk add --no-cache \
-    cifs-utils \
-    sshfs \
-    sshpass \
-    curl \
     bash \
+    curl \
     && rm -rf /var/cache/apk/*
 
 # Create necessary directories
-RUN mkdir -p /scripts \
-    && mkdir -p /mnt/storagebox
+RUN mkdir -p /scripts
 
 # Copy entrypoint and helper scripts
 COPY entrypoint.sh /scripts/entrypoint.sh
