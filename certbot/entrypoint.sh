@@ -26,7 +26,7 @@ STORAGE_BOX_HOST="${STORAGE_BOX_HOST:-u123456.your-storagebox.de}"
 STORAGE_BOX_USER="${STORAGE_BOX_USER:-u123456}"
 STORAGE_BOX_PASSWORD_FILE="${STORAGE_BOX_PASSWORD_FILE:-/run/secrets/storagebox_password}"
 STORAGE_BOX_PATH="${STORAGE_BOX_PATH:-/backup}"
-STORAGE_BOX_MOUNT_OPTIONS="${STORAGE_BOX_MOUNT_OPTIONS:-vers=3.0,sec=ntlmssp,seal,nodfs,noserverino,nounix,uid=0,gid=1001,file_mode=0640,dir_mode=0750}"
+STORAGE_BOX_MOUNT_OPTIONS="${STORAGE_BOX_MOUNT_OPTIONS:-vers=3.0,seal,nodfs,noserverino,nounix,uid=0,gid=1001,file_mode=0640,dir_mode=0750}"
 
 DEBUG="${DEBUG:-false}"
 
@@ -79,16 +79,6 @@ mount_storage_box() {
     
     log "Mounting Hetzner Storage Box via CIFS..."
     
-    # Ensure CIFS kernel module is loaded
-    log_debug "Loading CIFS kernel module..."
-    modprobe cifs 2>/dev/null || true
-    
-    # Disable oplocks as per Hetzner guidance
-    if [ -w /proc/fs/cifs/OplockEnabled ]; then
-        echo 0 > /proc/fs/cifs/OplockEnabled 2>/dev/null || true
-        log_debug "Disabled CIFS oplocks"
-    fi
-    
     if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
         log_error "Storage Box password file not found at $STORAGE_BOX_PASSWORD_FILE"
         log "Falling back to local storage"
@@ -101,10 +91,11 @@ mount_storage_box() {
     local remote_path="//${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
     
     log_debug "Mounting $remote_path to $mount_point"
+    log_debug "Mount options: $STORAGE_BOX_MOUNT_OPTIONS"
     
     # Check if already mounted by looking at mount table
     if mount | grep -q "on $mount_point type cifs"; then
-        log "Storage Box already mounted at $mount_point"
+        log "Storage Box already mounted at $mount_point (CIFS)"
         return 0
     fi
     
@@ -114,17 +105,21 @@ mount_storage_box() {
     # Mount the Storage Box (inline user/password to avoid special char issues)
     if mount -t cifs "$remote_path" "$mount_point" \
         -o "user=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}"; then
-        log "Successfully mounted Storage Box at $mount_point"
+        log "Successfully mounted Storage Box at $mount_point (CIFS)"
         log_debug "Mount options: $STORAGE_BOX_MOUNT_OPTIONS"
         return 0
     else
-        log_error "Failed to mount Storage Box"
+        log_error "Failed to mount Storage Box via CIFS"
         log_error "Remote: $remote_path"
         log_error "Mount options: $STORAGE_BOX_MOUNT_OPTIONS"
         log_error "Check credentials and network connectivity"
         log_debug "Attempting to capture kernel error with dmesg..."
         dmesg | tail -5 | while read line; do log_debug "$line"; done
         log "Falling back to local storage"
+        STORAGE_BOX_ENABLED="false"
+        return 1
+    fi
+}
         STORAGE_BOX_ENABLED="false"
         return 1
     fi
