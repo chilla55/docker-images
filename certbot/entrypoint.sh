@@ -18,6 +18,7 @@ CERT_EMAIL="${CERT_EMAIL:-admin@example.com}"
 CERT_DOMAINS="${CERT_DOMAINS:-example.com,*.example.com}"
 CLOUDFLARE_CREDENTIALS_FILE="${CLOUDFLARE_CREDENTIALS_FILE:-/run/secrets/cloudflare_api_token}"
 RENEW_INTERVAL="${RENEW_INTERVAL:-12h}"
+CERTBOT_DRY_RUN="${CERTBOT_DRY_RUN:-false}"
 
 # Storage Box CIFS/Samba settings
 STORAGE_BOX_ENABLED="${STORAGE_BOX_ENABLED:-true}"
@@ -129,10 +130,15 @@ unmount_storage_box() {
 obtain_certificate() {
     local domains_array=(${CERT_DOMAINS//,/ })
     local certbot_domains=""
+    local staging_args=()
     
     for domain in "${domains_array[@]}"; do
         certbot_domains="$certbot_domains -d $domain"
     done
+
+    if [ "$CERTBOT_DRY_RUN" = "true" ]; then
+        staging_args+=(--test-cert)
+    fi
     
     log "Checking if certificate exists for: ${CERT_DOMAINS}"
     
@@ -154,6 +160,7 @@ obtain_certificate() {
         --agree-tos \
         --non-interactive \
         --quiet \
+        "${staging_args[@]}" \
         $certbot_domains
     
     if [ $? -eq 0 ]; then
@@ -168,13 +175,19 @@ obtain_certificate() {
 
 renew_certificates() {
     log "Checking for certificate renewals..."
-    
-    certbot renew \
-        --dns-cloudflare \
-        --dns-cloudflare-credentials /etc/letsencrypt/.secrets/certbot/cloudflare.ini \
-        --quiet \
-        --non-interactive \
+    local renew_args=(
+        --dns-cloudflare
+        --dns-cloudflare-credentials /etc/letsencrypt/.secrets/certbot/cloudflare.ini
+        --quiet
+        --non-interactive
         --deploy-hook "/scripts/entrypoint.sh post-renew"
+    )
+
+    if [ "$CERTBOT_DRY_RUN" = "true" ]; then
+        renew_args+=(--dry-run)
+    fi
+    
+    certbot renew "${renew_args[@]}"
     
     local exit_code=$?
     
@@ -238,11 +251,19 @@ main() {
     if [ "$STORAGE_BOX_ENABLED" = "true" ]; then
         log "Storage Box: //${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
     fi
+    log "Dry Run (staging only): $CERTBOT_DRY_RUN"
     log "=========================================="
     
     # Setup
     setup_cloudflare
     mount_storage_box
+
+    # Optional dry-run to just validate mounting/credentials without hitting ACME
+    if [ "${SKIP_CERTS:-false}" = "true" ]; then
+        log "SKIP_CERTS=true: skipping certificate obtain/renew loop."
+        # Keep container alive so you can inspect the mount
+        tail -f /dev/null
+    fi
     
     # Obtain certificate if it doesn't exist
     obtain_certificate

@@ -82,6 +82,7 @@ services:
       STORAGE_BOX_PATH: /backup/certs
       # CIFS mount options: vers=3.0, uid=root(0), gid=nginx(1001), file perms for nginx group read
       STORAGE_BOX_MOUNT_OPTIONS: "vers=3.0,uid=0,gid=1001,file_mode=0640,dir_mode=0750"
+      CERTBOT_DRY_RUN: "true"   # Use Let's Encrypt staging / dry-run
       
       # ──────────────────────────────────────────────────────────────────
       # Debug Settings
