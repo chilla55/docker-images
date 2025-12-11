@@ -20,13 +20,16 @@ CLOUDFLARE_CREDENTIALS_FILE="${CLOUDFLARE_CREDENTIALS_FILE:-/run/secrets/cloudfl
 RENEW_INTERVAL="${RENEW_INTERVAL:-12h}"
 CERTBOT_DRY_RUN="${CERTBOT_DRY_RUN:-false}"
 
-# Storage Box CIFS/Samba settings
+# Storage Box settings (SMB3 primary, SSHFS fallback with password)
 STORAGE_BOX_ENABLED="${STORAGE_BOX_ENABLED:-true}"
 STORAGE_BOX_HOST="${STORAGE_BOX_HOST:-u123456.your-storagebox.de}"
 STORAGE_BOX_USER="${STORAGE_BOX_USER:-u123456}"
 STORAGE_BOX_PASSWORD_FILE="${STORAGE_BOX_PASSWORD_FILE:-/run/secrets/storagebox_password}"
+STORAGE_BOX_SSH_KEY_FILE="${STORAGE_BOX_SSH_KEY_FILE:-/run/secrets/storagebox_ssh_key}"
+STORAGE_BOX_SSH_PORT="${STORAGE_BOX_SSH_PORT:-23}"
 STORAGE_BOX_PATH="${STORAGE_BOX_PATH:-/backup}"
 STORAGE_BOX_MOUNT_OPTIONS="${STORAGE_BOX_MOUNT_OPTIONS:-vers=3.0,seal,nodfs,noserverino,nounix,uid=0,gid=1001,file_mode=0640,dir_mode=0750}"
+STORAGE_BOX_USE_SSHFS="${STORAGE_BOX_USE_SSHFS:-false}"
 
 DEBUG="${DEBUG:-false}"
 
@@ -77,7 +80,62 @@ mount_storage_box() {
         return 0
     fi
     
-    log "Mounting Hetzner Storage Box via CIFS..."
+    # Try SMB3 first (newer protocol)
+    log "Attempting to mount Storage Box via SMB3..."
+    if mount_storage_box_smb3; then
+        return 0
+    fi
+    
+    # Fall back to SSHFS with password
+    if [ "$STORAGE_BOX_USE_SSHFS" = "true" ]; then
+        log "SMB3 failed, attempting SSHFS..."
+        mount_storage_box_sshfs
+        return $?
+    fi
+    
+    # Last resort: CIFS
+    log "SSHFS disabled, attempting CIFS..."
+    mount_storage_box_cifs
+    return $?
+}
+
+mount_storage_box_smb3() {
+    log "Mounting Hetzner Storage Box via SMB3..."
+    
+    if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
+        log_error "Storage Box password file not found at $STORAGE_BOX_PASSWORD_FILE"
+        return 1
+    fi
+    
+    local password=$(cat "$STORAGE_BOX_PASSWORD_FILE")
+    local mount_point="/etc/letsencrypt"
+    local remote_path="//${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
+    
+    log_debug "Mounting $remote_path to $mount_point (SMB3)"
+    
+    # Check if already mounted
+    if mount | grep -q "on $mount_point type smb3"; then
+        log "Storage Box already mounted at $mount_point (SMB3)"
+        return 0
+    fi
+    
+    # Create mount point if it doesn't exist
+    mkdir -p "$mount_point"
+    
+    # Mount via SMB3
+    if mount -t smb3 "$remote_path" "$mount_point" \
+        -o "username=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}"; then
+        log "Successfully mounted Storage Box at $mount_point via SMB3"
+        return 0
+    else
+        log_error "Failed to mount Storage Box via SMB3"
+        log_error "Remote: $remote_path"
+        return 1
+    fi
+}
+
+mount_storage_box_sshfs() {
+    log "Mounting Hetzner Storage Box via SSHFS (port $STORAGE_BOX_SSH_PORT)..."
     
     if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
         log_error "Storage Box password file not found at $STORAGE_BOX_PASSWORD_FILE"
@@ -88,37 +146,35 @@ mount_storage_box() {
     
     local password=$(cat "$STORAGE_BOX_PASSWORD_FILE")
     local mount_point="/etc/letsencrypt"
-    local remote_path="//${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
+    local remote_path="${STORAGE_BOX_USER}@${STORAGE_BOX_HOST}:${STORAGE_BOX_PATH}"
     
-    log_debug "Mounting $remote_path to $mount_point"
-    log_debug "Mount options: $STORAGE_BOX_MOUNT_OPTIONS"
+    log_debug "Mounting $remote_path to $mount_point via SSHFS (password auth)"
     
-    # Check if already mounted by looking at mount table
-    if mount | grep -q "on $mount_point type cifs"; then
-        log "Storage Box already mounted at $mount_point (CIFS)"
+    # Check if already mounted
+    if mount | grep -q "on $mount_point type fuse.sshfs"; then
+        log "Storage Box already mounted at $mount_point (SSHFS)"
         return 0
     fi
     
     # Create mount point if it doesn't exist
     mkdir -p "$mount_point"
     
-    # Mount the Storage Box (inline user/password to avoid special char issues)
-    if mount -t cifs "$remote_path" "$mount_point" \
-        -o "user=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}"; then
-        log "Successfully mounted Storage Box at $mount_point (CIFS)"
-        log_debug "Mount options: $STORAGE_BOX_MOUNT_OPTIONS"
-        return 0
-    else
-        log_error "Failed to mount Storage Box via CIFS"
-        log_error "Remote: $remote_path"
-        log_error "Mount options: $STORAGE_BOX_MOUNT_OPTIONS"
-        log_error "Check credentials and network connectivity"
-        log_debug "Attempting to capture kernel error with dmesg..."
-        dmesg | tail -5 | while read line; do log_debug "$line"; done
-        log "Falling back to local storage"
-        STORAGE_BOX_ENABLED="false"
-        return 1
+    # Mount via SSHFS with password (using sshpass)
+    if command -v sshpass &> /dev/null; then
+        if sshpass -p "$password" sshfs -p "$STORAGE_BOX_SSH_PORT" \
+            -o "StrictHostKeyChecking=accept-new,allow_other,uid=0,gid=1001,dir_mode=0750,file_mode=0640,auto_unmount" \
+            "$remote_path" "$mount_point"; then
+            log "Successfully mounted Storage Box at $mount_point via SSHFS (password)"
+            return 0
+        fi
     fi
+    
+    log_error "Failed to mount Storage Box via SSHFS"
+    log_error "Remote: $remote_path (port $STORAGE_BOX_SSH_PORT)"
+    log_error "Ensure sshpass is installed and password is correct"
+    log "Falling back to local storage"
+    STORAGE_BOX_ENABLED="false"
+    return 1
 }
 
 unmount_storage_box() {

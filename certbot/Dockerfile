@@ -10,9 +10,11 @@ FROM certbot/dns-cloudflare:latest
 LABEL maintainer="chilla55"
 LABEL description="Certbot with Cloudflare DNS and Hetzner Storage Box (CIFS/Samba) support"
 
-# Install cifs-utils for mounting Storage Box via CIFS
+# Install cifs-utils, sshfs, and sshpass for mounting Storage Box
 RUN apk add --no-cache \
     cifs-utils \
+    sshfs \
+    sshpass \
     curl \
     bash \
     && rm -rf /var/cache/apk/*
