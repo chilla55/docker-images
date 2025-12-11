@@ -99,10 +99,10 @@ mount_storage_box() {
 }
 
 mount_storage_box_smb3() {
-    log "Mounting Hetzner Storage Box via SMB3..."
+    log "Attempting SMB3 mount (known to fail in Docker containers)..."
     
     if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
-        log_error "Storage Box password file not found at $STORAGE_BOX_PASSWORD_FILE"
+        log_debug "Storage Box password file not found, skipping SMB3"
         return 1
     fi
     
@@ -110,27 +110,23 @@ mount_storage_box_smb3() {
     local mount_point="/etc/letsencrypt"
     local remote_path="//${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
     
-    log_debug "Mounting $remote_path to $mount_point (SMB3)"
-    
     # Check if already mounted
     if mount | grep -q "on $mount_point type smb3"; then
         log "Storage Box already mounted at $mount_point (SMB3)"
         return 0
     fi
     
-    # Create mount point if it doesn't exist
     mkdir -p "$mount_point"
     
-    # Mount via SMB3
+    # Try SMB3 - will likely fail in Docker but worth attempting
     if mount -t smb3 "$remote_path" "$mount_point" \
-        -o "username=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}"; then
+        -o "username=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}" 2>/dev/null; then
         log "Successfully mounted Storage Box at $mount_point via SMB3"
         return 0
-    else
-        log_error "Failed to mount Storage Box via SMB3"
-        log_error "Remote: $remote_path"
-        return 1
     fi
+    
+    log_debug "SMB3 mount failed (expected in Docker containers)"
+    return 1
 }
 
 mount_storage_box_sshfs() {
@@ -160,8 +156,9 @@ mount_storage_box_sshfs() {
     
     # Mount via SSHFS with password (using sshpass)
     if command -v sshpass &> /dev/null; then
+        # SSHFS-specific options: umask for permissions, not dir_mode/file_mode
         if sshpass -p "$password" sshfs -p "$STORAGE_BOX_SSH_PORT" \
-            -o "StrictHostKeyChecking=accept-new,allow_other,uid=0,gid=1001,dir_mode=0750,file_mode=0640,auto_unmount" \
+            -o "StrictHostKeyChecking=accept-new,allow_other,umask=0027,uid=0,gid=1001,auto_unmount" \
             "$remote_path" "$mount_point"; then
             log "Successfully mounted Storage Box at $mount_point via SSHFS (password)"
             return 0
@@ -177,12 +174,10 @@ mount_storage_box_sshfs() {
 }
 
 mount_storage_box_cifs() {
-    log "Mounting Hetzner Storage Box via CIFS (fallback)..."
+    log "Attempting CIFS mount (known to fail in Docker containers)..."
     
     if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
-        log_error "Storage Box password file not found at $STORAGE_BOX_PASSWORD_FILE"
-        log "Falling back to local storage"
-        STORAGE_BOX_ENABLED="false"
+        log_debug "Storage Box password file not found, skipping CIFS"
         return 1
     fi
     
@@ -190,30 +185,23 @@ mount_storage_box_cifs() {
     local mount_point="/etc/letsencrypt"
     local remote_path="//${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
     
-    log_debug "Mounting $remote_path to $mount_point (CIFS fallback)"
-    
     # Check if already mounted
     if mount | grep -q "on $mount_point type cifs"; then
         log "Storage Box already mounted at $mount_point (CIFS)"
         return 0
     fi
     
-    # Create mount point if it doesn't exist
     mkdir -p "$mount_point"
     
-    # Mount via CIFS
+    # Try CIFS - will likely fail in Docker but worth attempting
     if mount -t cifs "$remote_path" "$mount_point" \
-        -o "user=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}"; then
+        -o "user=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}" 2>/dev/null; then
         log "Successfully mounted Storage Box at $mount_point via CIFS"
         return 0
-    else
-        log_error "Failed to mount Storage Box via CIFS"
-        log_error "Remote: $remote_path"
-        log_error "Check credentials and network connectivity"
-        log "Falling back to local storage"
-        STORAGE_BOX_ENABLED="false"
-        return 1
     fi
+    
+    log_debug "CIFS mount failed (expected in Docker containers)"
+    return 1
 }
 
 unmount_storage_box() {
