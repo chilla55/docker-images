@@ -79,6 +79,16 @@ mount_storage_box() {
     
     log "Mounting Hetzner Storage Box via CIFS..."
     
+    # Ensure CIFS kernel module is loaded
+    log_debug "Loading CIFS kernel module..."
+    modprobe cifs 2>/dev/null || true
+    
+    # Disable oplocks as per Hetzner guidance
+    if [ -w /proc/fs/cifs/OplockEnabled ]; then
+        echo 0 > /proc/fs/cifs/OplockEnabled 2>/dev/null || true
+        log_debug "Disabled CIFS oplocks"
+    fi
+    
     if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
         log_error "Storage Box password file not found at $STORAGE_BOX_PASSWORD_FILE"
         log "Falling back to local storage"
@@ -110,7 +120,10 @@ mount_storage_box() {
     else
         log_error "Failed to mount Storage Box"
         log_error "Remote: $remote_path"
+        log_error "Mount options: $STORAGE_BOX_MOUNT_OPTIONS"
         log_error "Check credentials and network connectivity"
+        log_debug "Attempting to capture kernel error with dmesg..."
+        dmesg | tail -5 | while read line; do log_debug "$line"; done
         log "Falling back to local storage"
         STORAGE_BOX_ENABLED="false"
         return 1
