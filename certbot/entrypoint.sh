@@ -25,8 +25,8 @@ STORAGE_BOX_ENABLED="${STORAGE_BOX_ENABLED:-true}"
 STORAGE_BOX_HOST="${STORAGE_BOX_HOST:-u123456.your-storagebox.de}"
 STORAGE_BOX_USER="${STORAGE_BOX_USER:-u123456}"
 STORAGE_BOX_PASSWORD_FILE="${STORAGE_BOX_PASSWORD_FILE:-/run/secrets/storagebox_password}"
-STORAGE_BOX_PATH="${STORAGE_BOX_PATH:-/certs}"
-STORAGE_BOX_MOUNT_OPTIONS="${STORAGE_BOX_MOUNT_OPTIONS:-vers=3.0,uid=0,gid=1001,file_mode=0640,dir_mode=0750}"
+STORAGE_BOX_PATH="${STORAGE_BOX_PATH:-/backup}"
+STORAGE_BOX_MOUNT_OPTIONS="${STORAGE_BOX_MOUNT_OPTIONS:-vers=3.0,sec=ntlmssp,uid=0,gid=1001,file_mode=0640,dir_mode=0750}"
 
 DEBUG="${DEBUG:-false}"
 
@@ -184,7 +184,7 @@ renew_certificates() {
     )
 
     if [ "$CERTBOT_DRY_RUN" = "true" ]; then
-        renew_args+=(--dry-run)
+        renew_args+=(--dry-run --test-cert)
     fi
     
     certbot renew "${renew_args[@]}"
@@ -256,7 +256,7 @@ main() {
     
     # Setup
     setup_cloudflare
-    mount_storage_box
+    mount_storage_box || true
 
     # Optional dry-run to just validate mounting/credentials without hitting ACME
     if [ "${SKIP_CERTS:-false}" = "true" ]; then
