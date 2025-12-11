@@ -94,8 +94,9 @@ services:
       - cloudflare_api_token
       - storagebox_password
     
-    # Storage Box will be mounted directly in container via SSHFS/SMB3/CIFS
-    # Fallback to local /etc/letsencrypt if all mounts fail
+    volumes:
+      # Bind-mount host's Storage Box certs directory to container
+      - /mnt/storagebox/certs:/etc/letsencrypt:rshared
     
     deploy:
       mode: replicated

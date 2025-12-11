@@ -82,32 +82,13 @@ mount_storage_box() {
     
     local mount_point="/etc/letsencrypt"
     
-    # Check if already mounted
+    # Check if already mounted (bind-mount from host or direct mount)
     if mount | grep -q "on $mount_point type"; then
         log "Storage Box already mounted at $mount_point"
         return 0
     fi
     
-    # Try SSHFS first (more reliable in containers with FUSE)
-    log "Attempting to mount Storage Box via SSHFS..."
-    if mount_storage_box_sshfs; then
-        return 0
-    fi
-    
-    # Try SMB3
-    log "SSHFS failed, attempting SMB3..."
-    if mount_storage_box_smb3; then
-        return 0
-    fi
-    
-    # Last resort: CIFS
-    log "SMB3 failed, attempting CIFS..."
-    if mount_storage_box_cifs; then
-        return 0
-    fi
-    
-    # Fallback to local storage
-    log "All mount attempts failed, using local storage"
+    log "Storage Box mount not found at $mount_point, using local storage"
     return 0
 }
 
