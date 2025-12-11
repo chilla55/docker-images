@@ -80,7 +80,6 @@ services:
       STORAGE_BOX_USER: u515899
       STORAGE_BOX_SSH_PORT: "23"
       STORAGE_BOX_PATH: /backup
-      STORAGE_BOX_USE_SSHFS: "false"
       # Mount options for SMB3/CIFS
       STORAGE_BOX_MOUNT_OPTIONS: "vers=3.0,seal,nodfs,noserverino,nounix,uid=0,gid=1001,file_mode=0640,dir_mode=0750"
       CERTBOT_DRY_RUN: "true"   # Use Let's Encrypt staging / dry-run

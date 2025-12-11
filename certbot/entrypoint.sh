@@ -87,14 +87,13 @@ mount_storage_box() {
     fi
     
     # Fall back to SSHFS with password
-    if [ "$STORAGE_BOX_USE_SSHFS" = "true" ]; then
-        log "SMB3 failed, attempting SSHFS..."
-        mount_storage_box_sshfs
-        return $?
+    log "SMB3 failed, attempting SSHFS with password..."
+    if mount_storage_box_sshfs; then
+        return 0
     fi
     
     # Last resort: CIFS
-    log "SSHFS disabled, attempting CIFS..."
+    log "SSHFS failed, attempting CIFS..."
     mount_storage_box_cifs
     return $?
 }
@@ -175,6 +174,46 @@ mount_storage_box_sshfs() {
     log "Falling back to local storage"
     STORAGE_BOX_ENABLED="false"
     return 1
+}
+
+mount_storage_box_cifs() {
+    log "Mounting Hetzner Storage Box via CIFS (fallback)..."
+    
+    if [ ! -f "$STORAGE_BOX_PASSWORD_FILE" ]; then
+        log_error "Storage Box password file not found at $STORAGE_BOX_PASSWORD_FILE"
+        log "Falling back to local storage"
+        STORAGE_BOX_ENABLED="false"
+        return 1
+    fi
+    
+    local password=$(cat "$STORAGE_BOX_PASSWORD_FILE")
+    local mount_point="/etc/letsencrypt"
+    local remote_path="//${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
+    
+    log_debug "Mounting $remote_path to $mount_point (CIFS fallback)"
+    
+    # Check if already mounted
+    if mount | grep -q "on $mount_point type cifs"; then
+        log "Storage Box already mounted at $mount_point (CIFS)"
+        return 0
+    fi
+    
+    # Create mount point if it doesn't exist
+    mkdir -p "$mount_point"
+    
+    # Mount via CIFS
+    if mount -t cifs "$remote_path" "$mount_point" \
+        -o "user=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}"; then
+        log "Successfully mounted Storage Box at $mount_point via CIFS"
+        return 0
+    else
+        log_error "Failed to mount Storage Box via CIFS"
+        log_error "Remote: $remote_path"
+        log_error "Check credentials and network connectivity"
+        log "Falling back to local storage"
+        STORAGE_BOX_ENABLED="false"
+        return 1
+    fi
 }
 
 unmount_storage_box() {
