@@ -89,12 +89,6 @@ mount_storage_box() {
     local password=$(cat "$STORAGE_BOX_PASSWORD_FILE")
     local mount_point="/etc/letsencrypt"
     local remote_path="//${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
-    local cred_file="/tmp/storagebox-cred"
-    cat > "$cred_file" <<EOF
-username=${STORAGE_BOX_USER}
-password=${password}
-EOF
-    chmod 600 "$cred_file"
     
     log_debug "Mounting $remote_path to $mount_point"
     
@@ -107,9 +101,9 @@ EOF
     # Create mount point if it doesn't exist
     mkdir -p "$mount_point"
     
-    # Mount the Storage Box
+    # Mount the Storage Box (inline user/password to avoid special char issues)
     if mount -t cifs "$remote_path" "$mount_point" \
-        -o "credentials=${cred_file},${STORAGE_BOX_MOUNT_OPTIONS}"; then
+        -o "user=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}"; then
         log "Successfully mounted Storage Box at $mount_point"
         log_debug "Mount options: $STORAGE_BOX_MOUNT_OPTIONS"
         return 0
