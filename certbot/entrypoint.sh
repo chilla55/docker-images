@@ -26,7 +26,7 @@ STORAGE_BOX_HOST="${STORAGE_BOX_HOST:-u123456.your-storagebox.de}"
 STORAGE_BOX_USER="${STORAGE_BOX_USER:-u123456}"
 STORAGE_BOX_PASSWORD_FILE="${STORAGE_BOX_PASSWORD_FILE:-/run/secrets/storagebox_password}"
 STORAGE_BOX_PATH="${STORAGE_BOX_PATH:-/backup}"
-STORAGE_BOX_MOUNT_OPTIONS="${STORAGE_BOX_MOUNT_OPTIONS:-vers=3.0,sec=ntlmssp,uid=0,gid=1001,file_mode=0640,dir_mode=0750}"
+STORAGE_BOX_MOUNT_OPTIONS="${STORAGE_BOX_MOUNT_OPTIONS:-vers=3.0,sec=ntlmssp,seal,nodfs,noserverino,nounix,uid=0,gid=1001,file_mode=0640,dir_mode=0750}"
 
 DEBUG="${DEBUG:-false}"
 
@@ -89,6 +89,12 @@ mount_storage_box() {
     local password=$(cat "$STORAGE_BOX_PASSWORD_FILE")
     local mount_point="/etc/letsencrypt"
     local remote_path="//${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
+    local cred_file="/tmp/storagebox-cred"
+    cat > "$cred_file" <<EOF
+username=${STORAGE_BOX_USER}
+password=${password}
+EOF
+    chmod 600 "$cred_file"
     
     log_debug "Mounting $remote_path to $mount_point"
     
@@ -103,7 +109,7 @@ mount_storage_box() {
     
     # Mount the Storage Box
     if mount -t cifs "$remote_path" "$mount_point" \
-        -o "username=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}"; then
+        -o "credentials=${cred_file},${STORAGE_BOX_MOUNT_OPTIONS}"; then
         log "Successfully mounted Storage Box at $mount_point"
         log_debug "Mount options: $STORAGE_BOX_MOUNT_OPTIONS"
         return 0

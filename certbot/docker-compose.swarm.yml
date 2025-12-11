@@ -80,8 +80,8 @@ services:
       STORAGE_BOX_USER: u515899
       STORAGE_BOX_PASSWORD_FILE: /run/secrets/storagebox_password
       STORAGE_BOX_PATH: /backup
-      # CIFS mount options: vers=3.0, sec=ntlmssp auth, uid=root(0), gid=nginx(1001), file perms for nginx group read
-      STORAGE_BOX_MOUNT_OPTIONS: "vers=3.0,sec=ntlmssp,uid=0,gid=1001,file_mode=0640,dir_mode=0750"
+      # CIFS mount options tuned per Hetzner guidance (extra hardening flags)
+      STORAGE_BOX_MOUNT_OPTIONS: "vers=3.0,sec=ntlmssp,seal,nodfs,noserverino,nounix,uid=0,gid=1001,file_mode=0640,dir_mode=0750"
       CERTBOT_DRY_RUN: "true"   # Use Let's Encrypt staging / dry-run
       
       # ──────────────────────────────────────────────────────────────────
