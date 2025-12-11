@@ -120,10 +120,6 @@ mount_storage_box() {
         return 1
     fi
 }
-        STORAGE_BOX_ENABLED="false"
-        return 1
-    fi
-}
 
 unmount_storage_box() {
     if [ "$STORAGE_BOX_ENABLED" = "true" ]; then
