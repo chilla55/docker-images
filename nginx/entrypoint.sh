@@ -110,6 +110,15 @@ fi
 # Ensure cache, log, and Cloudflare state dirs are writable
 chown -R nginx:nginx /var/cache/nginx /etc/nginx/logs "$CF_REALIP_STATE_DIR" 2>/dev/null || true
 
+# Validate nginx configuration before starting
+if nginx -t; then
+  log "[entrypoint] nginx config OK"
+else
+  log "[entrypoint] nginx config FAILED"
+  nginx -t || true
+  exit 1
+fi
+
 # Run nginx (PID 1) as root (safe in container due to Docker isolation)
 log "[entrypoint] Starting nginx"
 exec /usr/sbin/nginx -g 'daemon off;'
