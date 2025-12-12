@@ -128,7 +128,7 @@ fi
 # Run nginx (PID 1) as root (safe in container due to Docker isolation)
 log "[entrypoint] Starting nginx"
 log "[entrypoint] Final checks before exec:"
-log "  - Cert: $CERT_WATCH_PATH exists: $([ -f "$CERT_WATCH_PATH" ] && echo 'yes' || echo 'NO')"
+log "  - Cert: ${CERT_WATCH_PATH:-none} exists: $([ -n "${CERT_WATCH_PATH:-}" ] && [ -f "$CERT_WATCH_PATH" ] && echo 'yes' || echo 'no/unset')"
 log "  - Sites dir: $SITES_WATCH_PATH exists: $([ -d "$SITES_WATCH_PATH" ] && echo 'yes' || echo 'NO')"
 log "  - CF status: $([ -f "$CF_REALIP_STATUS" ] && echo 'yes' || echo 'NO')"
 exec /usr/sbin/nginx -g 'daemon off;' -v 2>&1
