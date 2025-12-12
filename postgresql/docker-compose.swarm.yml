@@ -77,7 +77,7 @@ services:
       - postgresql-primary
 
   pgpool:
-    image: bitnami/pgpool:4
+    image: ghcr.io/chilla55/pgpool-custom:${VERSION:-latest}
     hostname: pgpool
     environment:
       PGPOOL_BACKEND_NODES: "0:postgresql-primary:5432,1:postgresql-secondary:5432"
