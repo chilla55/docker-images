@@ -5,18 +5,21 @@ services:
     image: ghcr.io/chilla55/postgresql-replication:${VERSION:-latest}
     hostname: postgresql-primary
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: "/run/secrets/postgres_password"
       POSTGRES_DB: ${POSTGRES_DB:-app_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       REPLICATION_MODE: "primary"
       REPLICATION_USER: "replicator"
-      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      REPLICATION_PASSWORD_FILE: "/run/secrets/postgres_replication_password"
       ENABLE_CONNECTIVITY_MONITOR: "true"
       SECONDARY_HOST: "postgresql-secondary"
       CHECK_INTERVAL: "5"
     volumes:
       - postgresql-primary-data:/var/lib/postgresql/data
       - postgresql-primary-logs:/var/log/postgresql
+    secrets:
+      - postgres_password
+      - postgres_replication_password
     networks:
       - postgres-net
     deploy:
@@ -41,12 +44,12 @@ services:
     image: ghcr.io/chilla55/postgresql-replication:${VERSION:-latest}
     hostname: postgresql-secondary
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: "/run/secrets/postgres_password"
       POSTGRES_DB: ${POSTGRES_DB:-app_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       REPLICATION_MODE: "replica"
       REPLICATION_USER: "replicator"
-      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      REPLICATION_PASSWORD_FILE: "/run/secrets/postgres_replication_password"
       PRIMARY_HOST: "postgresql-primary"
       PRIMARY_PORT: "5432"
       ENABLE_CONNECTIVITY_MONITOR: "true"
@@ -54,6 +57,9 @@ services:
     volumes:
       - postgresql-secondary-data:/var/lib/postgresql/data
       - postgresql-secondary-logs:/var/log/postgresql
+    secrets:
+      - postgres_password
+      - postgres_replication_password
     networks:
       - postgres-net
     deploy:
@@ -82,11 +88,11 @@ services:
     environment:
       PGPOOL_BACKEND_NODES: "0:postgresql-primary:5432,1:postgresql-secondary:5432"
       PGPOOL_SR_CHECK_USER: "${REPLICATION_USER}"
-      PGPOOL_SR_CHECK_PASSWORD: "${REPLICATION_PASSWORD}"
+      PGPOOL_SR_CHECK_PASSWORD_FILE: "/run/secrets/postgres_replication_password"
       PGPOOL_POSTGRES_USERNAME: "${POSTGRES_USER:-postgres}"
-      PGPOOL_POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      PGPOOL_POSTGRES_PASSWORD_FILE: "/run/secrets/postgres_password"
       PGPOOL_ADMIN_USERNAME: "${PGPOOL_ADMIN_USER:-admin}"
-      PGPOOL_ADMIN_PASSWORD: "${PGPOOL_ADMIN_PASSWORD}"
+      PGPOOL_ADMIN_PASSWORD_FILE: "/run/secrets/pgpool_admin_password"
       PGPOOL_ENABLE_LOAD_BALANCING: "yes"
       PGPOOL_AUTO_FAILBACK: "yes"
       PGPOOL_FAILOVER_ON_BACKEND_ERROR: "yes"
@@ -94,6 +100,10 @@ services:
       PGPOOL_MAX_POOL: "4"
     volumes:
       - pgpool-data:/bitnami/pgpool
+    secrets:
+      - postgres_password
+      - postgres_replication_password
+      - pgpool_admin_password
     networks:
       - postgres-net
     deploy:
@@ -133,3 +143,14 @@ volumes:
 networks:
   postgres-net:
     external: true
+
+secrets:
+  postgres_password:
+    external: true
+    name: postgres_password
+  postgres_replication_password:
+    external: true
+    name: postgres_replication_password
+  pgpool_admin_password:
+    external: true
+    name: pgpool_admin_password
