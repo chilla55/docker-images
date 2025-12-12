@@ -17,11 +17,12 @@ services:
     volumes:
       - postgresql-primary-data:/var/lib/postgresql/data
       - postgresql-primary-logs:/var/log/postgresql
+      - /mnt/storagebox/rootca:/var/lib/postgresql/rootca:ro,rslave
     configs:
       - source: pg_hba_conf
         target: /etc/postgresql/pg_hba.conf
         mode: 0444
-      - source: postgresql_primary_conf
+      - source: postgresql_replica_conf
         target: /etc/postgresql/postgresql.conf
         mode: 0444
     secrets:
@@ -34,7 +35,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.postgresql.node == srv1
+          - node.labels.postgresql.node == mail
       restart_policy:
         condition: on-failure
         delay: 10s
@@ -61,10 +62,11 @@ services:
       PRIMARY_PORT: "5432"
       ENABLE_CONNECTIVITY_MONITOR: "true"
       CHECK_INTERVAL: "5"
-      PGSSLMODE: "require"
+      PGSSLMODE: "verify-ca"
     volumes:
       - postgresql-secondary-data:/var/lib/postgresql/data
       - postgresql-secondary-logs:/var/log/postgresql
+      - /mnt/storagebox/rootca:/var/lib/postgresql/rootca:ro,rslave
     configs:
       - source: pg_hba_conf
         target: /etc/postgresql/pg_hba.conf
@@ -72,17 +74,6 @@ services:
       - source: postgresql_replica_conf
         target: /etc/postgresql/postgresql.conf
         mode: 0444
-    secrets:
-      - postgres_password
-      - postgres_replication_password
-    networks:
-      - postgres-net
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.labels.postgresql.node == mail
       restart_policy:
         condition: on-failure
         delay: 10s

@@ -12,6 +12,45 @@ fi
 mkdir -p /var/log/postgresql
 chown -R postgres:postgres /var/log/postgresql
 
+# Generate SSL certificates signed by root CA on first run
+if [ ! -f /var/lib/postgresql/server.crt ] || [ ! -f /var/lib/postgresql/server.key ]; then
+    echo "Generating SSL certificate for $(hostname)..."
+    
+    # Determine hostname for certificate
+    SERVER_HOSTNAME=$(hostname)
+    
+    # Generate server private key
+    openssl genrsa -out /var/lib/postgresql/server.key 2048
+    
+    # Create certificate signing request (CSR)
+    openssl req -new -key /var/lib/postgresql/server.key \
+        -out /var/lib/postgresql/server.csr \
+        -subj "/C=DE/ST=State/L=City/O=Docker/CN=${SERVER_HOSTNAME}"
+    
+    # Sign certificate with root CA (mounted via /mnt/storagebox/rootca)
+    if [ -f /var/lib/postgresql/rootca/ca-cert.pem ] && [ -f /var/lib/postgresql/rootca/ca-key.pem ]; then
+        openssl x509 -req -days 3650 \
+            -in /var/lib/postgresql/server.csr \
+            -CA /var/lib/postgresql/rootca/ca-cert.pem \
+            -CAkey /var/lib/postgresql/rootca/ca-key.pem \
+            -CAcreateserial \
+            -out /var/lib/postgresql/server.crt
+        echo "✓ SSL certificate signed by root CA"
+    else
+        echo "WARNING: Root CA not found, generating self-signed cert instead"
+        openssl x509 -req -days 3650 -in /var/lib/postgresql/server.csr \
+            -signkey /var/lib/postgresql/server.key \
+            -out /var/lib/postgresql/server.crt
+    fi
+    
+    # Clean up CSR
+    rm -f /var/lib/postgresql/server.csr
+    
+    # Set proper permissions
+    chmod 600 /var/lib/postgresql/server.key /var/lib/postgresql/server.crt
+    chown postgres:postgres /var/lib/postgresql/server.key /var/lib/postgresql/server.crt
+fi
+
 ## Configure primary or initialize replica BEFORE launching postgres
 if [ "${REPLICATION_MODE}" = "primary" ]; then
     echo "Configuring as PRIMARY server..."
