@@ -56,9 +56,9 @@ else
   echo "[entrypoint] SITES_WATCH_PATH not set, sites watcher disabled."
 fi
 
-# Fix permissions before dropping to nginx user
+# Ensure cache and log dirs are writable
 chown -R nginx:nginx /var/cache/nginx /etc/nginx/logs 2>/dev/null || true
 
-# Drop privileges and run nginx (PID 1)
-log "[entrypoint] Starting nginx as user nginx"
-exec su-exec nginx /usr/sbin/nginx -g 'daemon off;'
+# Run nginx (PID 1) as root (safe in container due to Docker isolation)
+log "[entrypoint] Starting nginx"
+exec /usr/sbin/nginx -g 'daemon off;'
