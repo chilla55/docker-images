@@ -55,7 +55,7 @@ services:
       CERT_EMAIL: admin@chilla55.de
       CERT_DOMAINS: chilla55.de,*.chilla55.de
       RENEW_INTERVAL: 12h  # Check for renewals every 12 hours
-      CERTBOT_DRY_RUN: "true"   # Use Let's Encrypt staging / dry-run
+      CERTBOT_DRY_RUN: "false"   # Use Let's Encrypt staging / dry-run
       
       # ──────────────────────────────────────────────────────────────────
       # Cloudflare DNS Settings

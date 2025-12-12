@@ -46,7 +46,7 @@ services:
       CF_REALIP_STATE_DIR: "/tmp/cf-realip"  # per-container run persistence
       
       # Certificate watcher - watches for cert changes and reloads nginx
-      CERT_WATCH_PATH: "/etc/nginx/certs/live/example.com/fullchain.pem"  # Set to your domain
+      CERT_WATCH_PATH: "/etc/nginx/certs/live/chilla55.de/fullchain.pem"
       CERT_WATCH_INTERVAL: "300"  # 5 minutes
       CERT_WATCH_DEBUG: "0"
       
