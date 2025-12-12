@@ -72,7 +72,7 @@ services:
     
     volumes:
       # Bind-mount host's Storage Box certs directory to container
-      - /mnt/storagebox/certs:/etc/letsencrypt:rshared
+      - /mnt/storagebox/certs:/etc/letsencrypt:rslave
     
     deploy:
       mode: replicated
