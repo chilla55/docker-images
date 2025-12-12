@@ -64,20 +64,17 @@ EOF
 
 verify_storage_mount() {
     local mount_point="/etc/letsencrypt"
-    
-    # Check if Storage Box is mounted (bind-mount from host)
-    if command -v findmnt >/dev/null 2>&1; then
-        if findmnt -T "$mount_point" >/dev/null 2>&1; then
-            log "✓ Storage Box mounted at $mount_point"
-            findmnt -T "$mount_point" -o TARGET,SOURCE,FSTYPE,PROPAGATION -n
-            return 0
-        fi
-    else
-        if mountpoint -q "$mount_point" 2>/dev/null; then
-            log "✓ Storage Box mounted at $mount_point"
-            mount | grep -m1 "on $mount_point" || true
-            return 0
-        fi
+
+    # Prefer /proc/self/mountinfo because certbot base image may lack findmnt/mountpoint
+    if grep -q " $mount_point " /proc/self/mountinfo; then
+        local line
+        line=$(grep " $mount_point " /proc/self/mountinfo | head -1)
+        local fstype source propagation
+        fstype=$(echo "$line" | awk -F' - ' '{print $2}' | awk '{print $1}')
+        source=$(echo "$line" | awk -F' - ' '{print $2}' | awk '{print $2}')
+        propagation=$(echo "$line" | awk '{for(i=1;i<=NF;i++){if($i~/(shared|master):/){print $i;exit}}}')
+        log "✓ Storage Box mounted at $mount_point (type=${fstype:-unknown}, source=${source:-unknown}, prop=${propagation:-n/a})"
+        return 0
     fi
 
     log "Warning: No mount detected at $mount_point (using local storage)"

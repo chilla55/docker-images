@@ -1,4 +1,4 @@
-.PHONY: build push test deploy remove logs help
+.PHONY: build push deploy remove restart logs status inspect manual-renew shell clean-secrets help
 
 # ============================================================================
 # Configuration
@@ -24,24 +24,6 @@ push: build
 	docker push $(IMAGE_NAME):$(VERSION)
 	docker push $(IMAGE_NAME):latest
 	@echo "✓ Image pushed: $(IMAGE_NAME):$(VERSION)"
-
-# ============================================================================
-# Setup & Testing
-# ============================================================================
-
-## setup: Setup Docker secrets for certbot
-setup:
-	@echo "Running setup script..."
-	@bash setup.sh
-
-## test-cifs: Test CIFS connection to Storage Box (requires sudo)
-test-cifs:
-	@echo "Testing Storage Box CIFS connection..."
-	@sudo bash test-storagebox.sh
-
-## test: Run all tests
-test: test-cifs
-	@echo "✓ All tests passed"
 
 # ============================================================================
 # Deployment
@@ -103,11 +85,6 @@ manual-renew:
 		exit 1; \
 	fi
 
-## manual-sync: Not applicable with CIFS mount (certs written directly)
-manual-sync:
-	@echo "Note: With CIFS mount, certificates are written directly to Storage Box"
-	@echo "No manual sync needed - changes are immediate"
-
 ## shell: Open a shell in the certbot container
 shell:
 	@CONTAINER_ID=$$(docker ps --filter "name=$(STACK_NAME)_certbot" --format "{{.ID}}" | head -n 1); \
@@ -122,19 +99,11 @@ shell:
 # Cleanup
 # ============================================================================
 
-## clean-secrets: Remove all certbot-related secrets
+## clean-secrets: Remove certbot-related secrets (Cloudflare API token)
 clean-secrets:
-	@echo "Removing certbot secrets..."
-	@docker secret rm cloudflare_credentials 2>/dev/null || true
-	@docker secret rm rclone_config 2>/dev/null || true
+	@echo "Removing certbot secrets (if present)..."
+	@docker secret rm cloudflare_api_token 2>/dev/null || true
 	@echo "✓ Secrets removed"
-## clean-secrets: Remove all certbot-related secrets
-clean-secrets:
-	@echo "Removing certbot secrets..."
-	@docker secret rm cloudflare_credentials 2>/dev/null || true
-	@docker secret rm storagebox_password 2>/dev/null || true
-	@echo "✓ Secrets removed"AME):latest 2>/dev/null || true
-	@echo "✓ Cleanup complete"
 
 # ============================================================================
 # Help

@@ -9,9 +9,13 @@
 
 set -e
 
-# Check if /etc/letsencrypt is mounted from host
-if mount | grep -q "on /etc/letsencrypt"; then
-    echo "✓ Storage Box mounted at /etc/letsencrypt"
+# Check if /etc/letsencrypt is mounted from host (use mountinfo for reliability)
+if grep -q " /etc/letsencrypt " /proc/self/mountinfo; then
+    LINE=$(grep " /etc/letsencrypt " /proc/self/mountinfo | head -1)
+    FSTYPE=$(echo "$LINE" | awk -F' - ' '{print $2}' | awk '{print $1}')
+    SOURCE=$(echo "$LINE" | awk -F' - ' '{print $2}' | awk '{print $2}')
+    PROP=$(echo "$LINE" | awk '{for(i=1;i<=NF;i++){if($i~/(shared|master):/){print $i;exit}}}')
+    echo "✓ Mount present at /etc/letsencrypt (type=${FSTYPE:-unknown}, source=${SOURCE:-unknown}, prop=${PROP:-n/a})"
 else
     echo "WARNING: No mount detected at /etc/letsencrypt (using local storage)"
 fi
