@@ -10,7 +10,14 @@ BAK_FILE="${OUT_FILE}.bak"
 
 # Ensure paths & status file
 mkdir -p "$(dirname "$OUT_FILE")" "$(dirname "$ETAG_FILE")" "$(dirname "$STATUS_FILE")"
-[ -f "$STATUS_FILE" ] || : > "$STATUS_FILE"
+
+# Initialize empty status file with valid JSON if missing
+if [ ! -f "$STATUS_FILE" ] || [ ! -s "$STATUS_FILE" ]; then
+  printf '{"last_ok_iso":"","last_ok_ts":0,"last_error":"init","last_etag":"","consecutive_failures":0}\n' > "$STATUS_FILE"
+fi
+
+# Initialize empty etag file
+[ -f "$ETAG_FILE" ] || touch "$ETAG_FILE"
 
 status_ok() {
   NEW_ETAG="$1"

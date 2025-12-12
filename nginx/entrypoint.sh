@@ -32,9 +32,11 @@ mkdir -p "$(dirname "$CF_REALIP_STATUS")"
 
 run_once() { /usr/local/bin/update-cf-ips.sh || echo "[cloudflare-realip] update failed"; }
 
-# Cloudflare updater loop
+# Cloudflare updater - RUN ONCE BEFORE NGINX STARTS
 if [ "$CF_REALIP_AUTO" = "1" ] || [ "$CF_REALIP_AUTO" = "true" ]; then
-  run_once || true
+  log "[entrypoint] Running Cloudflare IP update before nginx startup..."
+  run_once
+  # Start background loop for periodic updates
   ( while :; do sleep "$CF_REALIP_INTERVAL"; run_once || true; done ) &
 else
   echo "[cloudflare-realip] Auto-update disabled."
