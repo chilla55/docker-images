@@ -131,4 +131,4 @@ log "[entrypoint] Final checks before exec:"
 log "  - Cert: $CERT_WATCH_PATH exists: $([ -f "$CERT_WATCH_PATH" ] && echo 'yes' || echo 'NO')"
 log "  - Sites dir: $SITES_WATCH_PATH exists: $([ -d "$SITES_WATCH_PATH" ] && echo 'yes' || echo 'NO')"
 log "  - CF status: $([ -f "$CF_REALIP_STATUS" ] && echo 'yes' || echo 'NO')"
-exec /usr/sbin/nginx -g 'daemon off;' 2>&1
+exec /usr/sbin/nginx -g 'daemon off;' -v 2>&1
