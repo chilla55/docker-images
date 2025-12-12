@@ -9,7 +9,12 @@ CERTS_DIR="${CERTS_DIR:-/etc/nginx/certs}"
 SITES_DIR="${SITES_DIR:-/etc/nginx/sites-enabled}"
 CERT_WATCH_PATH="${CERT_WATCH_PATH:-}"
 
-pgrep -x nginx >/dev/null || { echo "nginx not running"; exit 1; }
+# Check nginx is responding via HTTP instead of pgrep
+if ! curl -f -s http://localhost:80/ >/dev/null 2>&1; then
+    echo "nginx not responding on port 80"
+    exit 1
+fi
+
 [ -f "$STATUS_FILE" ] || { echo "no status file"; exit 1; }
 
 # Optional: verify bind mounts are present (detect accidental unmounts)
