@@ -2,9 +2,8 @@
 set -eo pipefail
 
 # Load secrets from *_FILE paths if provided
-if [ -n "$POSTGRES_PASSWORD_FILE" ] && [ -f "$POSTGRES_PASSWORD_FILE" ]; then
-    export POSTGRES_PASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
-fi
+# Avoid exporting POSTGRES_PASSWORD when POSTGRES_PASSWORD_FILE is set,
+# since the official postgres entrypoint treats them as mutually exclusive.
 if [ -n "$REPLICATION_PASSWORD_FILE" ] && [ -f "$REPLICATION_PASSWORD_FILE" ]; then
     export REPLICATION_PASSWORD="$(cat "$REPLICATION_PASSWORD_FILE")"
 fi
