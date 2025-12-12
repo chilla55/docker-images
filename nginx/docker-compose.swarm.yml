@@ -72,8 +72,7 @@ services:
 
 configs:
   nginx_conf:
-    external: true
-    name: nginx_main_config
+    file: ./nginx.conf
 
 networks:
   web-net:

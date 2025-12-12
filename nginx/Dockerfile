@@ -58,8 +58,8 @@ RUN rm -rf /usr/src/* /root/.cache /var/cache/apk/* && \
 # ------------ Stage 2: Runtime ------------
 FROM alpine:3.20
 
-# tools for updater/healthcheck/cifs mounting
-RUN apk add --no-cache brotli openssl pcre zlib curl jq cifs-utils bash su-exec
+# tools for updater/healthcheck
+RUN apk add --no-cache brotli openssl pcre zlib curl jq bash su-exec
 
 COPY --from=builder /usr/sbin/nginx /usr/sbin/nginx
 COPY --from=builder /etc/nginx /etc/nginx
