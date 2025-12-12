@@ -66,14 +66,22 @@ verify_storage_mount() {
     local mount_point="/etc/letsencrypt"
     
     # Check if Storage Box is mounted (bind-mount from host)
-    if mount | grep -q "on $mount_point"; then
-        log "✓ Storage Box mounted at $mount_point"
-        mount | grep "on $mount_point" | head -1
-        return 0
+    if command -v findmnt >/dev/null 2>&1; then
+        if findmnt -T "$mount_point" >/dev/null 2>&1; then
+            log "✓ Storage Box mounted at $mount_point"
+            findmnt -T "$mount_point" -o TARGET,SOURCE,FSTYPE,PROPAGATION -n
+            return 0
+        fi
     else
-        log "Warning: No mount detected at $mount_point (using local storage)"
-        return 0
+        if mountpoint -q "$mount_point" 2>/dev/null; then
+            log "✓ Storage Box mounted at $mount_point"
+            mount | grep -m1 "on $mount_point" || true
+            return 0
+        fi
     fi
+
+    log "Warning: No mount detected at $mount_point (using local storage)"
+    return 0
 }
 
 # ──────────────────────────────────────────────────────────────────────────
