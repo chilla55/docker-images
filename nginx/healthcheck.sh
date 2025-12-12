@@ -9,9 +9,9 @@ CERTS_DIR="${CERTS_DIR:-/etc/nginx/certs}"
 SITES_DIR="${SITES_DIR:-/etc/nginx/sites-enabled}"
 CERT_WATCH_PATH="${CERT_WATCH_PATH:-}"
 
-# Check nginx is responding via HTTP instead of pgrep
-if ! curl -f -s http://localhost:80/ >/dev/null 2>&1; then
-    echo "nginx not responding on port 80"
+# Check nginx is running (without -x flag which fails on full process names)
+if ! pgrep nginx >/dev/null 2>&1; then
+    echo "nginx not running"
     exit 1
 fi
 
