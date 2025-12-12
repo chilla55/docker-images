@@ -29,12 +29,20 @@ if [ ! -f /var/lib/postgresql/server.crt ] || [ ! -f /var/lib/postgresql/server.
     
     # Sign certificate with root CA (mounted via /mnt/storagebox/rootca)
     if [ -f /var/lib/postgresql/rootca/ca-cert.pem ] && [ -f /var/lib/postgresql/rootca/ca-key.pem ]; then
+        # Copy CA files to writable location temporarily for serial file generation
+        cp /var/lib/postgresql/rootca/ca-cert.pem /tmp/ca-cert.pem
+        cp /var/lib/postgresql/rootca/ca-key.pem /tmp/ca-key.pem
+        
         openssl x509 -req -days 3650 \
             -in /var/lib/postgresql/server.csr \
-            -CA /var/lib/postgresql/rootca/ca-cert.pem \
-            -CAkey /var/lib/postgresql/rootca/ca-key.pem \
+            -CA /tmp/ca-cert.pem \
+            -CAkey /tmp/ca-key.pem \
             -CAcreateserial \
             -out /var/lib/postgresql/server.crt
+        
+        # Clean up temp files
+        rm -f /tmp/ca-cert.pem /tmp/ca-key.pem /tmp/ca-cert.srl
+        
         echo "✓ SSL certificate signed by root CA"
     else
         echo "WARNING: Root CA not found, generating self-signed cert instead"
