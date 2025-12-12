@@ -17,6 +17,13 @@ services:
     volumes:
       - postgresql-primary-data:/var/lib/postgresql/data
       - postgresql-primary-logs:/var/log/postgresql
+    configs:
+      - source: pg_hba_conf
+        target: /etc/postgresql/pg_hba.conf
+        mode: 0444
+      - source: postgresql_primary_conf
+        target: /etc/postgresql/postgresql.conf
+        mode: 0444
     secrets:
       - postgres_password
       - postgres_replication_password
@@ -54,9 +61,17 @@ services:
       PRIMARY_PORT: "5432"
       ENABLE_CONNECTIVITY_MONITOR: "true"
       CHECK_INTERVAL: "5"
+      PGSSLMODE: "require"
     volumes:
       - postgresql-secondary-data:/var/lib/postgresql/data
       - postgresql-secondary-logs:/var/log/postgresql
+    configs:
+      - source: pg_hba_conf
+        target: /etc/postgresql/pg_hba.conf
+        mode: 0444
+      - source: postgresql_replica_conf
+        target: /etc/postgresql/postgresql.conf
+        mode: 0444
     secrets:
       - postgres_password
       - postgres_replication_password
@@ -154,3 +169,14 @@ secrets:
   pgpool_admin_password:
     external: true
     name: pgpool_admin_password
+
+configs:
+  pg_hba_conf:
+    external: true
+    name: pg_hba.conf
+  postgresql_primary_conf:
+    external: true
+    name: postgresql-primary.conf
+  postgresql_replica_conf:
+    external: true
+    name: postgresql-replica.conf

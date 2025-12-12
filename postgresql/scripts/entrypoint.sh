@@ -1,6 +1,14 @@
 #!/bin/bash
 set -eo pipefail
 
+# Load secrets from *_FILE paths if provided
+if [ -n "$POSTGRES_PASSWORD_FILE" ] && [ -f "$POSTGRES_PASSWORD_FILE" ]; then
+    export POSTGRES_PASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+fi
+if [ -n "$REPLICATION_PASSWORD_FILE" ] && [ -f "$REPLICATION_PASSWORD_FILE" ]; then
+    export REPLICATION_PASSWORD="$(cat "$REPLICATION_PASSWORD_FILE")"
+fi
+
 # Create log directory
 mkdir -p /var/log/postgresql
 chown -R postgres:postgres /var/log/postgresql
@@ -70,5 +78,8 @@ if [ "${ENABLE_CONNECTIVITY_MONITOR}" = "true" ]; then
     ) &
 fi
 
-# Execute the original PostgreSQL entrypoint
-exec docker-entrypoint.sh "$@"
+# Always use the same config file path and pg_hba.conf from /etc/postgresql
+PG_ARGS="-c hba_file=/etc/postgresql/pg_hba.conf -c config_file=/etc/postgresql/postgresql.conf"
+
+# Execute the original PostgreSQL entrypoint with explicit config paths
+exec docker-entrypoint.sh postgres $PG_ARGS
