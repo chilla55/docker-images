@@ -15,7 +15,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.redis.node == srv1
+          - web.node == web
       restart_policy:
         condition: on-failure
         delay: 5s
