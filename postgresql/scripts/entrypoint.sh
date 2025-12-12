@@ -5,14 +5,17 @@ set -eo pipefail
 mkdir -p /var/log/postgresql
 chown -R postgres:postgres /var/log/postgresql
 
-# Only configure if database is already initialized
-# The docker-entrypoint.sh will handle initial setup
-if [ -s "$PGDATA/PG_VERSION" ]; then
-    if [ "${REPLICATION_MODE}" = "primary" ]; then
-        echo "Configuring as PRIMARY server..."
-        
-        # Append replication settings if not already present
-        if ! grep -q "Replication Settings" ${PGDATA}/postgresql.conf; then
+## Configure primary or initialize replica BEFORE launching postgres
+if [ "${REPLICATION_MODE}" = "primary" ]; then
+    echo "Configuring as PRIMARY server..."
+
+    # Create archive directory (used by archive_command)
+    mkdir -p /var/lib/postgresql/archive
+    chown -R postgres:postgres /var/lib/postgresql/archive
+
+    # Append replication settings if database already initialized
+    if [ -s "$PGDATA/PG_VERSION" ]; then
+        if ! grep -q "Replication Settings" ${PGDATA}/postgresql.conf 2>/dev/null; then
             cat >> ${PGDATA}/postgresql.conf <<EOF
 
 # Replication Settings
@@ -24,37 +27,32 @@ archive_mode = on
 archive_command = 'test ! -f /var/lib/postgresql/archive/%f && cp %p /var/lib/postgresql/archive/%f'
 EOF
         fi
+    fi
 
-        # Create archive directory
-        mkdir -p /var/lib/postgresql/archive
-        chown -R postgres:postgres /var/lib/postgresql/archive
-        
-    elif [ "${REPLICATION_MODE}" = "replica" ]; then
-        echo "Configuring as REPLICA server..."
-        
-        # Wait for primary to be ready
-        echo "Waiting for primary to be ready..."
-        until pg_isready -h ${PRIMARY_HOST} -p ${PRIMARY_PORT} -U ${POSTGRES_USER:-postgres}; do
-            echo "Primary not ready, waiting..."
-            sleep 2
-        done
-        echo "Primary is ready!"
-        
-        # Check if this is first run (empty data directory)
-        if [ ! -s "$PGDATA/PG_VERSION" ]; then
-            echo "Initializing replica from primary..."
-            rm -rf ${PGDATA}/*
-            
-            # Use pg_basebackup to clone from primary
-            PGPASSWORD=${REPLICATION_PASSWORD} pg_basebackup \
-                -h ${PRIMARY_HOST} \
-                -p ${PRIMARY_PORT} \
-                -U ${REPLICATION_USER} \
-                -D ${PGDATA} \
-                -Fp -Xs -P -R
-            
-            echo "Replica initialized successfully"
-        fi
+elif [ "${REPLICATION_MODE}" = "replica" ]; then
+    echo "Configuring as REPLICA server..."
+
+    # Wait for primary to be ready before attempting basebackup
+    echo "Waiting for primary to be ready..."
+    until pg_isready -h ${PRIMARY_HOST} -p ${PRIMARY_PORT} -U ${POSTGRES_USER:-postgres}; do
+        echo "Primary not ready, waiting..."
+        sleep 2
+    done
+    echo "Primary is ready!"
+
+    # Initialize replica if data directory is empty (first run)
+    if [ ! -s "$PGDATA/PG_VERSION" ]; then
+        echo "Initializing replica from primary..."
+        rm -rf ${PGDATA}/*
+
+        PGPASSWORD=${REPLICATION_PASSWORD} pg_basebackup \
+            -h ${PRIMARY_HOST} \
+            -p ${PRIMARY_PORT} \
+            -U ${REPLICATION_USER} \
+            -D ${PGDATA} \
+            -Fp -Xs -P -R
+
+        echo "Replica initialized successfully"
     fi
 fi
 
