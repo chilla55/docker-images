@@ -76,10 +76,14 @@ RUN chmod +x /usr/local/bin/update-cf-ips.sh /usr/local/bin/healthcheck.sh /usr/
 RUN mkdir -p \
     /etc/nginx/modules \
     /var/cache/nginx \
+    /var/cache/nginx/client_body_temp \
+    /var/cache/nginx/proxy_temp \
+    /var/cache/nginx/fastcgi_temp \
+    /var/cache/nginx/uwsgi_temp \
+    /var/cache/nginx/scgi_temp \
     /etc/nginx/conf.d \
     /etc/nginx/sites-enabled \
     /etc/nginx/logs \
-    /etc/nginx/client_body_temp \
     /etc/nginx/certs \
     /var/www && \
     adduser -D -g 'nginx' nginx && \
