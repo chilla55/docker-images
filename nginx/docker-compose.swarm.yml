@@ -43,6 +43,7 @@ services:
       # Cloudflare Real IP updater
       CF_REALIP_AUTO: "true"
       CF_REALIP_INTERVAL: "21600"  # 6 hours
+      CF_REALIP_STATE_DIR: "/tmp/cf-realip"  # per-container run persistence
       
       # Certificate watcher - watches for cert changes and reloads nginx
       CERT_WATCH_PATH: "/etc/nginx/certs/live/example.com/fullchain.pem"  # Set to your domain

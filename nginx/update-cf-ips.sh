@@ -1,29 +1,41 @@
 #!/bin/sh
 set -eu
 
+STATE_DIR="${CF_REALIP_STATE_DIR:-/tmp/cf-realip}"
 API_URL="${CF_IPS_API_URL:-https://api.cloudflare.com/client/v4/ips}"
-OUT_FILE="${CF_REALIP_OUT:-/var/cache/nginx/cloudflare_realip.conf}"
-ETAG_FILE="${CF_REALIP_ETAG:-/var/cache/nginx/cloudflare_ips.etag}"
-STATUS_FILE="${CF_REALIP_STATUS:-/var/cache/nginx/cf-realip.status.json}"
+OUT_FILE="${CF_REALIP_OUT:-${STATE_DIR}/cloudflare_realip.conf}"
+ETAG_FILE="${CF_REALIP_ETAG:-${STATE_DIR}/cloudflare_ips.etag}"
+STATUS_FILE="${CF_REALIP_STATUS:-${STATE_DIR}/cf-realip.status.json}"
 TMP_FILE="${OUT_FILE}.tmp"
 BAK_FILE="${OUT_FILE}.bak"
 
 # Ensure paths & status file
 mkdir -p "$(dirname "$OUT_FILE")" "$(dirname "$ETAG_FILE")" "$(dirname "$STATUS_FILE")"
 
-# Initialize empty status file with valid JSON if missing
+# Initialize with valid placeholder content if missing/empty
 if [ ! -f "$STATUS_FILE" ] || [ ! -s "$STATUS_FILE" ]; then
   printf '{"last_ok_iso":"","last_ok_ts":0,"last_error":"init","last_etag":"","consecutive_failures":0}\n' > "$STATUS_FILE"
 fi
 
-# Initialize empty etag file
-[ -f "$ETAG_FILE" ] || touch "$ETAG_FILE"
+# Initialize etag with a placeholder so it's never empty
+if [ ! -f "$ETAG_FILE" ] || [ ! -s "$ETAG_FILE" ]; then
+  printf 'pending' > "$ETAG_FILE"
+fi
 
 status_ok() {
   NEW_ETAG="$1"
   NOW_ISO="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"; NOW_TS="$(date -u +%s)"
+  
+  # Write status to temp file first, then atomic rename
+  STATUS_TMP="${STATUS_FILE}.tmp.$$"
   printf '{"last_ok_iso":"%s","last_ok_ts":%s,"last_error":"","last_etag":"%s","consecutive_failures":0}\n' \
-    "$NOW_ISO" "$NOW_TS" "$NEW_ETAG" > "$STATUS_FILE"
+    "$NOW_ISO" "$NOW_TS" "$NEW_ETAG" > "$STATUS_TMP"
+  mv -f "$STATUS_TMP" "$STATUS_FILE"
+  
+  # Write etag to temp file first, then atomic rename
+  ETAG_TMP="${ETAG_FILE}.tmp.$$"
+  printf '%s' "$NEW_ETAG" > "$ETAG_TMP"
+  mv -f "$ETAG_TMP" "$ETAG_FILE"
 }
 
 status_err() {
@@ -32,9 +44,13 @@ status_err() {
   CF=$((CF+1))
   LAST_OK_ISO="$(jq -r '.last_ok_iso // ""' <"$STATUS_FILE" 2>/dev/null || true)"
   LAST_OK_TS="$(jq -r '.last_ok_ts // 0' <"$STATUS_FILE" 2>/dev/null || true)"
+  
+  # Write to temp, then atomic rename
+  STATUS_TMP="${STATUS_FILE}.tmp.$$"
   printf '{"last_ok_iso":"%s","last_ok_ts":%s,"last_error":"%s","last_etag":"%s","consecutive_failures":%s}\n' \
     "$LAST_OK_ISO" "$LAST_OK_TS" "$(printf %s "$MSG" | tr '\n' ' ')" \
-    "$(cat "$ETAG_FILE" 2>/dev/null || echo "")" "$CF" > "$STATUS_FILE"
+    "$(cat "$ETAG_FILE" 2>/dev/null || echo "")" "$CF" > "$STATUS_TMP"
+  mv -f "$STATUS_TMP" "$STATUS_FILE"
 }
 
 # Fetch Cloudflare JSON

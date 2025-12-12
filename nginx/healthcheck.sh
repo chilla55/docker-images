@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-STATUS_FILE="${CF_REALIP_STATUS:-/var/cache/nginx/cf-realip.status.json}"
+STATUS_FILE="${CF_REALIP_STATUS:-/tmp/cf-realip/cf-realip.status.json}"
 INTERVAL="${CF_REALIP_INTERVAL:-21600}"
 MAX_AGE=$(( INTERVAL * 2 ))
 MAX_FAILS="${CF_REALIP_MAX_FAILS:-5}"
