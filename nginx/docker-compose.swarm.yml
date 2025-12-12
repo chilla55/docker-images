@@ -1,25 +1,12 @@
 version: '3.8'
 
-# ──────────────────────────────────────────────────────────────────────────
-# Secrets
-# ──────────────────────────────────────────────────────────────────────────
-secrets:
-  storagebox_password:
-    external: true
-    name: storagebox_password
-
 services:
   nginx:
     image: ghcr.io/chilla55/nginx:latest
     networks:
       - web-net
     
-    # Required for CIFS mount
-    cap_add:
-      - SYS_ADMIN
-      - DAC_READ_SEARCH
-    devices:
-      - /dev/fuse
+    # Note: Bind mounts handle storagebox paths - no container-level CIFS mounting needed
     deploy:
       mode: replicated
       replicas: 1
@@ -56,37 +43,26 @@ services:
       # Cloudflare Real IP updater
       CF_REALIP_AUTO: "true"
       CF_REALIP_INTERVAL: "21600"  # 6 hours
-      CF_REALIP_MAX_FAILS: "5"
       
       # Certificate watcher - watches for cert changes and reloads nginx
       CERT_WATCH_PATH: "/etc/nginx/certs/live/example.com/fullchain.pem"  # Set to your domain
       CERT_WATCH_INTERVAL: "300"  # 5 minutes
       CERT_WATCH_DEBUG: "0"
       
-      # Storage Box CIFS mount for certificates
-      STORAGE_BOX_CERTS_ENABLED: "true"
-      STORAGE_BOX_HOST: "u515899.your-storagebox.de"
-      STORAGE_BOX_USER: "u515899"
-      STORAGE_BOX_PASSWORD_FILE: "/run/secrets/storagebox_password"
-      STORAGE_BOX_CERTS_PATH: "/backup/certs"
-      STORAGE_BOX_CERTS_MOUNT_POINT: "/etc/nginx/certs"
-      STORAGE_BOX_CERTS_MOUNT_OPTIONS: "vers=3.0,uid=0,gid=101,file_mode=0640,dir_mode=0750,ro"
-      
-      # Storage Box CIFS mount for site configurations
-      STORAGE_BOX_SITES_ENABLED: "true"
-      STORAGE_BOX_SITES_PATH: "/sites"
-      STORAGE_BOX_SITES_MOUNT_POINT: "/etc/nginx/sites-enabled"
-      STORAGE_BOX_SITES_MOUNT_OPTIONS: "vers=3.0,uid=0,gid=101,file_mode=0640,dir_mode=0750,ro"
+      # Sites watcher - watches for site configuration changes
+      SITES_WATCH_PATH: "/etc/nginx/sites-enabled"
+      SITES_WATCH_INTERVAL: "30"  # Check every 30 seconds
+      SITES_WATCH_DEBUG: "0"
     
     configs:
       - source: nginx_conf
         target: /etc/nginx/nginx.conf
         mode: 0444
     
-    secrets:
-      - storagebox_password
-    
-    # Note: Both /etc/nginx/certs and /etc/nginx/sites-enabled are mounted from Storage Box via CIFS
+    volumes:
+      # Host bind mounts for storagebox paths
+      - /mnt/storagebox/certs:/etc/nginx/certs:ro
+      - /mnt/storagebox/sites:/etc/nginx/sites-enabled:ro
     
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]

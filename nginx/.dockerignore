@@ -8,3 +8,5 @@ LICENSE
 *.log
 .env*
 .DS_Store
+.editorconfig
+.prettierrc
