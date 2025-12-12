@@ -75,30 +75,6 @@ verify_storage_mount() {
         return 0
     fi
 }
-    fi
-    
-    local password=$(cat "$STORAGE_BOX_PASSWORD_FILE")
-    local mount_point="/etc/letsencrypt"
-    local remote_path="//${STORAGE_BOX_HOST}${STORAGE_BOX_PATH}"
-    
-    # Check if already mounted
-    if mount | grep -q "on $mount_point type smb3"; then
-        log "Storage Box already mounted at $mount_point (SMB3)"
-        return 0
-    fi
-    
-    mkdir -p "$mount_point"
-    
-    # Try SMB3 - will likely fail in Docker but worth attempting
-    if mount -t smb3 "$remote_path" "$mount_point" \
-        -o "username=${STORAGE_BOX_USER},password=${password},${STORAGE_BOX_MOUNT_OPTIONS}" 2>/dev/null; then
-        log "Successfully mounted Storage Box at $mount_point via SMB3"
-        return 0
-    fi
-    
-    log_debug "SMB3 mount failed (expected in Docker containers)"
-    return 1
-}
 
 # ──────────────────────────────────────────────────────────────────────────
 # Certificate Functions
