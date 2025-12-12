@@ -40,12 +40,17 @@ elif [ "${REPLICATION_MODE}" = "replica" ]; then
     echo "Configuring as REPLICA server..."
 
     # Wait for primary to be ready before attempting basebackup
-    echo "Waiting for primary to be ready..."
-    until pg_isready -h ${PRIMARY_HOST} -p ${PRIMARY_PORT} -U ${POSTGRES_USER:-postgres}; do
-        echo "Primary not ready, waiting..."
+    echo "Waiting for primary to be ready (host=${PRIMARY_HOST} port=${PRIMARY_PORT})..."
+    while true; do
+        # Use /dev/tcp with extended timeout (10 sec) to check if port is open
+        if timeout 10 bash -c "echo > /dev/tcp/${PRIMARY_HOST}/${PRIMARY_PORT}" 2>/dev/null; then
+            echo "Primary is ready!"
+            break
+        else
+            echo "Primary not ready, waiting..."
+        fi
         sleep 2
     done
-    echo "Primary is ready!"
 
     # Initialize replica if data directory is empty (first run)
     if [ ! -s "$PGDATA/PG_VERSION" ]; then
