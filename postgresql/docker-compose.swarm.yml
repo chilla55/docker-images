@@ -14,6 +14,8 @@ services:
       ENABLE_CONNECTIVITY_MONITOR: "true"
       SECONDARY_HOST: "postgresql-secondary"
       CHECK_INTERVAL: "5"
+      PGSSLMODE: "verify-ca"
+      PGSSLROOTCERT: "/var/lib/postgresql/rootca/ca-cert.pem"
     volumes:
       - postgresql-primary-data:/var/lib/postgresql/data
       - postgresql-primary-logs:/var/log/postgresql
