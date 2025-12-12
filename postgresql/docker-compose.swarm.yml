@@ -172,11 +172,8 @@ secrets:
 
 configs:
   pg_hba_conf:
-    external: true
-    name: pg_hba.conf
+    file: ./pg_hba.conf
   postgresql_primary_conf:
-    external: true
-    name: postgresql-primary.conf
+    file: ./postgresql-primary.conf
   postgresql_replica_conf:
-    external: true
-    name: postgresql-replica.conf
+    file: ./postgresql-replica.conf
