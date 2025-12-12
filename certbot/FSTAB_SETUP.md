@@ -21,7 +21,7 @@ sudo mkdir -p /mnt/storagebox
 ```bash
 sudo bash -c 'cat >> /etc/fstab << '\''EOF'\''
 # Hetzner Storage Box
-//u515899.your-storagebox.de/backup /mnt/storagebox smb3 credentials=/root/.storagebox-creds,vers=3.0,seal,nodfs,noserverino,nounix,uid=0,gid=0,file_mode=0755,dir_mode=0755,x-systemd.automount 0 0
+//u515899.your-storagebox.de/backup /mnt/storagebox smb3 credentials=/root/.storagebox-creds,vers=3.0,seal,nodfs,noserverino,mfsymlinks,uid=0,gid=0,file_mode=0755,dir_mode=0755,x-systemd.automount 0 0
 EOF'
 ```
 
@@ -41,7 +41,7 @@ ls -la /mnt/storagebox/certs/
 ### Test mount manually
 ```bash
 sudo mount -t smb3 //u515899.your-storagebox.de/backup /mnt/storagebox \
-  -o credentials=/root/.storagebox-creds,vers=3.0,seal,nodfs,noserverino,nounix
+  -o credentials=/root/.storagebox-creds,vers=3.0,seal,nodfs,noserverino,mfsymlinks
 ```
 
 ### Check fstab errors

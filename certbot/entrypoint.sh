@@ -53,10 +53,14 @@ setup_cloudflare() {
     local cf_dir="/etc/letsencrypt/.secrets/certbot"
     mkdir -p "$cf_dir"
     
-    local token=$(cat "$CLOUDFLARE_CREDENTIALS_FILE")
-    cat > "$cf_dir/cloudflare.ini" <<EOF
-dns_cloudflare_api_token = $token
-EOF
+    local token_raw
+    token_raw=$(cat "$CLOUDFLARE_CREDENTIALS_FILE" | tr -d '\r')
+    if echo "$token_raw" | grep -qi 'dns_cloudflare_api_token'; then
+        # Secret already includes the key
+        echo "$token_raw" > "$cf_dir/cloudflare.ini"
+    else
+        echo "dns_cloudflare_api_token = $token_raw" > "$cf_dir/cloudflare.ini"
+    fi
     
     chmod 600 "$cf_dir/cloudflare.ini"
     log "Cloudflare credentials configured"
@@ -79,6 +83,25 @@ verify_storage_mount() {
 
     log "Warning: No mount detected at $mount_point (using local storage)"
     return 0
+}
+
+check_symlink_support() {
+    local tmp_dir="/etc/letsencrypt/.symlink-test"
+    local target_file="$tmp_dir/target"
+    local link_file="$tmp_dir/link"
+    rm -rf "$tmp_dir"
+    mkdir -p "$tmp_dir"
+    echo "ok" > "$target_file"
+    if ln -s "$(basename "$target_file")" "$link_file" 2>/dev/null; then
+        rm -rf "$tmp_dir"
+        return 0
+    else
+        log_error "Filesystem at /etc/letsencrypt does not support symlinks (required by certbot)."
+        log_error "If using CIFS/SMB, mount with mfsymlinks and without nounix. Example fstab options:"
+        log_error "  //u515899.your-storagebox.de/backup /mnt/storagebox smb3 credentials=/root/.storagebox-creds,vers=3.0,seal,nodfs,noserverino,mfsymlinks,uid=0,gid=0,file_mode=0755,dir_mode=0755,x-systemd.automount 0 0"
+        rm -rf "$tmp_dir"
+        exit 1
+    fi
 }
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -209,6 +232,7 @@ main() {
     # Setup
     setup_cloudflare
     verify_storage_mount
+    check_symlink_support
 
     # Optional dry-run to just validate mounting/credentials without hitting ACME
     if [ "${SKIP_CERTS:-false}" = "true" ]; then
