@@ -21,6 +21,8 @@ cleanup() {
     exit 0
 }
 
+# Trap ERR to catch unexpected exits
+trap 'log "[entrypoint] TRAP: unexpected error on line $LINENO"; exit 1' ERR
 trap cleanup TERM INT
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -125,4 +127,8 @@ fi
 
 # Run nginx (PID 1) as root (safe in container due to Docker isolation)
 log "[entrypoint] Starting nginx"
-exec /usr/sbin/nginx -g 'daemon off;'
+log "[entrypoint] Final checks before exec:"
+log "  - Cert: $CERT_WATCH_PATH exists: $([ -f "$CERT_WATCH_PATH" ] && echo 'yes' || echo 'NO')"
+log "  - Sites dir: $SITES_WATCH_PATH exists: $([ -d "$SITES_WATCH_PATH" ] && echo 'yes' || echo 'NO')"
+log "  - CF status: $([ -f "$CF_REALIP_STATUS" ] && echo 'yes' || echo 'NO')"
+exec /usr/sbin/nginx -g 'daemon off;' 2>&1
