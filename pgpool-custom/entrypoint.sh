@@ -81,12 +81,16 @@ fi
 # Render pool_passwd if password provided
 if [[ -n "${PGPOOL_POSTGRES_PASSWORD}" ]]; then
   echo "Rendering pool_passwd for user ${PGPOOL_POSTGRES_USERNAME}"
-  # Write password to temp file and use it with pg_md5
-  echo -n "${PGPOOL_POSTGRES_PASSWORD}" > /tmp/.pgpass
-  HASH=$(pg_md5 -m -u "${PGPOOL_POSTGRES_USERNAME}" < /tmp/.pgpass)
-  echo "${PGPOOL_POSTGRES_USERNAME}:${HASH}" > /etc/pgpool2/pool_passwd
-  chmod 600 /etc/pgpool2/pool_passwd
-  rm -f /tmp/.pgpass
+  # Pass password directly as argument (deprecated but works)
+  HASH=$(pg_md5 -m "${PGPOOL_POSTGRES_PASSWORD}" 2>&1 | grep -E '^[a-f0-9]{35}$')
+  if [ -n "$HASH" ]; then
+    echo "${PGPOOL_POSTGRES_USERNAME}:${HASH}" > /etc/pgpool2/pool_passwd
+    chmod 600 /etc/pgpool2/pool_passwd
+    echo "✓ pool_passwd created successfully"
+  else
+    echo "ERROR: Failed to generate MD5 hash for pool_passwd"
+    exit 1
+  fi
 fi
 
 # Parse PGPOOL_BACKEND_NODES like "0:postgresql-primary:5432,1:postgresql-secondary:5432"
