@@ -81,8 +81,8 @@ fi
 # Render pool_passwd if password provided
 if [[ -n "${PGPOOL_POSTGRES_PASSWORD}" ]]; then
   echo "Rendering pool_passwd for user ${PGPOOL_POSTGRES_USERNAME}"
-  # Pass password directly as argument (deprecated but works)
-  HASH=$(pg_md5 -m "${PGPOOL_POSTGRES_PASSWORD}" 2>&1 | grep -E '^[a-f0-9]{35}$')
+  # Pass password directly as argument (works in Alpine pgpool)
+  HASH=$(pg_md5 "${PGPOOL_POSTGRES_PASSWORD}")
   if [ -n "$HASH" ]; then
     echo "${PGPOOL_POSTGRES_USERNAME}:${HASH}" > /etc/pgpool2/pool_passwd
     chmod 600 /etc/pgpool2/pool_passwd
