@@ -1,30 +1,63 @@
 # pgpool-custom (Alpine)
 
-Custom Pgpool-II image based on Alpine, configured via environment variables to be compatible with existing Bitnami-style compose settings.
+Custom pgpool-II image based on Alpine Linux with SSL support and DNS resolution waiting.
 
-## Environment variables
-- `PGPOOL_BACKEND_NODES`: comma-separated `IDX:HOST:PORT` entries, e.g. `0:postgresql-primary:5432,1:postgresql-secondary:5432`.
-- `PGPOOL_SR_CHECK_USER`, `PGPOOL_SR_CHECK_PASSWORD`: user/password for streaming replication checks.
-- `PGPOOL_POSTGRES_USERNAME`, `PGPOOL_POSTGRES_PASSWORD`: database user/password for client authentication; renders `pool_passwd`.
-- `PGPOOL_ENABLE_LOAD_BALANCING`: `yes`/`no`.
-- `PGPOOL_AUTO_FAILBACK`: `yes`/`no`.
-- `PGPOOL_FAILOVER_ON_BACKEND_ERROR`: `yes`/`no`.
-- `PGPOOL_NUM_INIT_CHILDREN`: default 32.
-- `PGPOOL_MAX_POOL`: default 4.
+## Features
 
-## Notes
-- Runs in foreground (`pgpool -n`) suitable for Docker/Swarm.
-- No host port exposure required; uses overlay networks.
-- Configuration files generated at container start from templates.
+- Environment-driven configuration
+- SSL/TLS for backend connections
+- Root CA certificate support
+- Automatic DNS resolution waiting
+- Health checks via pg_isready
+- Auto-generated SSL certificates
 
-## Build & Push
+## Environment Variables
+
+**Backend Configuration:**
+- `PGPOOL_BACKEND_NODES` - Comma-separated backends: `IDX:HOST:PORT` (e.g., `0:postgresql-primary:5432,1:postgresql-secondary:5432`)
+
+**Authentication:**
+- `PGPOOL_SR_CHECK_USER` - Streaming replication check user
+- `PGPOOL_SR_CHECK_PASSWORD_FILE` - Path to replication password secret
+- `PGPOOL_POSTGRES_USERNAME` - Database username for pool_passwd
+- `PGPOOL_POSTGRES_PASSWORD_FILE` - Path to postgres password secret
+- `PGPOOL_ADMIN_PASSWORD_FILE` - Path to admin password secret
+
+**Behavior:**
+- `PGPOOL_ENABLE_LOAD_BALANCING` - Enable load balancing (yes/no, default: yes)
+- `PGPOOL_AUTO_FAILBACK` - Enable automatic failback (yes/no, default: yes)
+- `PGPOOL_FAILOVER_ON_BACKEND_ERROR` - Failover on backend errors (yes/no, default: yes)
+- `PGPOOL_NUM_INIT_CHILDREN` - Number of connection pools (default: 32)
+- `PGPOOL_MAX_POOL` - Max connections per pool (default: 4)
+
+## SSL Configuration
+
+Automatically generates and signs certificates using root CA:
+- Root CA: `/var/lib/postgresql/rootca/ca-cert.pem` (mounted read-only)
+- Server cert: `/var/lib/postgresql/server.crt` (auto-generated)
+- Server key: `/var/lib/postgresql/server.key` (auto-generated)
+
+## Health Check
+
+Uses `pg_isready -h localhost -p 5432` with 90-second start period.
+
+## Build & Deploy
+
 ```bash
-# Build locally
-docker build -t ghcr.io/chilla55/pgpool-custom:latest -f pgpool-custom/Dockerfile pgpool-custom
-
-# Login to GHCR (if not already)
-echo "$GHCR_TOKEN" | docker login ghcr.io -u chilla55 --password-stdin
+# Build
+docker build -t ghcr.io/chilla55/pgpool-custom:latest .
 
 # Push
 docker push ghcr.io/chilla55/pgpool-custom:latest
+
+# Deploy with PostgreSQL stack
+docker stack deploy -c docker-compose.swarm.yml postgresql
 ```
+
+## Notes
+
+- Runs in foreground mode suitable for Docker Swarm
+- Waits for backend DNS resolution before starting
+- Configuration generated from templates at runtime
+- Ports: 5432 (PostgreSQL), 9898 (PCP admin)
+
