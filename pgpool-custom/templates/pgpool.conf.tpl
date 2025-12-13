@@ -11,6 +11,16 @@ failover_on_backend_error = @@FAILOVER_ON_BACKEND_ERROR@@
 num_init_children = @@NUM_INIT_CHILDREN@@
 max_pool = @@MAX_POOL@@
 
+# SSL Configuration for backend connections
+ssl = on
+ssl_key = '/var/lib/postgresql/server.key'
+ssl_cert = '/var/lib/postgresql/server.crt'
+ssl_ca_cert = '/var/lib/postgresql/rootca/ca-cert.pem'
+ssl_prefer_server_ciphers = on
+
+# Backend SSL mode
+backend_use_ssl = on
+
 # Authentication
 enable_pool_hba = on
 pool_passwd = '/etc/pgpool2/pool_passwd'

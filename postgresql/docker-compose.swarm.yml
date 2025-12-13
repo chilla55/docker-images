@@ -120,6 +120,7 @@ services:
       PGPOOL_MAX_POOL: "4"
     volumes:
       - pgpool-data:/bitnami/pgpool
+      - /mnt/storagebox/rootca:/var/lib/postgresql/rootca:ro,rslave
     secrets:
       - postgres_password
       - postgres_replication_password
