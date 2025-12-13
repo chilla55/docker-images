@@ -133,5 +133,28 @@ sed -e "s|@@SR_CHECK_USER@@|${PGPOOL_SR_CHECK_USER}|g" \
 # Ensure permissions
 chown -R postgres:postgres /etc/pgpool2 /var/log/pgpool /var/run/pgpool /var/lib/pgpool || true
 
+# Wait for PostgreSQL backends to be resolvable via DNS
+echo "Waiting for PostgreSQL backends to be resolvable..."
+IFS=',' read -ra NODES <<< "${PGPOOL_BACKEND_NODES}"
+for NODE in "${NODES[@]}"; do
+  [[ -z "$NODE" ]] && continue
+  IFS=':' read -ra PARTS <<< "$NODE"
+  HOST="${PARTS[1]}"
+  
+  echo "Waiting for ${HOST} to be resolvable..."
+  for i in {1..60}; do
+    if getent hosts "${HOST}" >/dev/null 2>&1; then
+      echo "✓ ${HOST} is resolvable"
+      break
+    fi
+    if [ $i -eq 60 ]; then
+      echo "WARNING: ${HOST} not resolvable after 60 seconds, continuing anyway..."
+    fi
+    sleep 1
+  done
+done
+
+echo "Starting pgpool-II..."
+
 # Start pgpool in foreground
 exec pgpool -n -f /etc/pgpool2/pgpool.conf

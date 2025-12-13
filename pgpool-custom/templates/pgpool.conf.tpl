@@ -11,6 +11,26 @@ failover_on_backend_error = @@FAILOVER_ON_BACKEND_ERROR@@
 num_init_children = @@NUM_INIT_CHILDREN@@
 max_pool = @@MAX_POOL@@
 
+# Connection settings
+connection_cache = on
+reset_query_list = 'ABORT; DISCARD ALL'
+
+# Health check settings
+health_check_period = 10
+health_check_timeout = 5
+health_check_user = '@@SR_CHECK_USER@@'
+health_check_password = '@@SR_CHECK_PASSWORD@@'
+health_check_max_retries = 3
+health_check_retry_delay = 1
+
+# Failover and failback
+failover_command = ''
+follow_primary_command = ''
+failback_command = ''
+
+# Connection retry
+search_primary_node_timeout = 300
+
 # SSL Configuration for backend connections
 ssl = on
 ssl_key = '/var/lib/postgresql/server.key'
