@@ -8,6 +8,11 @@ BACKUP_DIR="/backups"
 MYSQL_DATA_DIR="/var/lib/mysql"
 AUTO_RESTORE="${BACKUP_AUTO_RESTORE:-true}"
 
+# Ensure log directory exists with correct permissions
+mkdir -p /var/log/mysql
+chown -R mysql:mysql /var/log/mysql
+chmod 755 /var/log/mysql
+
 # Initialize MariaDB if needed
 if [ ! -d "${MYSQL_DATA_DIR}/mysql" ]; then
     echo "[backup-entrypoint] Initializing MariaDB data directory..."
@@ -114,6 +119,8 @@ if [ "${BACKUP_ENABLED}" = "true" ]; then
     
     # Full backup schedule (default: Sunday 3 AM weekly)
     FULL_SCHEDULE="${BACKUP_FULL_SCHEDULE:-0 3 * * 0}"
+    # Differential backup schedule (default: Wednesday 3 AM mid-week)
+    DIFFERENTIAL_SCHEDULE="${BACKUP_DIFFERENTIAL_SCHEDULE:-0 3 * * 3}"
     # Incremental backup schedule (default: every hour)
     INCREMENTAL_SCHEDULE="${BACKUP_INCREMENTAL_SCHEDULE:-0 * * * *}"
     
@@ -121,21 +128,19 @@ if [ "${BACKUP_ENABLED}" = "true" ]; then
     cat > /var/spool/cron/crontabs/root << EOF
 # MariaDB Intelligent Backup Schedule
 ${FULL_SCHEDULE} /usr/local/bin/backup-full.sh >> /var/log/mysql/backup-full.log 2>&1
+${DIFFERENTIAL_SCHEDULE} /usr/local/bin/backup-differential.sh >> /var/log/mysql/backup-differential.log 2>&1
 ${INCREMENTAL_SCHEDULE} /usr/local/bin/backup-incremental.sh >> /var/log/mysql/backup-incremental.log 2>&1
 EOF
     
     chmod 0600 /var/spool/cron/crontabs/root
     
-    # Ensure log directory exists
-    mkdir -p /var/log/mysql
-    chown mysql:mysql /var/log/mysql
-    
     # Start crond in background
     crond -b -l 2
     echo "[backup-entrypoint] Backup schedules configured"
     echo "  Full backups: ${FULL_SCHEDULE}"
+    echo "  Differential backups: ${DIFFERENTIAL_SCHEDULE}"
     echo "  Incremental backups: ${INCREMENTAL_SCHEDULE}"
-    echo "  Retention: ${BACKUP_RETENTION_DAYS:-30} days"
+    echo "  Retention: 14 days (full), 42 days (differential+full), 42+ days (full only)"
 fi
 
 # Execute MariaDB

@@ -18,8 +18,13 @@ done
 
 # Check if there's a full backup
 if [ ! -f "${BACKUP_DIR}/full/latest_full.sql.bz2" ]; then
-    echo "[$(date)] No full backup found. Skipping incremental backup."
-    echo "[$(date)] Run full backup first or wait for scheduled full backup."
+    echo "[$(date)] No full backup found. Running full backup first..."
+    /usr/local/bin/backup-full.sh
+    if [ $? -ne 0 ]; then
+        echo "[$(date)] ERROR: Full backup failed. Cannot proceed with incremental backup."
+        exit 1
+    fi
+    echo "[$(date)] Full backup completed. Skipping incremental backup this time."
     exit 0
 fi
 

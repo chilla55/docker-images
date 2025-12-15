@@ -9,8 +9,9 @@ services:
       # Backup configuration
       BACKUP_ENABLED: "true"
       BACKUP_AUTO_RESTORE: "true"  # Automatically restore from backup if database is empty
-      BACKUP_RETENTION_DAYS: "30"
+      BACKUP_RETENTION_DAYS: "30"  # Note: Tiered retention is hardcoded (14/42/42 days)
       BACKUP_FULL_SCHEDULE: "0 3 * * 0"  # Weekly full backup: Sunday 3 AM
+      BACKUP_DIFFERENTIAL_SCHEDULE: "0 3 * * 3"  # Mid-week differential: Wednesday 3 AM
       BACKUP_INCREMENTAL_SCHEDULE: "0 * * * *"  # Hourly incremental backup (only if changes detected)
     volumes:
       - mariadb-data:/var/lib/mysql

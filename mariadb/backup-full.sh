@@ -63,12 +63,32 @@ mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" -e "FLUSH LOGS;" 2>/dev/null || true
 
 echo "[$(date)] Full backup completed: ${BACKUP_FILE}"
 
-# Clean up old backups
-echo "[$(date)] Cleaning up backups older than ${RETENTION_DAYS} days"
-find "${BACKUP_DIR}/full" -name "*_full.sql.bz2" -mtime +${RETENTION_DAYS} -delete
-find "${BACKUP_DIR}/full" -name "*_metadata.txt" -mtime +${RETENTION_DAYS} -delete
-find "${BACKUP_DIR}/full" -name "*.sha256" -mtime +${RETENTION_DAYS} -delete
-find "${BACKUP_DIR}/incremental" -name "*.sql.bz2" -mtime +${RETENTION_DAYS} -delete 2>/dev/null || true
+# Clean up old backups with tiered retention strategy
+echo "[$(date)] Cleaning up backups with tiered retention"
+
+# Tier 1: Keep incrementals for 14 days (full granularity)
+find "${BACKUP_DIR}/incremental" -name "*.sql.bz2" -mtime +14 -delete 2>/dev/null || true
+find "${BACKUP_DIR}/incremental" -name "*_metadata.txt" -mtime +14 -delete 2>/dev/null || true
+find "${BACKUP_DIR}/incremental" -name "*.sha256" -mtime +14 -delete 2>/dev/null || true
+echo "[$(date)] Cleaned up incrementals older than 14 days"
+
+# Tier 2: Keep differential backups for 42 days (twice-weekly recovery)
+find "${BACKUP_DIR}/differential" -name "*.sql.bz2" -mtime +42 -delete 2>/dev/null || true
+find "${BACKUP_DIR}/differential" -name "*_metadata.txt" -mtime +42 -delete 2>/dev/null || true
+find "${BACKUP_DIR}/differential" -name "*.sha256" -mtime +42 -delete 2>/dev/null || true
+echo "[$(date)] Cleaned up differentials older than 42 days"
+
+# Tier 3: Keep full backups for 42 days (weekly recovery)
+# Always keep minimum 2 full backups for safety
+FULL_BACKUP_COUNT=$(find "${BACKUP_DIR}/full" -name "*_full.sql.bz2" -type f 2>/dev/null | wc -l)
+if [ "${FULL_BACKUP_COUNT}" -gt 2 ]; then
+    find "${BACKUP_DIR}/full" -name "*_full.sql.bz2" -mtime +42 -delete
+    find "${BACKUP_DIR}/full" -name "*_metadata.txt" -mtime +42 -delete
+    find "${BACKUP_DIR}/full" -name "*.sha256" -mtime +42 -delete
+    echo "[$(date)] Cleaned up full backups older than 42 days (keeping minimum 2 backups)"
+else
+    echo "[$(date)] Keeping all full backups (count: ${FULL_BACKUP_COUNT}, minimum: 2)"
+fi
 
 echo "[$(date)] Backup rotation completed"
 

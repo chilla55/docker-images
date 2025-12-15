@@ -22,6 +22,7 @@ COPY mariadb.cnf /etc/my.cnf.d/custom.cnf
 # Copy backup scripts
 COPY backup-entrypoint.sh /usr/local/bin/
 COPY backup-full.sh /usr/local/bin/
+COPY backup-differential.sh /usr/local/bin/
 COPY backup-incremental.sh /usr/local/bin/
 COPY backup-restore.sh /usr/local/bin/
 COPY healthcheck.sh /usr/local/bin/
