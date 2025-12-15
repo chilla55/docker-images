@@ -28,7 +28,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.database == true
+          - node.labels.postgresql.node == srv1
       restart_policy:
         condition: on-failure
         delay: 10s
