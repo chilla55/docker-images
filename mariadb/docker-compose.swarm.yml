@@ -18,6 +18,9 @@ services:
       - /mnt/storagebox/backups/mariadb:/backups:rslave
     secrets:
       - mysql_root_password
+    configs:
+      - source: mariadb_config
+        target: /etc/mysql/mariadb.conf.d/99-custom.cnf
     networks:
       - mariadb-net
     ports:
@@ -64,3 +67,7 @@ volumes:
 secrets:
   mysql_root_password:
     external: true
+
+configs:
+  mariadb_config:
+    file: ./mariadb.cnf

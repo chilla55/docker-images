@@ -10,8 +10,11 @@ RUN apt-get update && \
     gzip \
     bzip2 \
     rsync \
-    mysql-client \
+    mariadb-client \
     && rm -rf /var/lib/apt/lists/*
+
+# Ensure MariaDB tools are in PATH and create necessary symlinks
+RUN ln -sf /usr/sbin/my_print_defaults /usr/bin/my_print_defaults 2>/dev/null || true
 
 # Copy backup scripts
 COPY backup-entrypoint.sh /usr/local/bin/
@@ -21,9 +24,6 @@ COPY backup-restore.sh /usr/local/bin/
 COPY healthcheck.sh /usr/local/bin/
 
 RUN chmod +x /usr/local/bin/*.sh
-
-# Copy custom MariaDB configuration
-COPY mariadb.cnf /etc/mysql/mariadb.conf.d/99-custom.cnf
 
 # Create backup state directory
 RUN mkdir -p /var/lib/mysql-backup-state
