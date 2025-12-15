@@ -21,9 +21,6 @@ services:
     environment:
       DOMAIN: ${VAULTWARDEN_DOMAIN:-https://vw.chilla55.de}
       
-      # Database configuration
-      DATABASE_URL: "mysql://vaultwarden:$$(cat /run/secrets/vaultwarden_db_password)@maxscale:4006/vaultwarden"
-      
       # Admin token from secret
       ADMIN_TOKEN_FILE: /run/secrets/vaultwarden_admin_token
       

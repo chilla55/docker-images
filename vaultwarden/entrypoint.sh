@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# Build DATABASE_URL from secret if DB password file exists
+if [ -f "/run/secrets/vaultwarden_db_password" ]; then
+    DB_PASSWORD=$(cat /run/secrets/vaultwarden_db_password)
+    export DATABASE_URL="mysql://vaultwarden:${DB_PASSWORD}@maxscale:4006/vaultwarden"
+    echo "DATABASE_URL configured for MySQL"
+fi
+
 # Check if keys directory is mounted from host (at /data/keys)
 if [ -d "/data/keys" ]; then
     echo "Storage Box keys directory mounted at /data/keys"
