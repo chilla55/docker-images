@@ -28,4 +28,5 @@ EOF
 fi
 
 # Execute original MariaDB entrypoint
-exec docker-entrypoint.sh "$@"
+# Note: MariaDB 11.7 uses 'mariadbd' not 'mysqld'
+exec docker-entrypoint.sh mariadbd
