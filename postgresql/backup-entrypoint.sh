@@ -32,51 +32,15 @@ if [ ! -s "${PGDATA}/PG_VERSION" ]; then
     # Initialize database as postgres user
     su-exec postgres initdb -D "${PGDATA}" --auth=md5 --pwfile=<(echo "${POSTGRES_PASSWORD}")
     
-    # Configure PostgreSQL
-    cat >> "${PGDATA}/postgresql.conf" << EOF
-
-# Custom Configuration
-listen_addresses = '*'
-port = 5432
-max_connections = 500
-shared_buffers = 2GB
-effective_cache_size = 6GB
-maintenance_work_mem = 512MB
-checkpoint_completion_target = 0.9
-wal_buffers = 16MB
-default_statistics_target = 100
-random_page_cost = 1.1
-effective_io_concurrency = 200
-work_mem = 2097kB
-min_wal_size = 1GB
-max_wal_size = 4GB
-max_worker_processes = 4
-max_parallel_workers_per_gather = 2
-max_parallel_workers = 4
-max_parallel_maintenance_workers = 2
-
-# Logging
-logging_collector = on
-log_directory = '/var/log/postgresql'
-log_filename = 'postgresql-%Y-%m-%d.log'
-log_truncate_on_rotation = off
-log_rotation_age = 1d
-log_rotation_size = 100MB
-log_line_prefix = '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
-log_checkpoints = on
-log_connections = on
-log_disconnections = on
-log_lock_waits = on
-log_statement = 'ddl'
-log_timezone = 'UTC'
-
-# WAL
-wal_level = replica
-archive_mode = on
-archive_command = '/bin/true'
-max_wal_senders = 3
-EOF
-
+    # Use provided config if available, otherwise use embedded config
+    if [ -f /etc/postgresql/postgresql.conf ]; then
+        echo "[backup-entrypoint] Using provided postgresql.conf"
+        cp /etc/postgresql/postgresql.conf "${PGDATA}/postgresql.conf"
+    else
+        echo "[backup-entrypoint] Using default postgresql.conf"
+        # Default config is already in place from initdb
+    fi
+    
     # Configure pg_hba.conf for network access
     cat > "${PGDATA}/pg_hba.conf" << EOF
 # TYPE  DATABASE        USER            ADDRESS                 METHOD

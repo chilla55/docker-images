@@ -64,4 +64,4 @@ secrets:
 
 configs:
   postgresql-conf:
-    external: true
+    file: ./postgresql.conf
