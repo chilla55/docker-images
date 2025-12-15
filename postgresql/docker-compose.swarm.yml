@@ -5,7 +5,7 @@ services:
     image: ${REGISTRY:-localhost}/postgresql:${VERSION:-latest}
     hostname: postgresql-{{.Node.Hostname}}
     networks:
-      - backend-net
+      - postgres-net
     volumes:
       - /mnt/storagebox/backups/postgresql:/backups:rslave
       - postgresql-data:/var/lib/postgresql/data
@@ -51,7 +51,7 @@ services:
           memory: 512M
 
 networks:
-  backend-net:
+  postgres-net:
     external: true
 
 volumes:
