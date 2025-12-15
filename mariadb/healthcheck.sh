@@ -1,7 +1,10 @@
 #!/bin/bash
+# MariaDB healthcheck script
+
+MYSQL_ROOT_PASSWORD=$(cat /run/secrets/mysql_root_password 2>/dev/null || echo "${MYSQL_ROOT_PASSWORD}")
 
 # Check if MariaDB is responding
-if mysqladmin ping -h localhost -u root -p"$(cat /run/secrets/mysql_root_password)" --silent 2>/dev/null; then
+if mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" &>/dev/null; then
     exit 0
 else
     exit 1

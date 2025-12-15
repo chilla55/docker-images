@@ -2,94 +2,151 @@
 set -e
 
 BACKUP_DIR="/backups"
-RESTORE_DIR="/var/lib/mysql"
-MYSQL_ROOT_PASSWORD=$(cat /run/secrets/mysql_root_password)
+MYSQL_ROOT_PASSWORD=$(cat /run/secrets/mysql_root_password 2>/dev/null || echo "${MYSQL_ROOT_PASSWORD}")
 
 echo "==================================="
 echo "MariaDB Backup Restore Utility"
 echo "==================================="
-echo ""
 
 # Function to list available backups
 list_backups() {
-    echo "Available Full Backups:"
-    find "${BACKUP_DIR}/full" -name "*.tar.gz" -type f | sort -r | nl
     echo ""
-    echo "Available Incremental Backups:"
-    find "${BACKUP_DIR}/incremental" -name "*.tar.gz" -type f | sort -r | nl
-    echo ""
-}
-
-# Function to restore from backup
-restore_backup() {
-    local FULL_BACKUP=$1
-    local RESTORE_TEMP="/tmp/restore"
-    
-    echo "[$(date)] Starting restore process"
-    echo "[$(date)] Full backup: ${FULL_BACKUP}"
-    
-    # Stop MariaDB
-    echo "[$(date)] Stopping MariaDB..."
-    mysqladmin -u root -p"${MYSQL_ROOT_PASSWORD}" shutdown || true
-    sleep 5
-    
-    # Backup current data (just in case)
-    if [ -d "${RESTORE_DIR}" ]; then
-        echo "[$(date)] Backing up current data to ${RESTORE_DIR}.backup"
-        mv "${RESTORE_DIR}" "${RESTORE_DIR}.backup.$(date +%Y%m%d_%H%M%S)"
+    echo "Available FULL backups:"
+    if [ -d "${BACKUP_DIR}/full" ]; then
+        ls -lh "${BACKUP_DIR}/full"/*_full.sql.bz2 2>/dev/null || echo "  No full backups found"
+    else
+        echo "  Backup directory not found"
     fi
     
-    # Extract full backup
-    mkdir -p "${RESTORE_TEMP}/full"
-    echo "[$(date)] Extracting full backup..."
-    tar -xzf "${FULL_BACKUP}" -C "${RESTORE_TEMP}/full"
-    FULL_DIR=$(find "${RESTORE_TEMP}/full" -maxdepth 1 -type d -name "20*" | head -1)
-    
-    # Apply incremental backups in order
-    echo "[$(date)] Looking for incremental backups..."
-    FULL_DATE=$(basename "${FULL_BACKUP}" .tar.gz)
-    INCREMENTALS=$(find "${BACKUP_DIR}/incremental" -name "*.tar.gz" -newer "${FULL_BACKUP}" | sort)
-    
-    for INCR in ${INCREMENTALS}; do
-        echo "[$(date)] Applying incremental: $(basename ${INCR})"
-        mkdir -p "${RESTORE_TEMP}/incr"
-        tar -xzf "${INCR}" -C "${RESTORE_TEMP}/incr"
-        INCR_DIR=$(find "${RESTORE_TEMP}/incr" -maxdepth 1 -type d -name "20*" | head -1)
-        
-        # Apply incremental to base
-        mariabackup --prepare \
-            --target-dir="${FULL_DIR}" \
-            --incremental-dir="${INCR_DIR}"
-        
-        rm -rf "${RESTORE_TEMP}/incr"
-    done
-    
-    # Final prepare
-    echo "[$(date)] Final preparation of backup..."
-    mariabackup --prepare --target-dir="${FULL_DIR}"
-    
-    # Copy to data directory
-    echo "[$(date)] Copying data to ${RESTORE_DIR}..."
-    mariabackup --copy-back --target-dir="${FULL_DIR}"
-    
-    # Fix permissions
-    chown -R mysql:mysql "${RESTORE_DIR}"
-    
-    # Cleanup
-    rm -rf "${RESTORE_TEMP}"
-    
-    echo "[$(date)] Restore completed successfully!"
-    echo "[$(date)] Start MariaDB to complete recovery"
     echo ""
-    echo "To start MariaDB, run: mysqld"
+    echo "Available INCREMENTAL backups:"
+    if [ -d "${BACKUP_DIR}/incremental" ]; then
+        ls -lh "${BACKUP_DIR}/incremental"/*_incremental.sql.bz2 2>/dev/null || echo "  No incremental backups found"
+    else
+        echo "  Backup directory not found"
+    fi
 }
 
-# Main menu
-if [ $# -eq 0 ]; then
-    list_backups
-    echo "Usage: $0 <full-backup-path>"
-    echo "Example: $0 /backups/full/20250115_020000.tar.gz"
-    exit 0
-fi
+# Function to restore from full backup
+restore_full() {
+    local BACKUP_FILE=$1
+    
+    if [ ! -f "${BACKUP_FILE}" ]; then
+        echo "ERROR: Backup file not found: ${BACKUP_FILE}"
+        exit 1
+    fi
+    
+    echo ""
+    echo "Restoring from full backup: ${BACKUP_FILE}"
+    echo "WARNING: This will overwrite existing databases!"
+    echo ""
+    
+    # Verify checksum if available
+    if [ -f "${BACKUP_FILE}.sha256" ]; then
+        echo "Verifying backup integrity..."
+        if sha256sum -c "${BACKUP_FILE}.sha256"; then
+            echo "Checksum verified successfully"
+        else
+            echo "ERROR: Checksum verification failed!"
+            exit 1
+        fi
+    fi
+    
+    # Decompress and restore
+    echo "Decompressing and restoring backup..."
+    bunzip2 -c "${BACKUP_FILE}" | mysql -uroot -p"${MYSQL_ROOT_PASSWORD}"
+    
+    echo "Full backup restored successfully!"
+}
 
-restore_backup "$1"
+# Function to restore incremental backup
+restore_incremental() {
+    local BACKUP_FILE=$1
+    
+    if [ ! -f "${BACKUP_FILE}" ]; then
+        echo "ERROR: Backup file not found: ${BACKUP_FILE}"
+        exit 1
+    fi
+    
+    echo ""
+    echo "Restoring from incremental backup: ${BACKUP_FILE}"
+    
+    # Verify checksum if available
+    if [ -f "${BACKUP_FILE}.sha256" ]; then
+        echo "Verifying backup integrity..."
+        if sha256sum -c "${BACKUP_FILE}.sha256"; then
+            echo "Checksum verified successfully"
+        else
+            echo "ERROR: Checksum verification failed!"
+            exit 1
+        fi
+    fi
+    
+    # Decompress and restore
+    echo "Decompressing and restoring backup..."
+    bunzip2 -c "${BACKUP_FILE}" | mysql -uroot -p"${MYSQL_ROOT_PASSWORD}"
+    
+    echo "Incremental backup restored successfully!"
+}
+
+# Main script
+case "${1}" in
+    list)
+        list_backups
+        ;;
+    restore-full)
+        if [ -z "${2}" ]; then
+            echo "Usage: $0 restore-full <backup_file>"
+            echo "Example: $0 restore-full /backups/full/20231215_030000_full.sql.bz2"
+            list_backups
+            exit 1
+        fi
+        restore_full "${2}"
+        ;;
+    restore-incremental)
+        if [ -z "${2}" ]; then
+            echo "Usage: $0 restore-incremental <backup_file>"
+            echo "Example: $0 restore-incremental /backups/incremental/20231215_120000_incremental.sql.bz2"
+            list_backups
+            exit 1
+        fi
+        restore_incremental "${2}"
+        ;;
+    restore-latest)
+        echo "Restoring from latest full backup..."
+        LATEST_FULL="${BACKUP_DIR}/full/latest_full.sql.bz2"
+        if [ -L "${LATEST_FULL}" ]; then
+            restore_full "${LATEST_FULL}"
+        else
+            echo "ERROR: No latest full backup found"
+            exit 1
+        fi
+        
+        echo ""
+        echo "Applying latest incremental backup if available..."
+        LATEST_INCREMENTAL="${BACKUP_DIR}/incremental/latest_incremental.sql.bz2"
+        if [ -L "${LATEST_INCREMENTAL}" ]; then
+            restore_incremental "${LATEST_INCREMENTAL}"
+        else
+            echo "No incremental backup found (this is OK if no changes were made)"
+        fi
+        
+        echo ""
+        echo "Restore complete!"
+        ;;
+    *)
+        echo "Usage: $0 {list|restore-full|restore-incremental|restore-latest}"
+        echo ""
+        echo "Commands:"
+        echo "  list                          - List all available backups"
+        echo "  restore-full <file>           - Restore from a specific full backup"
+        echo "  restore-incremental <file>    - Restore from a specific incremental backup"
+        echo "  restore-latest                - Restore from latest full + incremental backups"
+        echo ""
+        echo "Examples:"
+        echo "  $0 list"
+        echo "  $0 restore-latest"
+        echo "  $0 restore-full /backups/full/20231215_030000_full.sql.bz2"
+        exit 1
+        ;;
+esac

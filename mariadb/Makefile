@@ -1,63 +1,105 @@
-# MariaDB Single-Node Makefile
-VERSION ?= latest
-STACK_NAME ?= mariadb-single
+.PHONY: build push deploy clean help
 
-.PHONY: help build push deploy down logs backup-full backup-incremental restore clean
+VERSION ?= latest
+REGISTRY := ghcr.io
+IMAGE_NAME := chilla55/mariadb-single
+FULL_IMAGE := $(REGISTRY)/$(IMAGE_NAME):$(VERSION)
 
 help:
-	@echo "MariaDB Single-Node Management"
-	@echo "==============================="
-	@echo ""
-	@echo "Available commands:"
-	@echo "  make build              - Build MariaDB single-node image"
-	@echo "  make push               - Push image to registry"
-	@echo "  make deploy             - Deploy MariaDB stack"
-	@echo "  make down               - Remove MariaDB stack"
-	@echo "  make logs               - Show MariaDB logs"
-	@echo "  make backup-full        - Trigger immediate full backup"
-	@echo "  make backup-incremental - Trigger immediate incremental backup"
-	@echo "  make restore            - Restore from backup"
-	@echo "  make clean              - Clean up old images"
+	@echo "MariaDB Docker Image - Makefile Commands"
+	@echo "========================================="
+	@echo "make build          - Build the Docker image"
+	@echo "make push           - Push the image to registry"
+	@echo "make deploy         - Deploy to Docker Swarm"
+	@echo "make clean          - Remove local images"
+	@echo "make logs           - View service logs"
+	@echo "make backup-full    - Trigger immediate full backup"
+	@echo "make backup-incr    - Trigger immediate incremental backup"
+	@echo "make backup-list    - List available backups"
+	@echo "make backup-restore - Restore from latest backup"
 	@echo ""
 
 build:
-	@echo "Building MariaDB single-node image..."
-	docker build -f Dockerfile.single -t ghcr.io/chilla55/mariadb-single:$(VERSION) .
-	@echo "✓ Build complete"
+	@echo "Building MariaDB image $(FULL_IMAGE)..."
+	docker build -t $(FULL_IMAGE) .
+	docker tag $(FULL_IMAGE) $(REGISTRY)/$(IMAGE_NAME):latest
 
-push: build
-	@echo "Pushing image to registry..."
-	docker push ghcr.io/chilla55/mariadb-single:$(VERSION)
-	@echo "✓ Push complete"
+push:
+	@echo "Pushing $(FULL_IMAGE)..."
+	docker push $(FULL_IMAGE)
+	docker push $(REGISTRY)/$(IMAGE_NAME):latest
 
 deploy:
-	@echo "Deploying MariaDB single-node stack..."
-	docker stack deploy -c docker-compose.single.yml $(STACK_NAME)
-	@echo "✓ Stack deployed"
-	@echo ""
-	@echo "To check status: docker service ls | grep mariadb"
+	@echo "Deploying MariaDB service to Swarm..."
+	docker stack deploy -c docker-compose.swarm.yml mariadb
 
-down:
+update:
+	@echo "Updating MariaDB service..."
+	docker service update --image $(FULL_IMAGE) mariadb_mariadb
+
+remove:
 	@echo "Removing MariaDB stack..."
-	docker stack rm $(STACK_NAME)
-	@echo "✓ Stack removed"
+	docker stack rm mariadb
 
 logs:
-	@docker service logs -f $(STACK_NAME)_mariadb
+	@echo "Fetching logs for MariaDB service..."
+	docker service logs -f mariadb_mariadb
 
-backup-full:
-	@echo "Triggering full backup..."
-	@docker exec $$(docker ps -q -f name=$(STACK_NAME)_mariadb) /usr/local/bin/backup-full.sh
-
-backup-incremental:
-	@echo "Triggering incremental backup..."
-	@docker exec $$(docker ps -q -f name=$(STACK_NAME)_mariadb) /usr/local/bin/backup-incremental.sh
-
-restore:
-	@echo "Available backups:"
-	@docker exec $$(docker ps -q -f name=$(STACK_NAME)_mariadb) /usr/local/bin/backup-restore.sh
+ps:
+	@echo "MariaDB service status:"
+	docker service ps mariadb_mariadb
 
 clean:
-	@echo "Cleaning up old images..."
-	docker image prune -f
-	@echo "✓ Cleanup complete"
+	@echo "Removing local MariaDB images..."
+	docker rmi $(FULL_IMAGE) || true
+	docker rmi $(REGISTRY)/$(IMAGE_NAME):latest || true
+
+backup-full:
+	@echo "Triggering immediate full backup..."
+	@CONTAINER=$$(docker ps -q -f name=mariadb_mariadb); \
+	if [ -z "$$CONTAINER" ]; then \
+		echo "ERROR: MariaDB container not found"; \
+		exit 1; \
+	fi; \
+	docker exec $$CONTAINER /usr/local/bin/backup-full.sh
+
+backup-incr:
+	@echo "Triggering immediate incremental backup..."
+	@CONTAINER=$$(docker ps -q -f name=mariadb_mariadb); \
+	if [ -z "$$CONTAINER" ]; then \
+		echo "ERROR: MariaDB container not found"; \
+		exit 1; \
+	fi; \
+	docker exec $$CONTAINER /usr/local/bin/backup-incremental.sh
+
+backup-list:
+	@echo "Listing available backups..."
+	@CONTAINER=$$(docker ps -q -f name=mariadb_mariadb); \
+	if [ -z "$$CONTAINER" ]; then \
+		echo "ERROR: MariaDB container not found"; \
+		exit 1; \
+	fi; \
+	docker exec $$CONTAINER /usr/local/bin/backup-restore.sh list
+
+backup-restore:
+	@echo "Restoring from latest backup..."
+	@echo "WARNING: This will overwrite existing data!"
+	@read -p "Are you sure? (y/N): " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		CONTAINER=$$(docker ps -q -f name=mariadb_mariadb); \
+		if [ -z "$$CONTAINER" ]; then \
+			echo "ERROR: MariaDB container not found"; \
+			exit 1; \
+		fi; \
+		docker exec $$CONTAINER /usr/local/bin/backup-restore.sh restore-latest; \
+	else \
+		echo "Restore cancelled"; \
+	fi
+
+shell:
+	@CONTAINER=$$(docker ps -q -f name=mariadb_mariadb); \
+	if [ -z "$$CONTAINER" ]; then \
+		echo "ERROR: MariaDB container not found"; \
+		exit 1; \
+	fi; \
+	docker exec -it $$CONTAINER bash

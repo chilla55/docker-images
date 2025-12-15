@@ -5,20 +5,23 @@ services:
     image: ghcr.io/chilla55/mariadb-single:${VERSION:-latest}
     hostname: mariadb.srv1.chilla55.de
     environment:
-      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
       # Backup configuration
       BACKUP_ENABLED: "true"
+      BACKUP_AUTO_RESTORE: "true"  # Automatically restore from backup if database is empty
       BACKUP_RETENTION_DAYS: "30"
-      BACKUP_FULL_SCHEDULE: "0 2 * * 0"  # Weekly full backup: Sunday 2 AM
-      BACKUP_INCREMENTAL_SCHEDULE: "0 2 * * 1-6"  # Daily incremental: Mon-Sat 2 AM
+      BACKUP_FULL_SCHEDULE: "0 3 * * 0"  # Weekly full backup: Sunday 3 AM
+      BACKUP_INCREMENTAL_SCHEDULE: "0 * * * *"  # Hourly incremental backup (only if changes detected)
     volumes:
       - mariadb-data:/var/lib/mysql
-      - /mnt/storagebox/mariadb-backups:/backups:rslave
-    networks:
-      - mariadb-net
+      - mariadb-logs:/var/log/mysql
+      - /mnt/storagebox/backups/mariadb:/backups:rslave
     secrets:
       - mysql_root_password
-      - storagebox_password
+    networks:
+      - mariadb-net
+    ports:
+      - "3306:3306"
     deploy:
       mode: replicated
       replicas: 1
@@ -26,7 +29,7 @@ services:
         constraints:
           - node.labels.mariadb.node == srv1
       restart_policy:
-        condition: any
+        condition: on-failure
         delay: 10s
         max_attempts: 5
       resources:
@@ -36,8 +39,13 @@ services:
         reservations:
           cpus: '2'
           memory: 2G
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: stop-first
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$(cat /run/secrets/mysql_root_password)"]
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -49,6 +57,8 @@ networks:
 
 volumes:
   mariadb-data:
+    driver: local
+  mariadb-logs:
     driver: local
 
 secrets:

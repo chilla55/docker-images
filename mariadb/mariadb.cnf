@@ -1,0 +1,37 @@
+[mysqld]
+# Performance settings
+innodb_buffer_pool_size = 2G
+innodb_log_file_size = 512M
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method = O_DIRECT
+
+# Connection settings
+max_connections = 500
+max_allowed_packet = 64M
+
+# Query cache
+query_cache_size = 64M
+query_cache_type = 1
+
+# Logging
+general_log = 0
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow-query.log
+long_query_time = 2
+
+# Binary logging for backups and replication
+log_bin = /var/lib/mysql/mysql-bin
+expire_logs_days = 7
+max_binlog_size = 100M
+binlog_format = ROW
+
+# Character set
+character_set_server = utf8mb4
+collation_server = utf8mb4_unicode_ci
+
+# InnoDB settings
+innodb_file_per_table = 1
+innodb_stats_on_metadata = 0
+
+# Safety
+sql_mode = STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
