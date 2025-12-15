@@ -21,13 +21,8 @@ services:
     environment:
       DOMAIN: ${VAULTWARDEN_DOMAIN:-https://vw.chilla55.de}
       
-      # Database configuration - built from env vars and secret
-      DB_TYPE: ${DB_TYPE:-mysql}
-      DB_HOST: ${DB_HOST:-maxscale}
-      DB_PORT: ${DB_PORT:-4006}
-      DB_USER: ${DB_USER:-vaultwarden}
-      DB_NAME: ${DB_NAME:-vaultwarden}
-      DATABASE_PASSWORD_FILE: /run/secrets/vaultwarden_db_password
+      # Database configuration
+      DATABASE_URL: "mysql://vaultwarden:$$(cat /run/secrets/vaultwarden_db_password)@maxscale:4006/vaultwarden"
       
       # Admin token from secret
       ADMIN_TOKEN_FILE: /run/secrets/vaultwarden_admin_token
