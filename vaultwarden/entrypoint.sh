@@ -4,10 +4,8 @@ set -e
 # Build DATABASE_URL from secret if DB password file exists
 if [ -f "/run/secrets/vaultwarden_db_password" ]; then
     DB_PASSWORD="$(cat /run/secrets/vaultwarden_db_password)"
-    # URL-encode the password for special characters
-    DB_PASSWORD_ENCODED="$(printf '%s' "$DB_PASSWORD" | od -An -tx1 | tr ' ' % | tr -d '\n')"
-    export DATABASE_URL="mysql://vaultwarden:${DB_PASSWORD_ENCODED}@maxscale:4006/vaultwarden"
-    echo "DATABASE_URL configured for MySQL with encoded password"
+    export DATABASE_URL="mysql://vaultwarden:${DB_PASSWORD}@maxscale:4006/vaultwarden"
+    echo "DATABASE_URL configured for MySQL"
 fi
 
 # Check if keys directory is mounted from host (at /data/keys)
