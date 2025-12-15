@@ -1,28 +1,28 @@
-FROM mariadb:11.2
+FROM mariadb:11.7
 
-LABEL maintainer="chilla55"
-LABEL description="MariaDB with Master-Slave Replication support"
-
-# Install necessary packages
-RUN apt-get update && \
-    apt-get install -y \
-    curl \
-    netcat-openbsd \
+# Install backup tools and dependencies
+RUN apt-get update && apt-get install -y \
+    mariadb-backup \
+    cron \
+    rsync \
+    openssh-client \
+    sshfs \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy configuration files
-COPY replication-entrypoint.sh /usr/local/bin/
-COPY replication-healthcheck.sh /usr/local/bin/
-COPY scripts/check-connectivity.sh /usr/local/bin/
-COPY mariadb-master.cnf /etc/mysql/conf.d/
-COPY mariadb-slave.cnf /etc/mysql/conf.d/
+# Copy backup scripts
+COPY backup-entrypoint.sh /usr/local/bin/
+COPY backup-full.sh /usr/local/bin/
+COPY backup-incremental.sh /usr/local/bin/
+COPY backup-restore.sh /usr/local/bin/
+COPY healthcheck.sh /usr/local/bin/
 
-RUN chmod +x /usr/local/bin/replication-entrypoint.sh && \
-    chmod +x /usr/local/bin/replication-healthcheck.sh && \
-    chmod +x /usr/local/bin/check-connectivity.sh
+RUN chmod +x /usr/local/bin/backup-*.sh /usr/local/bin/healthcheck.sh
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD /usr/local/bin/replication-healthcheck.sh
+# MariaDB configuration optimized for single-node with backups
+COPY mariadb-single.cnf /etc/mysql/conf.d/
 
-ENTRYPOINT ["/usr/local/bin/replication-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/backup-entrypoint.sh"]
 CMD ["mariadbd"]
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=30s \
+    CMD /usr/local/bin/healthcheck.sh

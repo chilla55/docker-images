@@ -1,203 +1,64 @@
-# MariaDB Master-Slave Replication with MaxScale for Docker Swarm
+# MariaDB Single-Node with Automated Backups
 
-High-availability MariaDB setup with automatic failover using master-slave replication and MaxScale orchestrator.
-
-## Architecture
-
-- **Primary Node (Node 1)**: Handles all writes and reads
-- **Secondary Node (Node 2)**: Standby replica for reads and automatic failover
-- **MaxScale (Node 3)**: Orchestrator for automatic failover and query routing
-- **Overlay Network**: Secure communication between components
+Production-ready single-node MariaDB setup with automated backup capabilities using mariabackup.
 
 ## Features
 
-- ✅ Automatic failover (10-15s downtime)
-- ✅ Async replication (better for WAN/multi-provider)
-- ✅ Split-brain prevention with cooperative monitoring
-- ✅ Read-write splitting
-- ✅ Automatic recovery when network restores
-- ✅ Lightweight orchestrator (512MB RAM on Node 3)
-- ✅ REST API for cluster management
-
-## Prerequisites
-
-- Docker Swarm cluster (minimum 2 worker nodes + 1 manager)
-- Node labels configured for placement
-- Environment variables configured
+- **Single-Node Design**: Simplified deployment on srv1.chilla55.de
+- **Automated Backups**: 
+  - Weekly full backups (Sunday 2 AM)
+  - Daily incremental backups (Monday-Saturday 2 AM)
+  - 30-day retention by default
+- **Backup Strategy**: mariabackup with incremental support
+- **Storage**: Backups saved to `/mnt/storagebox/mariadb-backups`
+- **Binary Logging**: 7-day retention for point-in-time recovery
 
 ## Quick Start
 
-### 1. Configure Environment
+### Build and Deploy
 
 ```bash
-cp .env.example .env
-# Edit .env with your passwords
+cd mariadb
+make build push deploy
 ```
 
-### 2. Build Image
+### Manual Backups
 
 ```bash
-make build
+make backup-full        # Full backup
+make backup-incremental # Incremental backup
 ```
 
-### 3. Label Swarm Nodes
+### Restore
 
 ```bash
-make label-nodes
-# You'll be prompted to enter node names for Primary, Secondary, and MaxScale
+make restore  # Lists available backups and restore instructions
 ```
 
-### 4. Deploy Stack
+## Backup Strategy
+
+- **Weekly Full**: Complete database snapshot (Sunday 2 AM)
+- **Daily Incremental**: Only changes since last backup (Mon-Sat 2 AM)
+- **Retention**: 30 days automatic cleanup
+- **Storage**: `/mnt/storagebox/mariadb-backups`
+
+## Configuration
+
+Edit `docker-compose.yml`:
+```yaml
+BACKUP_FULL_SCHEDULE: "0 2 * * 0"      # Weekly full
+BACKUP_INCREMENTAL_SCHEDULE: "0 2 * * 1-6"  # Daily incremental
+BACKUP_RETENTION_DAYS: "30"
+```
+
+## Commands
 
 ```bash
-make deploy
+make build              # Build image
+make push               # Push to registry
+make deploy             # Deploy stack
+make logs               # View logs
+make backup-full        # Trigger full backup
+make backup-incremental # Trigger incremental backup
+make restore            # Restore from backup
 ```
-
-### 5. Setup Replication
-
-```bash
-make setup-replication
-# Follow the instructions to configure replication
-```
-
-### 6. Create MaxScale User
-
-```bash
-make create-maxscale-user
-```
-
-## Ports
-
-- **3306**: Primary (direct access)
-- **3307**: Secondary (direct access)
-- **4006**: MaxScale Read-Write Router (recommended for applications)
-- **4008**: MaxScale Read-Only Router
-- **8989**: MaxScale REST API
-
-## Connecting to the Database
-
-### Via MaxScale (Recommended)
-
-```bash
-mysql -h <maxscale-host> -P 4006 -u app_user -p
-```
-
-### Direct to Nodes
-
-```bash
-# Primary
-mysql -h <primary-host> -P 3306 -u root -p
-
-# Secondary
-mysql -h <secondary-host> -P 3307 -u root -p
-```
-
-## Monitoring
-
-### Check Status
-
-```bash
-make status
-```
-
-### View Logs
-
-```bash
-make logs-primary
-make logs-secondary
-make logs-maxscale
-```
-
-### MaxScale REST API
-
-```bash
-curl http://<maxscale-host>:8989/v1/servers
-```
-
-## Failover
-
-### Automatic Failover
-
-MaxScale automatically promotes Secondary when:
-- Primary is unreachable for 15 seconds
-- Secondary can reach MaxScale
-- Verified from multiple perspectives
-
-### Manual Failover
-
-```bash
-# Immediate failover
-make failover
-
-# Graceful switchover
-make switchover
-```
-
-## Split-Brain Prevention
-
-Both nodes run connectivity monitors that check every 5 seconds:
-
-**Primary checks**:
-- Can reach Secondary?
-- Can reach MaxScale?
-- If neither reachable for 15s → enters read-only mode
-
-**Secondary checks**:
-- Can reach Primary?
-- Can reach MaxScale?
-- If Primary down + MaxScale up → ready for promotion
-
-This ensures only one active writer at any time.
-
-## Troubleshooting
-
-### Replication Not Running
-
-```bash
-# On Secondary
-docker exec <secondary> mysql -u root -p -e "SHOW SLAVE STATUS\G"
-
-# Restart replication
-docker exec <secondary> mysql -u root -p -e "STOP SLAVE; START SLAVE;"
-```
-
-### MaxScale Can't Connect
-
-```bash
-# Re-create MaxScale user
-make create-maxscale-user
-
-# Check connectivity
-docker exec <maxscale> maxctrl list servers
-```
-
-### Check Connectivity Monitor
-
-```bash
-# View logs for connectivity checks
-make logs-primary | grep "ISOLATED\|Connectivity"
-make logs-secondary | grep "ISOLATED\|Connectivity"
-```
-
-## Architecture Documentation
-
-See `MASTER_SLAVE_ARCHITECTURE.md` for detailed architecture, failover scenarios, and resource planning.
-
-## Performance Tuning
-
-Key configuration files:
-- `mariadb-master.cnf`: Primary configuration
-- `mariadb-slave.cnf`: Secondary configuration
-- `maxscale.cnf`: MaxScale routing and failover settings
-
-## Security
-
-- Change all default passwords in `.env`
-- Use Docker secrets for production
-- Restrict network access
-- Enable SSL/TLS for client connections
-- Regular security updates
-
-## License
-
-This configuration is provided as-is for use in your infrastructure.

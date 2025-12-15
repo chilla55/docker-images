@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  mariadb:
+    image: ghcr.io/chilla55/mariadb-single:${VERSION:-latest}
+    hostname: mariadb.srv1.chilla55.de
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      # Backup configuration
+      BACKUP_ENABLED: "true"
+      BACKUP_RETENTION_DAYS: "30"
+      BACKUP_FULL_SCHEDULE: "0 2 * * 0"  # Weekly full backup: Sunday 2 AM
+      BACKUP_INCREMENTAL_SCHEDULE: "0 2 * * 1-6"  # Daily incremental: Mon-Sat 2 AM
+      STORAGEBOX_HOST: "${STORAGEBOX_HOST}"
+      STORAGEBOX_USER: "${STORAGEBOX_USER}"
+      STORAGEBOX_PATH: "/mariadb-backups"
+    volumes:
+      - mariadb-data:/var/lib/mysql
+      - mariadb-logs:/var/log/mysql
+      - /mnt/storagebox/mariadb-backups:/backups:rslave
+    networks:
+      - mariadb-net
+    secrets:
+      - mysql_root_password
+      - storagebox_password
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.mariadb.node == srv1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$(cat /run/secrets/mysql_root_password)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  mariadb-net:
+    external: true
+
+volumes:
+  mariadb-data:
+    driver: local
+  mariadb-logs:
+    driver: local
+
+secrets:
+  mysql_root_password:
+    external: true
+  storagebox_password:
+    external: true

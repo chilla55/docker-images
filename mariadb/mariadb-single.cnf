@@ -1,0 +1,47 @@
+[mysqld]
+# Basic settings
+user = mysql
+pid-file = /var/run/mysqld/mysqld.pid
+socket = /var/run/mysqld/mysqld.sock
+port = 3306
+datadir = /var/lib/mysql
+
+# Character set
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+# InnoDB settings
+innodb_buffer_pool_size = 2G
+innodb_log_file_size = 512M
+innodb_log_buffer_size = 64M
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method = O_DIRECT
+innodb_file_per_table = 1
+
+# Binary logging for point-in-time recovery
+log-bin = /var/lib/mysql/mysql-bin
+binlog_format = ROW
+expire_logs_days = 7
+max_binlog_size = 100M
+sync_binlog = 1
+
+# Performance
+max_connections = 200
+thread_cache_size = 50
+table_open_cache = 2000
+query_cache_type = 0
+query_cache_size = 0
+
+# Logging
+log_error = /var/log/mysql/error.log
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow.log
+long_query_time = 2
+
+# Security
+bind-address = 0.0.0.0
+
+[client]
+port = 3306
+socket = /var/run/mysqld/mysqld.sock
+default-character-set = utf8mb4
