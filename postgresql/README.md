@@ -1,81 +1,70 @@
-# PostgreSQL High Availability Cluster
+# PostgreSQL Single-Node with Automated Backups
 
-PostgreSQL 16 with streaming replication, SSL/TLS encryption, and pgpool-II for automatic failover.
-
-## Architecture
-
-- **Primary** (srv1): Read-write operations with streaming replication
-- **Secondary** (mail): Hot standby replica
-- **pgpool** (srv2): Connection pooling, load balancing, automatic failover/failback
-- **Network**: 10.2.2.0/24 overlay network (postgres-net)
-- **Security**: Root CA-based SSL certificate verification, Docker Swarm secrets
+Production-ready single-node PostgreSQL setup with automated backup capabilities using pg_basebackup.
 
 ## Features
 
-- ✅ Streaming replication with SSL encryption
-- ✅ Automatic failover and failback via pgpool
-- ✅ Connectivity monitoring with read-only protection
-- ✅ Load balancing for read queries
-- ✅ Health checks on all components
-- ✅ Certificate auto-generation and signing
+- **Single-Node Design**: Simplified deployment on srv1.chilla55.de
+- **Automated Backups**: 
+  - Weekly full backups (Sunday 3 AM)
+  - Daily WAL archiving (continuous)
+  - 30-day retention by default
+- **Backup Strategy**: pg_basebackup with WAL archiving
+- **Storage**: Backups saved to `/mnt/storagebox/postgresql-backups`
 
-## Connection
+## Quick Start
 
-**Via pgpool (recommended):**
-```bash
-psql -h pgpool -p 5432 -U postgres -d app_db
-```
-
-**Direct connections:**
-- Primary: `postgresql-primary:5432` (read-write)
-- Secondary: `postgresql-secondary:5432` (read-only)
-
-## SSL Configuration
-
-All connections use SSL with verify-ca mode:
-- Root CA: `/mnt/storagebox/rootca/ca-cert.pem`
-- Server certificates auto-generated and signed on first start
-- Mounted read-only with rslave propagation
-
-## Secrets
-
-Required Docker Swarm secrets:
-- `postgres_password` - PostgreSQL superuser password
-- `postgres_replication_password` - Replication user password
-- `pgpool_admin_password` - pgpool admin password
-
-## Deployment
+### Build and Deploy
 
 ```bash
-# Build and push images
-docker build -t ghcr.io/chilla55/postgresql-replication:latest .
-docker push ghcr.io/chilla55/postgresql-replication:latest
-
-# Deploy stack
-docker stack deploy -c docker-compose.swarm.yml postgresql
+cd postgresql
+make build push deploy
 ```
 
-## Monitoring
+### Manual Backups
 
 ```bash
-# Check service status
-docker stack ps postgresql
-
-# View replication status on primary
-docker exec $(docker ps -q -f name=postgresql_postgresql-primary) \
-  psql -U postgres -c "SELECT * FROM pg_stat_replication;"
-
-# Check pgpool node status
-docker service logs postgresql_pgpool | grep "node status"
+make backup-full        # Full backup
+make backup-incremental # Archive WAL files
 ```
 
-## Configuration Files
+### Restore
 
-- `docker-compose.swarm.yml` - Swarm orchestration
-- `pg_hba.conf` - Client authentication (hostssl required)
-- `postgresql-primary.conf` - Primary server config with SSL
-- `postgresql-replica.conf` - Replica server config with SSL
-- `scripts/entrypoint.sh` - Startup and SSL cert generation
-- `scripts/check-connectivity.sh` - Cluster health monitoring
-- `scripts/healthcheck.sh` - Container health validation
-- `scripts/init-replication-user.sh` - Replication user creation
+```bash
+make restore  # Lists available backups and restore instructions
+```
+
+## Backup Strategy
+
+- **Weekly Full**: Complete database snapshot using pg_basebackup (Sunday 3 AM)
+- **Continuous WAL**: Write-Ahead Log files archived continuously
+- **Retention**: 30 days automatic cleanup
+- **Storage**: `/mnt/storagebox/postgresql-backups`
+
+## Configuration
+
+Edit `docker-compose.yml`:
+```yaml
+BACKUP_FULL_SCHEDULE: "0 3 * * 0"      # Weekly full
+BACKUP_INCREMENTAL_SCHEDULE: "0 3 * * 1-6"  # Daily WAL archive
+BACKUP_RETENTION_DAYS: "30"
+```
+
+## Commands
+
+```bash
+make build              # Build image
+make push               # Push to registry
+make deploy             # Deploy stack
+make logs               # View logs
+make backup-full        # Trigger full backup
+make backup-incremental # Archive WAL files
+make restore            # Restore from backup
+```
+
+## Network
+
+Service available on `postgres-net` as:
+- `postgresql` (service name)
+- `postgresql.srv1.chilla55.de` (hostname)
+- Port: `5432`

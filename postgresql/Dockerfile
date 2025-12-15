@@ -1,26 +1,28 @@
-FROM postgres:16
+FROM postgres:17
 
 LABEL maintainer="chilla55"
-LABEL description="PostgreSQL with Master-Slave Replication support"
+LABEL description="PostgreSQL single-node with automated backups"
 
-# Install necessary packages
+# Install backup tools
 RUN apt-get update && \
     apt-get install -y \
-    curl \
-    netcat-openbsd \
+    cron \
+    gzip \
+    rsync \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy configuration files
-COPY scripts/ /usr/local/bin/
-COPY scripts/init-replication-user.sh /docker-entrypoint-initdb.d/
-COPY postgresql-primary.conf /etc/postgresql/
-COPY postgresql-replica.conf /etc/postgresql/
-COPY pg_hba.conf /etc/postgresql/
+# Copy backup scripts
+COPY backup-entrypoint.sh /usr/local/bin/
+COPY backup-full.sh /usr/local/bin/
+COPY backup-incremental.sh /usr/local/bin/
+COPY backup-restore.sh /usr/local/bin/
+COPY healthcheck.sh /usr/local/bin/
+COPY postgresql.conf /etc/postgresql/
 
-RUN chmod +x /usr/local/bin/*.sh /docker-entrypoint-initdb.d/*.sh
+RUN chmod +x /usr/local/bin/*.sh
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD /usr/local/bin/healthcheck.sh
-
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/backup-entrypoint.sh"]
 CMD ["postgres"]
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=30s \
+    CMD /usr/local/bin/healthcheck.sh

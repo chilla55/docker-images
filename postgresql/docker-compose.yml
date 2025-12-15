@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  postgresql:
+    image: ghcr.io/chilla55/postgresql-single:${VERSION:-latest}
+    hostname: postgresql.srv1.chilla55.de
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      # Backup configuration
+      BACKUP_ENABLED: "true"
+      BACKUP_RETENTION_DAYS: "30"
+      BACKUP_FULL_SCHEDULE: "0 3 * * 0"  # Weekly full backup: Sunday 3 AM
+      BACKUP_INCREMENTAL_SCHEDULE: "0 3 * * 1-6"  # Daily incremental: Mon-Sat 3 AM
+    volumes:
+      - postgresql-data:/var/lib/postgresql/data
+      - postgresql-logs:/var/log/postgresql
+      - /mnt/storagebox/postgresql-backups:/backups:rslave
+    configs:
+      - source: pg_hba_conf
+        target: /etc/postgresql/pg_hba.conf
+        mode: 0444
+    secrets:
+      - postgres_password
+    networks:
+      - postgres-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.postgresql.node == srv1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  postgres-net:
+    external: true
+
+volumes:
+  postgresql-data:
+    driver: local
+  postgresql-logs:
+    driver: local
+
+configs:
+  pg_hba_conf:
+    file: ./pg_hba.conf
+
+secrets:
+  postgres_password:
+    external: true
