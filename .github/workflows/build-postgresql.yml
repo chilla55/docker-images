@@ -43,7 +43,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/postgresql-replication
+  IMAGE_NAME: ${{ github.repository_owner }}/postgresql-single
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────

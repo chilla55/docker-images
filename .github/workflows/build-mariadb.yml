@@ -1,5 +1,5 @@
 # ============================================================================
-# GitHub Actions Workflow: Build and Push MariaDB Replication Docker Image
+# GitHub Actions Workflow: Build and Push MariaDB Single-Node Docker Image
 # ============================================================================
 # Automatically builds new versions when changes are made to mariadb/
 # Supports multi-platform builds (amd64, arm64)
@@ -45,7 +45,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/mariadb-replication
+  IMAGE_NAME: ${{ github.repository_owner }}/mariadb-single
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
