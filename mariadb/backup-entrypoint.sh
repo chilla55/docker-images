@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 echo "[backup-entrypoint] Starting MariaDB with backup capability"
 
@@ -20,13 +20,17 @@ EOF
     
     chmod 0644 /etc/cron.d/mariadb-backup
     
-    # Start cron
-    service cron start
+    # Start cron in background
+    cron
     echo "[backup-entrypoint] Backup schedules configured"
     echo "  Full backups: ${FULL_SCHEDULE}"
     echo "  Incremental backups: ${INCREMENTAL_SCHEDULE}"
 fi
 
-# Execute original MariaDB entrypoint
-# Note: MariaDB 11.7 uses 'mariadbd' not 'mysqld'
-exec docker-entrypoint.sh mariadbd
+# Source and execute original MariaDB entrypoint
+# This will handle initialization and then exec mariadbd
+source /usr/local/bin/docker-entrypoint.sh
+
+# Call the main function from the original entrypoint
+# Pass mariadbd as the command to run
+_main mariadbd "$@"
