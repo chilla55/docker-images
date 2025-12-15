@@ -1,31 +1,165 @@
 #!/bin/bash
 set -e
 
-echo "[backup-entrypoint] Starting PostgreSQL with backup capability"
+echo "[backup-entrypoint] Starting PostgreSQL with intelligent backup capability"
+
+# Check if this is a fresh installation and backups exist
+BACKUP_DIR="/backups"
+PGDATA="/var/lib/postgresql/data"
+AUTO_RESTORE="${BACKUP_AUTO_RESTORE:-true}"
+
+# Ensure log directory exists with correct permissions
+mkdir -p /var/log/postgresql
+chown -R postgres:postgres /var/log/postgresql
+chmod 755 /var/log/postgresql
+
+# Initialize PostgreSQL if needed
+if [ ! -s "${PGDATA}/PG_VERSION" ]; then
+    echo "[backup-entrypoint] Initializing PostgreSQL data directory..."
+    
+    # Get postgres password
+    if [ -f /run/secrets/postgres_password ]; then
+        POSTGRES_PASSWORD=$(cat /run/secrets/postgres_password)
+    else
+        POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
+    fi
+    
+    if [ -z "${POSTGRES_PASSWORD}" ]; then
+        echo "[backup-entrypoint] ERROR: No postgres password provided"
+        exit 1
+    fi
+    
+    # Initialize database as postgres user
+    su-exec postgres initdb -D "${PGDATA}" --auth=md5 --pwfile=<(echo "${POSTGRES_PASSWORD}")
+    
+    # Configure PostgreSQL
+    cat >> "${PGDATA}/postgresql.conf" << EOF
+
+# Custom Configuration
+listen_addresses = '*'
+port = 5432
+max_connections = 500
+shared_buffers = 2GB
+effective_cache_size = 6GB
+maintenance_work_mem = 512MB
+checkpoint_completion_target = 0.9
+wal_buffers = 16MB
+default_statistics_target = 100
+random_page_cost = 1.1
+effective_io_concurrency = 200
+work_mem = 2097kB
+min_wal_size = 1GB
+max_wal_size = 4GB
+max_worker_processes = 4
+max_parallel_workers_per_gather = 2
+max_parallel_workers = 4
+max_parallel_maintenance_workers = 2
+
+# Logging
+logging_collector = on
+log_directory = '/var/log/postgresql'
+log_filename = 'postgresql-%Y-%m-%d.log'
+log_truncate_on_rotation = off
+log_rotation_age = 1d
+log_rotation_size = 100MB
+log_line_prefix = '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+log_checkpoints = on
+log_connections = on
+log_disconnections = on
+log_lock_waits = on
+log_statement = 'ddl'
+log_timezone = 'UTC'
+
+# WAL
+wal_level = replica
+archive_mode = on
+archive_command = '/bin/true'
+max_wal_senders = 3
+EOF
+
+    # Configure pg_hba.conf for network access
+    cat > "${PGDATA}/pg_hba.conf" << EOF
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+local   all             all                                     peer
+host    all             all             127.0.0.1/32            md5
+host    all             all             ::1/128                 md5
+host    all             all             0.0.0.0/0               md5
+EOF
+
+    # Auto-restore from backup if enabled and backups exist
+    if [ "${AUTO_RESTORE}" = "true" ]; then
+        if [ -L "${BACKUP_DIR}/full/latest_full.sql.bz2" ] || [ -f "${BACKUP_DIR}/full/latest_full.sql.bz2" ]; then
+            echo "[backup-entrypoint] Fresh installation detected with available backups"
+            echo "[backup-entrypoint] Will restore after PostgreSQL initialization..."
+            
+            # Start PostgreSQL in background temporarily
+            su-exec postgres postgres -D "${PGDATA}" &
+            POSTGRES_PID=$!
+            
+            # Wait for PostgreSQL to be ready
+            echo "[backup-entrypoint] Waiting for PostgreSQL to initialize..."
+            for i in {1..60}; do
+                if su-exec postgres psql -U postgres -c "SELECT 1" &>/dev/null 2>&1; then
+                    echo "[backup-entrypoint] PostgreSQL is ready"
+                    break
+                fi
+                if [ $i -eq 60 ]; then
+                    echo "[backup-entrypoint] ERROR: PostgreSQL failed to start within timeout"
+                    kill $POSTGRES_PID 2>/dev/null || true
+                    exit 1
+                fi
+                sleep 2
+            done
+            
+            # Restore from backup
+            echo "[backup-entrypoint] Restoring from latest backup..."
+            if POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" /usr/local/bin/backup-restore.sh restore-latest; then
+                echo "[backup-entrypoint] Database restored successfully from backup!"
+            else
+                echo "[backup-entrypoint] WARNING: Backup restore failed, continuing with fresh database"
+            fi
+            
+            # Shutdown temporary instance
+            su-exec postgres pg_ctl -D "${PGDATA}" stop -m fast
+            wait $POSTGRES_PID
+        else
+            echo "[backup-entrypoint] No backups found for auto-restore"
+        fi
+    fi
+else
+    echo "[backup-entrypoint] Database already initialized"
+fi
 
 # Setup cron if backups are enabled
 if [ "${BACKUP_ENABLED}" = "true" ]; then
     echo "[backup-entrypoint] Configuring backup schedules"
     
-    # Full backup schedule (default: Sunday 3 AM)
+    # Full backup schedule (default: Sunday 3 AM weekly)
     FULL_SCHEDULE="${BACKUP_FULL_SCHEDULE:-0 3 * * 0}"
-    INCREMENTAL_SCHEDULE="${BACKUP_INCREMENTAL_SCHEDULE:-0 3 * * 1-6}"
+    # Differential backup schedule (default: Wednesday 3 AM mid-week)
+    DIFFERENTIAL_SCHEDULE="${BACKUP_DIFFERENTIAL_SCHEDULE:-0 3 * * 3}"
+    # Incremental backup schedule (default: every hour)
+    INCREMENTAL_SCHEDULE="${BACKUP_INCREMENTAL_SCHEDULE:-0 * * * *}"
     
-    # Create crontab
-    cat > /etc/cron.d/postgresql-backup << EOF
-# PostgreSQL Backup Schedule
-${FULL_SCHEDULE} postgres /usr/local/bin/backup-full.sh >> /var/log/postgresql/backup-full.log 2>&1
-${INCREMENTAL_SCHEDULE} postgres /usr/local/bin/backup-incremental.sh >> /var/log/postgresql/backup-incremental.log 2>&1
+    # Create crontab for root
+    cat > /var/spool/cron/crontabs/root << EOF
+# PostgreSQL Intelligent Backup Schedule
+${FULL_SCHEDULE} /usr/local/bin/backup-full.sh >> /var/log/postgresql/backup-full.log 2>&1
+${DIFFERENTIAL_SCHEDULE} /usr/local/bin/backup-differential.sh >> /var/log/postgresql/backup-differential.log 2>&1
+${INCREMENTAL_SCHEDULE} /usr/local/bin/backup-incremental.sh >> /var/log/postgresql/backup-incremental.log 2>&1
 EOF
     
-    chmod 0644 /etc/cron.d/postgresql-backup
+    chmod 0600 /var/spool/cron/crontabs/root
     
-    # Start cron
-    service cron start
+    # Start crond in background
+    crond -b -l 2
     echo "[backup-entrypoint] Backup schedules configured"
     echo "  Full backups: ${FULL_SCHEDULE}"
+    echo "  Differential backups: ${DIFFERENTIAL_SCHEDULE}"
     echo "  Incremental backups: ${INCREMENTAL_SCHEDULE}"
+    echo "  Retention: 14 days (full), 42 days (differential+full), 42+ days (full only)"
 fi
 
-# Execute original PostgreSQL entrypoint
-exec docker-entrypoint.sh "$@"
+# Execute PostgreSQL as postgres user
+echo "[backup-entrypoint] Starting PostgreSQL..."
+exec su-exec postgres postgres -D "${PGDATA}"

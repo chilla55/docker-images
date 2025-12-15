@@ -1,0 +1,67 @@
+version: "3.8"
+
+services:
+  postgresql:
+    image: ${REGISTRY:-localhost}/postgresql:${VERSION:-latest}
+    hostname: postgresql-{{.Node.Hostname}}
+    networks:
+      - backend-net
+    volumes:
+      - /mnt/storagebox/backups/postgresql:/backups:rslave
+      - postgresql-data:/var/lib/postgresql/data
+    environment:
+      - TZ=Europe/Berlin
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    configs:
+      - source: postgresql-conf
+        target: /etc/postgresql/postgresql.conf
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.database == true
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 30s
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+networks:
+  backend-net:
+    external: true
+
+volumes:
+  postgresql-data:
+    driver: local
+
+secrets:
+  postgres_password:
+    external: true
+
+configs:
+  postgresql-conf:
+    external: true
