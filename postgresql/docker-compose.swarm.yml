@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   postgresql:
-    image: ${REGISTRY:-localhost}/postgresql:${VERSION:-latest}
+    image: ghcr.io/chilla55/postgresql-single:${VERSION:-latest}
     hostname: postgresql-{{.Node.Hostname}}
     networks:
       - postgres-net
