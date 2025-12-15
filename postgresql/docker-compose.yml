@@ -15,10 +15,6 @@ services:
       - postgresql-data:/var/lib/postgresql/data
       - postgresql-logs:/var/log/postgresql
       - /mnt/storagebox/postgresql-backups:/backups:rslave
-    configs:
-      - source: pg_hba_conf
-        target: /etc/postgresql/pg_hba.conf
-        mode: 0444
     secrets:
       - postgres_password
     networks:
@@ -56,10 +52,6 @@ volumes:
     driver: local
   postgresql-logs:
     driver: local
-
-configs:
-  pg_hba_conf:
-    file: ./pg_hba.conf
 
 secrets:
   postgres_password:

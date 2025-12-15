@@ -22,7 +22,7 @@ RUN chmod +x /usr/local/bin/backup-*.sh /usr/local/bin/healthcheck.sh
 COPY mariadb-single.cnf /etc/mysql/conf.d/
 
 ENTRYPOINT ["/usr/local/bin/backup-entrypoint.sh"]
-CMD ["mariadbd"]
+CMD ["mysqld"]
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=30s \
     CMD /usr/local/bin/healthcheck.sh
