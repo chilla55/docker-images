@@ -1,4 +1,13 @@
 [mysqld]
+# Data directory
+datadir = /var/lib/mysql
+socket = /run/mysqld/mysqld.sock
+pid-file = /run/mysqld/mysqld.pid
+
+# Network settings
+bind-address = 0.0.0.0
+port = 3306
+
 # Performance settings
 innodb_buffer_pool_size = 2G
 innodb_log_file_size = 512M
@@ -18,6 +27,7 @@ general_log = 0
 slow_query_log = 1
 slow_query_log_file = /var/log/mysql/slow-query.log
 long_query_time = 2
+log_error = /var/log/mysql/error.log
 
 # Binary logging for backups and replication
 log_bin = /var/lib/mysql/mysql-bin
@@ -35,3 +45,6 @@ innodb_stats_on_metadata = 0
 
 # Safety
 sql_mode = STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+
+[client]
+socket = /run/mysqld/mysqld.sock

@@ -1,20 +1,23 @@
-FROM mariadb:11.2
+FROM alpine:3.19
 
 LABEL maintainer="chilla55"
 LABEL description="MariaDB single-node with intelligent automated backups"
 
-# Install backup tools
-RUN apt-get update && \
-    apt-get install -y \
-    cron \
-    gzip \
-    bzip2 \
-    rsync \
+# Install MariaDB and backup tools
+RUN apk add --no-cache \
+    mariadb \
     mariadb-client \
-    && rm -rf /var/lib/apt/lists/*
+    bash \
+    dcron \
+    bzip2 \
+    tzdata \
+    && mkdir -p /run/mysqld \
+    && chown -R mysql:mysql /run/mysqld \
+    && mkdir -p /var/lib/mysql \
+    && chown -R mysql:mysql /var/lib/mysql
 
-# Ensure MariaDB tools are in PATH and create necessary symlinks
-RUN ln -sf /usr/sbin/my_print_defaults /usr/bin/my_print_defaults 2>/dev/null || true
+# Copy MariaDB configuration
+COPY mariadb.cnf /etc/my.cnf.d/custom.cnf
 
 # Copy backup scripts
 COPY backup-entrypoint.sh /usr/local/bin/
@@ -28,8 +31,13 @@ RUN chmod +x /usr/local/bin/*.sh
 # Create backup state directory
 RUN mkdir -p /var/lib/mysql-backup-state
 
+# Expose MariaDB port
+EXPOSE 3306
+
+VOLUME ["/var/lib/mysql"]
+
 ENTRYPOINT ["/usr/local/bin/backup-entrypoint.sh"]
-CMD ["mariadbd"]
+CMD ["mariadbd", "--user=mysql", "--console"]
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=30s \
     CMD /usr/local/bin/healthcheck.sh
