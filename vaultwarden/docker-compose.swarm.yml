@@ -12,22 +12,11 @@ secrets:
   vaultwarden_smtp_password:
     external: true
     name: vaultwarden_smtp_password
-  
-  vaultwarden_storagebox_password:
-    external: true
-    name: storagebox_password
 
 services:
   vaultwarden:
     image: ghcr.io/chilla55/vaultwarden:${VERSION:-latest}
     hostname: vaultwarden
-    
-    # Required for CIFS mount
-    cap_add:
-      - SYS_ADMIN
-      - DAC_READ_SEARCH
-    devices:
-      - /dev/fuse
     
     environment:
       DOMAIN: ${VAULTWARDEN_DOMAIN:-https://vw.chilla55.de}
@@ -110,24 +99,19 @@ services:
       # Security
       ROCKET_LIMITS: "{json=10485760}"
       INCREASE_NOTE_SIZE_LIMIT: ${INCREASE_NOTE_SIZE_LIMIT:-false}
-      
-      # Storage Box configuration
-      STORAGE_BOX_KEYS_ENABLED: ${STORAGE_BOX_KEYS_ENABLED:-true}
-      STORAGE_BOX_HOST: ${STORAGE_BOX_HOST:-u123456.your-storagebox.de}
-      STORAGE_BOX_USER: ${STORAGE_BOX_USER:-u123456}
-      STORAGE_BOX_PASSWORD_FILE: /run/secrets/vaultwarden_storagebox_password
-      STORAGE_BOX_KEYS_PATH: ${STORAGE_BOX_KEYS_PATH:-/vaultwarden/keys}
-      STORAGE_BOX_KEYS_MOUNT_POINT: ${STORAGE_BOX_KEYS_MOUNT_POINT:-/data/keys}
-      STORAGE_BOX_KEYS_MOUNT_OPTIONS: ${STORAGE_BOX_KEYS_MOUNT_OPTIONS:-vers=3.0,uid=0,gid=0,file_mode=0600,dir_mode=0700}
     
     secrets:
       - vaultwarden_admin_token
       - vaultwarden_db_password
       - vaultwarden_smtp_password
-      - vaultwarden_storagebox_password
     
     volumes:
       - vaultwarden-data:/data
+      - type: bind
+        source: /mnt/storagebox/vaultwarden/keys
+        target: /data/keys
+        bind:
+          propagation: rslave
     
     networks:
       - web-net

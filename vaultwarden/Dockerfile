@@ -1,7 +1,7 @@
 FROM vaultwarden/server:latest
 
-# Install healthcheck dependencies and CIFS utilities
-RUN apt-get update && apt-get install -y wget cifs-utils && rm -rf /var/lib/apt/lists/*
+# Install healthcheck dependencies
+RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
 
 # Add scripts
 COPY healthcheck.sh /usr/local/bin/healthcheck.sh

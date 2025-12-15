@@ -15,22 +15,22 @@ for i in {1..60}; do
 done
 
 # Move keys to Storage Box if not already there
-if [ "${STORAGE_BOX_KEYS_ENABLED}" = "true" ] && [ -f "/data/rsa_key.pem" ]; then
-    if [ ! -f "${STORAGE_BOX_KEYS_MOUNT_POINT}/rsa_key.pem" ]; then
+if [ -d "/data/keys" ] && [ -f "/data/rsa_key.pem" ]; then
+    if [ ! -f "/data/keys/rsa_key.pem" ]; then
         echo "Moving RSA keys to Storage Box..."
         
         # Copy keys to Storage Box
-        cp /data/rsa_key.pem "${STORAGE_BOX_KEYS_MOUNT_POINT}/rsa_key.pem"
-        cp /data/rsa_key.pub.pem "${STORAGE_BOX_KEYS_MOUNT_POINT}/rsa_key.pub.pem"
+        cp /data/rsa_key.pem /data/keys/rsa_key.pem
+        cp /data/rsa_key.pub.pem /data/keys/rsa_key.pub.pem
         
         # Set permissions
-        chmod 600 "${STORAGE_BOX_KEYS_MOUNT_POINT}/rsa_key.pem"
-        chmod 644 "${STORAGE_BOX_KEYS_MOUNT_POINT}/rsa_key.pub.pem"
+        chmod 600 /data/keys/rsa_key.pem
+        chmod 644 /data/keys/rsa_key.pub.pem
         
         # Remove originals and create symlinks
         rm -f /data/rsa_key.pem /data/rsa_key.pub.pem
-        ln -s "${STORAGE_BOX_KEYS_MOUNT_POINT}/rsa_key.pem" /data/rsa_key.pem
-        ln -s "${STORAGE_BOX_KEYS_MOUNT_POINT}/rsa_key.pub.pem" /data/rsa_key.pub.pem
+        ln -s /data/keys/rsa_key.pem /data/rsa_key.pem
+        ln -s /data/keys/rsa_key.pub.pem /data/rsa_key.pub.pem
         
         echo "RSA keys moved to Storage Box and symlinked"
     else
