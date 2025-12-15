@@ -19,9 +19,11 @@ COPY backup-full.sh /usr/local/bin/
 COPY backup-incremental.sh /usr/local/bin/
 COPY backup-restore.sh /usr/local/bin/
 COPY healthcheck.sh /usr/local/bin/
-COPY mariadb.cnf /etc/mysql/conf.d/
 
 RUN chmod +x /usr/local/bin/*.sh
+
+# Copy custom MariaDB configuration
+COPY mariadb.cnf /etc/mysql/mariadb.conf.d/99-custom.cnf
 
 # Create backup state directory
 RUN mkdir -p /var/lib/mysql-backup-state
