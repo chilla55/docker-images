@@ -3,6 +3,14 @@ set -e
 
 BACKUP_DIR="/backups"
 MYSQL_ROOT_PASSWORD=$(cat /run/secrets/mysql_root_password 2>/dev/null || echo "${MYSQL_ROOT_PASSWORD}")
+MYSQL_SOCKET="${MYSQL_SOCKET:-}"
+
+# Build mysql connection command
+if [ -n "${MYSQL_SOCKET}" ]; then
+    MYSQL_CMD="mysql --socket=${MYSQL_SOCKET} -uroot -p${MYSQL_ROOT_PASSWORD}"
+else
+    MYSQL_CMD="mysql -uroot -p${MYSQL_ROOT_PASSWORD}"
+fi
 
 echo "==================================="
 echo "MariaDB Backup Restore Utility"
@@ -49,12 +57,12 @@ restore_database() {
     
     # Extract and restore only the specified database
     echo "Extracting database '${DATABASE_NAME}'..."
-    bunzip2 -c "${BACKUP_FILE}" | sed -n "/^-- Current Database: \`${DATABASE_NAME}\`/,/^-- Current Database:/p" | head -n -1 | mysql -uroot -p"${MYSQL_ROOT_PASSWORD}"
+    bunzip2 -c "${BACKUP_FILE}" | sed -n "/^-- Current Database: \`${DATABASE_NAME}\`/,/^-- Current Database:/p" | head -n -1 | ${MYSQL_CMD}
     
     # If sed pattern doesn't work, try alternative extraction
     if [ $? -ne 0 ]; then
         echo "Trying alternative extraction method..."
-        bunzip2 -c "${BACKUP_FILE}" | mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" --one-database "${DATABASE_NAME}"
+        bunzip2 -c "${BACKUP_FILE}" | ${MYSQL_CMD} --one-database "${DATABASE_NAME}"
     fi
     
     echo "Database '${DATABASE_NAME}' restored successfully!"
@@ -106,7 +114,7 @@ restore_full() {
     
     # Decompress and restore
     echo "Decompressing and restoring backup..."
-    bunzip2 -c "${BACKUP_FILE}" | mysql -uroot -p"${MYSQL_ROOT_PASSWORD}"
+    bunzip2 -c "${BACKUP_FILE}" | ${MYSQL_CMD}
     
     echo "Full backup restored successfully!"
 }
@@ -136,7 +144,7 @@ restore_incremental() {
     
     # Decompress and restore
     echo "Decompressing and restoring backup..."
-    bunzip2 -c "${BACKUP_FILE}" | mysql -uroot -p"${MYSQL_ROOT_PASSWORD}"
+    bunzip2 -c "${BACKUP_FILE}" | ${MYSQL_CMD}
     
     echo "Incremental backup restored successfully!"
 }

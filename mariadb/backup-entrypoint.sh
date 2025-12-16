@@ -69,7 +69,7 @@ EOF
             
             # Restore from backup
             echo "[backup-entrypoint] Restoring from latest backup..."
-            if MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}" /usr/local/bin/backup-restore.sh restore-latest; then
+            if MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}" MYSQL_SOCKET="/tmp/mysql_init.sock" /usr/local/bin/backup-restore.sh restore-latest; then
                 echo "[backup-entrypoint] Database restored successfully from backup!"
             else
                 echo "[backup-entrypoint] WARNING: Backup restore failed, continuing with fresh database"
