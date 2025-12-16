@@ -83,8 +83,8 @@ services:
       # Database Settings
       # ──────────────────────────────────────────────────────────────────
       DB_CONNECTION: mysql
-      DB_HOST: maxscale
-      DB_PORT: "4006"
+      DB_HOST: mariadb
+      DB_PORT: "3306"
       DB_DATABASE: panel
       DB_USERNAME: pterodactyl
       DB_PASSWORD_FILE: /run/secrets/panel_db_password
