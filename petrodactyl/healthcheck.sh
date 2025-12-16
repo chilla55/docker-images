@@ -1,4 +1,4 @@
-﻿#!/bin/sh
+﻿#!/bin/bash
 # ============================================================================
 # Pterodactyl Panel Healthcheck Script
 # ============================================================================
@@ -27,7 +27,7 @@ fi
 # ──────────────────────────────────────────────────────────────────────────
 # Check 3: HTTP endpoint responds
 # ──────────────────────────────────────────────────────────────────────────
-if ! wget -q -O /dev/null --timeout=3 "http://localhost:80/" 2>/dev/null; then
+if ! curl -sf -o /dev/null --max-time 3 "http://localhost:80/" 2>/dev/null; then
     echo "[HEALTHCHECK ERROR] HTTP endpoint not responding" >&2
     exit 1
 fi
