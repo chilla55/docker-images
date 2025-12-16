@@ -36,23 +36,45 @@ fi
 BACKUP_FILE="${BACKUP_DIR}/mariadb/full/mariadb-full-$(date +%Y%m%d-%H%M%S).sql.bz2"
 echo "  Creating backup: $BACKUP_FILE"
 
-docker exec $MARIADB_CONTAINER mysqldump \
+# Determine which dump command to use
+if docker exec $MARIADB_CONTAINER which mariadb-dump >/dev/null 2>&1; then
+    DUMP_CMD="mariadb-dump"
+elif docker exec $MARIADB_CONTAINER which mysqldump >/dev/null 2>&1; then
+    DUMP_CMD="mysqldump"
+else
+    echo -e "${RED}✗ Neither mariadb-dump nor mysqldump found in container${NC}"
+    exit 1
+fi
+
+echo "  Using dump command: $DUMP_CMD"
+
+# Use MYSQL_PWD environment variable to avoid password in process list
+if docker exec -e MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" $MARIADB_CONTAINER $DUMP_CMD \
     -u root \
-    -p"${MYSQL_ROOT_PASSWORD}" \
     --all-databases \
     --single-transaction \
     --quick \
     --lock-tables=false \
     --routines \
     --triggers \
-    --events | bzip2 > "$BACKUP_FILE"
-
-if [ $? -eq 0 ] && [ -f "$BACKUP_FILE" ]; then
+    --events 2>&1 | bzip2 > "$BACKUP_FILE"; then
+    
+    # Check if file is not empty (more than 1KB)
+    FILE_SIZE=$(stat -f%z "$BACKUP_FILE" 2>/dev/null || stat -c%s "$BACKUP_FILE" 2>/dev/null)
+    if [ "$FILE_SIZE" -lt 1024 ]; then
+        echo -e "${RED}✗ Backup file is too small ($FILE_SIZE bytes), something went wrong${NC}"
+        echo "  Backup content:"
+        bzcat "$BACKUP_FILE" 2>&1
+        rm -f "$BACKUP_FILE"
+        exit 1
+    fi
+    
     echo -e "${GREEN}✓ MariaDB backup completed${NC}"
     echo "  Location: $BACKUP_FILE"
     echo "  Size: $(du -h "$BACKUP_FILE" | cut -f1)"
 else
     echo -e "${RED}✗ MariaDB backup failed${NC}"
+    [ -f "$BACKUP_FILE" ] && rm -f "$BACKUP_FILE"
     exit 1
 fi
 
