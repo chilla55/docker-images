@@ -9,7 +9,7 @@ CF_REALIP_STATE_DIR="${CF_REALIP_STATE_DIR:-/tmp/cf-realip}"
 # Sites watcher settings
 : "${SITES_WATCH_PATH:=/etc/nginx/sites-enabled}"
 : "${SITES_WATCH_INTERVAL:=30}"
-: "${SITES_WATCH_DEBUG:=0}"
+: "${SITES_WATCH_DEBUG:=1}"
 
 log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
