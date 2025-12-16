@@ -134,34 +134,34 @@ validate_and_fix_config() {
       log "[entrypoint] WARNING: Upstream resolution failure detected (attempt $attempt/$max_attempts)"
       
       if [ $attempt -eq $max_attempts ]; then
-        log "[entrypoint] Attempting graceful degradation - temporarily removing problematic site symlinks"
+        log "[entrypoint] Attempting graceful degradation - removing problematic site symlinks"
         
         # Extract the problematic file from error message
         local problem_file=$(echo "$error_output" | grep -oP 'in \K/[^ ]+\.conf' | head -1)
         
         if [ -n "$problem_file" ] && [ -e "$problem_file" ]; then
           local site_name=$(basename "$problem_file")
-          log "[entrypoint] Temporarily removing site link: $site_name"
+          log "[entrypoint] Removing site symlink: $site_name"
           
-          # Remove the symlink or file from sites-enabled
+          # Remove the symlink from sites-enabled (config remains in source)
           rm -f "$problem_file"
           
           # Test again after removing
           if nginx -t 2>&1; then
-            log "[entrypoint] nginx config OK after removing $site_name"
-            log "[entrypoint] The sites watcher will recreate the link when the upstream service is available"
+            log "[entrypoint] nginx config OK after disabling $site_name"
+            log "[entrypoint] Sites watcher will retry when upstream becomes available"
             return 0
           fi
         fi
         
-        # If we still have issues, try removing all sites-enabled configs
+        # If we still have issues, try removing all sites-enabled symlinks
         if [ -d "$SITES_WATCH_PATH" ] && [ "$(ls -A $SITES_WATCH_PATH 2>/dev/null)" ]; then
-          log "[entrypoint] Removing all site links from sites-enabled"
+          log "[entrypoint] Removing all site symlinks from sites-enabled"
           rm -f "$SITES_WATCH_PATH"/* 2>/dev/null || true
           
           if nginx -t 2>&1; then
             log "[entrypoint] nginx will start with default configuration only"
-            log "[entrypoint] The sites watcher will recreate links when upstream services are available"
+            log "[entrypoint] Sites watcher will enable sites when upstreams become available"
             return 0
           fi
         fi
