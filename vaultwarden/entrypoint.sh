@@ -4,8 +4,10 @@ set -e
 # Build DATABASE_URL from secret if DB password file exists
 if [ -f "/run/secrets/vaultwarden_db_password" ]; then
     DB_PASSWORD="$(cat /run/secrets/vaultwarden_db_password)"
-    export DATABASE_URL="mysql://vaultwarden:${DB_PASSWORD}@mariadb-secondary:3306/vaultwarden"
-    echo "DATABASE_URL configured for MySQL (secondary)"
+    # Use DB_HOST from environment or default to 'mariadb'
+    DB_HOST="${DB_HOST:-mariadb}"
+    export DATABASE_URL="mysql://vaultwarden:${DB_PASSWORD}@${DB_HOST}:3306/vaultwarden"
+    echo "DATABASE_URL configured for MySQL (host: ${DB_HOST})"
 fi
 
 # Check if keys directory is mounted from host (at /data/keys)
