@@ -42,6 +42,12 @@ if [ ! -s "${PGDATA}/PG_VERSION" ]; then
         echo "[backup-entrypoint] Using default postgresql.conf"
         # Default config is already in place from initdb
     fi
+else
+    # Update config on every start if mounted config exists
+    if [ -f /etc/postgresql/postgresql.conf ]; then
+        echo "[backup-entrypoint] Updating postgresql.conf from mounted config"
+        cp /etc/postgresql/postgresql.conf "${PGDATA}/postgresql.conf"
+    fi
     
     # Configure pg_hba.conf for network access
     cat > "${PGDATA}/pg_hba.conf" << EOF
