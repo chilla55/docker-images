@@ -141,9 +141,10 @@ validate_and_fix_config() {
         
         if [ -n "$problem_file" ] && [ -e "$problem_file" ]; then
           local site_name=$(basename "$problem_file")
-          log "[entrypoint] Removing site symlink: $site_name"
+          log "[entrypoint] WARNING: Problematic site found: $site_name"
+          log "[entrypoint] Removing ONLY this site symlink: $site_name"
           
-          # Remove the symlink from sites-enabled (config remains in source)
+          # Remove ONLY the problematic symlink from sites-enabled
           rm -f "$problem_file"
           
           # Test again after removing
@@ -151,18 +152,11 @@ validate_and_fix_config() {
             log "[entrypoint] nginx config OK after disabling $site_name"
             log "[entrypoint] Sites watcher will retry when upstream becomes available"
             return 0
-          fi
-        fi
-        
-        # If we still have issues, try removing all sites-enabled symlinks
-        if [ -d "$SITES_WATCH_PATH" ] && [ "$(ls -A $SITES_WATCH_PATH 2>/dev/null)" ]; then
-          log "[entrypoint] Removing all site symlinks from sites-enabled"
-          rm -f "$SITES_WATCH_PATH"/* 2>/dev/null || true
-          
-          if nginx -t 2>&1; then
-            log "[entrypoint] nginx will start with default configuration only"
-            log "[entrypoint] Sites watcher will enable sites when upstreams become available"
-            return 0
+          else
+            # If still failing, there may be another problematic site - try again
+            log "[entrypoint] Still have config issues after removing $site_name, checking for more..."
+            validate_and_fix_config  # Recursive call to handle next problematic site
+            return $?
           fi
         fi
       fi

@@ -8,7 +8,7 @@
      ```yaml
      volumes:
        - /mnt/storagebox/certs:/etc/nginx/certs:ro
-       - /mnt/storagebox/sites:/etc/nginx/sites-enabled:ro
+       - /mnt/storagebox/sites:/etc/nginx/sites-available:ro
      ```
    - Removed CIFS mount environment variables
    - Added sites watcher environment variables:
@@ -53,7 +53,7 @@ The host machine should have the following structure at `/mnt/storagebox`:
 │           ├── fullchain.pem
 │           ├── privkey.pem
 │           └── ...
-└── sites/              # Site configurations mounted to /etc/nginx/sites-enabled
+└── sites/              # Site configurations mounted to /etc/nginx/sites-available\n                        # Symlinks created in /etc/nginx/sites-enabled by watch-sites-reload.sh
     ├── example.com.conf
     ├── api.example.com.conf
     └── ...

@@ -14,7 +14,7 @@ debug() {
 }
 
 # Source directory where all site configs are stored (before symlinking)
-SITES_SOURCE_DIR="${SITES_SOURCE_DIR:-/mnt/storagebox/sites}"
+SITES_SOURCE_DIR="${SITES_SOURCE_DIR:-/etc/nginx/sites-available}"
 
 if [ ! -d "$SITES_PATH" ]; then
   log "ERROR: Sites directory does not exist: $SITES_PATH"

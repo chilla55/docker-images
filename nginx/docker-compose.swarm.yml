@@ -63,7 +63,7 @@ services:
     volumes:
       # Host bind mounts with rslave propagation (simple syntax like certbot)
       - /mnt/storagebox/certs:/etc/nginx/certs:rslave
-      - /mnt/storagebox/sites:/etc/nginx/sites-enabled:rslave
+      - /mnt/storagebox/sites:/etc/nginx/sites-available:rslave
     
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]
