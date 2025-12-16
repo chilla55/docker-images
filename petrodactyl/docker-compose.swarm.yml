@@ -86,7 +86,7 @@ services:
       DB_HOST: maxscale
       DB_PORT: "4006"
       DB_DATABASE: panel
-      DB_USERNAME: ptero
+      DB_USERNAME: pterodactyl
       DB_PASSWORD_FILE: /run/secrets/panel_db_password
       
       # ──────────────────────────────────────────────────────────────────
