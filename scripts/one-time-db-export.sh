@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-echo "=== One-Time Database Export for Migration ==="
-echo "This script triggers immediate backups of all databases"
+echo "=== One-Time MariaDB Export for Migration ==="
+echo "This script creates a full backup of MariaDB for swarm migration"
 echo ""
 
 # Colors
@@ -57,47 +57,18 @@ else
 fi
 
 echo ""
-echo -e "${YELLOW}Step 2: Creating PostgreSQL Full Backup${NC}"
-POSTGRES_CONTAINER=$(docker ps -q -f name=postgresql)
-if [ -z "$POSTGRES_CONTAINER" ]; then
-    echo -e "${YELLOW}⚠ PostgreSQL container not found, skipping${NC}"
-else
-    # Check if backup script exists in container
-    if docker exec $POSTGRES_CONTAINER test -f /usr/local/bin/backup-full.sh; then
-        # New container with backup script
-        docker exec $POSTGRES_CONTAINER /usr/local/bin/backup-full.sh
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}✓ PostgreSQL backup completed${NC}"
-            echo "  Location: ${BACKUP_DIR}/postgresql/full/"
-            ls -lh ${BACKUP_DIR}/postgresql/full/ | tail -5
-        else
-            echo -e "${RED}✗ PostgreSQL backup failed${NC}"
-            exit 1
-        fi
+echo -e "${GREEN}=== MariaDB Backup Completed ===${NC}"
+echo ""
+echo "Backup location: ${BACKUP_DIR}/mariadb/full/"
 echo ""
 echo "To restore on new swarm setup:"
+echo "  1. Deploy the new mariadb service with the updated image"
+echo "  2. The new container has BACKUP_AUTO_RESTORE=true enabled"
+echo "  3. It will automatically restore from the latest backup on first start"
 echo ""
-echo "MariaDB:"
-echo "  1. Deploy the mariadb service with new image"
-echo "  2. The new container has auto-restore - it will use the backup automatically"
-echo "  3. Or restore manually:"
-echo "     bzcat /mnt/storagebox/backups/mariadb/full/<backup-file> | docker exec -i <container> mysql -u root -p"
-echo ""
-echo "PostgreSQL:"
-echo "  1. Deploy the postgresql service"
-echo "  2. If new container has backup script:"
-echo "     docker exec <container> /usr/local/bin/backup-restore.sh /backups/full/<backup-file>"
-echo "  3. Or restore manually:"
-echo "     bzcat /mnt/storagebox/backups/postgresql/full/<backup-file> | docker exec -i <container> psql -U postgres"
-            echo -e "${GREEN}✓ PostgreSQL backup completed${NC}"
-            echo "  Location: $BACKUP_FILE"
-            echo "  Size: $(du -h "$BACKUP_FILE" | cut -f1)"
-        else
-            echo -e "${RED}✗ PostgreSQL backup failed${NC}"
-            exit 1
-        fi
-    fi
-fi
+echo "Or restore manually:"
+echo "  bzcat ${BACKUP_DIR}/mariadb/full/<backup-file> | \\"
+echo "    docker exec -i <container> mysql -u root -p\$(cat /run/secrets/mysql_root_password)"
 
 echo ""
 echo -e "${GREEN}=== All Database Backups Completed ===${NC}"
