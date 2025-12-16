@@ -21,7 +21,7 @@ services:
       - mysql_root_password
     configs:
       - source: mariadb_config
-        target: /etc/mysql/mariadb.conf.d/99-custom.cnf
+        target: /etc/my.cnf.d/99-custom.cnf
     networks:
       - mariadb-net
     ports:
