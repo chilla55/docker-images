@@ -8,10 +8,7 @@ BACKUP_DIR="/backups"
 PGDATA="/var/lib/postgresql/data"
 AUTO_RESTORE="${BACKUP_AUTO_RESTORE:-true}"
 
-# Ensure log directory exists with correct permissions
-mkdir -p /var/log/postgresql
-chown -R postgres:postgres /var/log/postgresql
-chmod 755 /var/log/postgresql
+# No need for internal log directory - using Docker logs
 
 # Initialize PostgreSQL if needed
 if [ ! -s "${PGDATA}/PG_VERSION" ]; then
@@ -113,9 +110,9 @@ if [ "${BACKUP_ENABLED}" = "true" ]; then
     # Create crontab for root
     cat > /var/spool/cron/crontabs/root << EOF
 # PostgreSQL Intelligent Backup Schedule
-${FULL_SCHEDULE} /usr/local/bin/backup-full.sh >> /var/log/postgresql/backup-full.log 2>&1
-${DIFFERENTIAL_SCHEDULE} /usr/local/bin/backup-differential.sh >> /var/log/postgresql/backup-differential.log 2>&1
-${INCREMENTAL_SCHEDULE} /usr/local/bin/backup-incremental.sh >> /var/log/postgresql/backup-incremental.log 2>&1
+${FULL_SCHEDULE} /usr/local/bin/backup-full.sh 2>&1
+${DIFFERENTIAL_SCHEDULE} /usr/local/bin/backup-differential.sh 2>&1
+${INCREMENTAL_SCHEDULE} /usr/local/bin/backup-incremental.sh 2>&1
 EOF
     
     chmod 0600 /var/spool/cron/crontabs/root
