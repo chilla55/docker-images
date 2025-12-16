@@ -70,6 +70,7 @@ COPY healthcheck.sh   /usr/local/bin/healthcheck.sh
 COPY entrypoint.sh    /entrypoint.sh
 COPY watch-cert-reload.sh   /usr/local/bin/watch-cert-reload.sh
 COPY watch-sites-reload.sh  /usr/local/bin/watch-sites-reload.sh
+COPY default-site.conf /etc/nginx/conf.d/00-default.conf
 RUN chmod +x /usr/local/bin/update-cf-ips.sh /usr/local/bin/healthcheck.sh /usr/local/bin/watch-cert-reload.sh /usr/local/bin/watch-sites-reload.sh /entrypoint.sh
 
 # usual dirs/users (keep yours as-is)

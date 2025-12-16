@@ -116,12 +116,75 @@ fi
 # Ensure cache, log, and Cloudflare state dirs are writable
 chown -R nginx:nginx /var/cache/nginx /etc/nginx/logs "$CF_REALIP_STATE_DIR" 2>/dev/null || true
 
-# Validate nginx configuration before starting
-if nginx -t; then
-  log "[entrypoint] nginx config OK"
-else
-  log "[entrypoint] nginx config FAILED"
+# Validate nginx configuration before starting - with graceful degradation for upstream resolution failures
+validate_and_fix_config() {
+  local max_attempts=3
+  local attempt=1
+  
+  while [ $attempt -le $max_attempts ]; do
+    if nginx -t 2>&1; then
+      log "[entrypoint] nginx config OK"
+      return 0
+    fi
+    
+    local error_output=$(nginx -t 2>&1)
+    
+    # Check if the error is about upstream host not found
+    if echo "$error_output" | grep -q "host not found in upstream"; then
+      log "[entrypoint] WARNING: Upstream resolution failure detected (attempt $attempt/$max_attempts)"
+      
+      if [ $attempt -eq $max_attempts ]; then
+        log "[entrypoint] Attempting graceful degradation - temporarily removing problematic site symlinks"
+        
+        # Extract the problematic file from error message
+        local problem_file=$(echo "$error_output" | grep -oP 'in \K/[^ ]+\.conf' | head -1)
+        
+        if [ -n "$problem_file" ] && [ -e "$problem_file" ]; then
+          local site_name=$(basename "$problem_file")
+          log "[entrypoint] Temporarily removing site link: $site_name"
+          
+          # Remove the symlink or file from sites-enabled
+          rm -f "$problem_file"
+          
+          # Test again after removing
+          if nginx -t 2>&1; then
+            log "[entrypoint] nginx config OK after removing $site_name"
+            log "[entrypoint] The sites watcher will recreate the link when the upstream service is available"
+            return 0
+          fi
+        fi
+        
+        # If we still have issues, try removing all sites-enabled configs
+        if [ -d "$SITES_WATCH_PATH" ] && [ "$(ls -A $SITES_WATCH_PATH 2>/dev/null)" ]; then
+          log "[entrypoint] Removing all site links from sites-enabled"
+          rm -f "$SITES_WATCH_PATH"/* 2>/dev/null || true
+          
+          if nginx -t 2>&1; then
+            log "[entrypoint] nginx will start with default configuration only"
+            log "[entrypoint] The sites watcher will recreate links when upstream services are available"
+            return 0
+          fi
+        fi
+      fi
+      
+      # Wait a bit before retry (upstream service might be starting)
+      log "[entrypoint] Waiting 3 seconds before retry..."
+      sleep 3
+      attempt=$((attempt + 1))
+    else
+      # Different type of error - fail immediately
+      log "[entrypoint] CRITICAL: nginx config has non-recoverable errors"
+      echo "$error_output"
+      return 1
+    fi
+  done
+  
+  log "[entrypoint] CRITICAL: Could not recover nginx configuration"
   nginx -t || true
+  return 1
+}
+
+if ! validate_and_fix_config; then
   exit 1
 fi
 

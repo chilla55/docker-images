@@ -71,7 +71,28 @@ while :; do
       fi
     else
       log "ERROR: nginx configuration test failed, NOT reloading"
-      nginx -t 2>&1 | head -20
+      log "Checking if this is an upstream resolution issue..."
+      
+      # Check if the error is due to upstream resolution
+      if nginx -t 2>&1 | grep -q "host not found in upstream"; then
+        log "Upstream host not found - removing problematic site link"
+        
+        # Extract the problematic file and remove it
+        problem_file=$(nginx -t 2>&1 | grep -oP 'in \K/[^ ]+\.conf' | head -1)
+        if [ -n "$problem_file" ] && [ -e "$problem_file" ]; then
+          site_name=$(basename "$problem_file")
+          log "Removing site link: $site_name (upstream not available)"
+          rm -f "$problem_file"
+          
+          # Try reload after removal
+          if nginx -t 2>&1 | grep -q "successful"; then
+            log "Config OK after removing $site_name, reloading nginx"
+            nginx -s reload 2>/dev/null || kill -HUP 1 2>/dev/null
+          fi
+        fi
+      else
+        nginx -t 2>&1 | head -20
+      fi
     fi
     
     LAST_STATE="$CURRENT_STATE"
