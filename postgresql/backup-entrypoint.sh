@@ -30,7 +30,12 @@ if [ ! -s "${PGDATA}/PG_VERSION" ]; then
     fi
     
     # Initialize database as postgres user
-    su-exec postgres initdb -D "${PGDATA}" --auth=md5 --pwfile=<(echo "${POSTGRES_PASSWORD}")
+    # Create temp password file for initdb
+    echo "${POSTGRES_PASSWORD}" > /tmp/pgpass
+    chown postgres:postgres /tmp/pgpass
+    chmod 600 /tmp/pgpass
+    su-exec postgres initdb -D "${PGDATA}" --auth=md5 --pwfile=/tmp/pgpass
+    rm -f /tmp/pgpass
     
     # Use provided config if available, otherwise use embedded config
     if [ -f /etc/postgresql/postgresql.conf ]; then
