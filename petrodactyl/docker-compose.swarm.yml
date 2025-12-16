@@ -31,13 +31,9 @@ secrets:
     external: true
     name: pterodactyl_db_password
   
-  panel_redis_password:
-    external: true
-    name: pterodactyl_redis_password
-  
   panel_mail_password:
     external: true
-    name: pterodactyl_mail_password
+    name: vaultwarden_smtp_password
 
 # ──────────────────────────────────────────────────────────────────────────
 # Services
@@ -107,7 +103,7 @@ services:
       MAIL_HOST: smtp.example.com
       MAIL_PORT: "25"
       MAIL_USERNAME: ""
-      MAIL_PASSWORD: ""
+      MAIL_PASSWORD_FILE: /run/secrets/panel_mail_password
       MAIL_ENCRYPTION: tls
       MAIL_FROM_ADDRESS: no-reply@chilla55.de
       MAIL_FROM_NAME: "Pterodactyl Panel"
@@ -139,6 +135,7 @@ services:
     secrets:
       - panel_app_key
       - panel_db_password
+      - panel_mail_password
     
     deploy:
       mode: replicated
