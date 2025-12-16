@@ -172,36 +172,3 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Platforms:** linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # Security Scan (Optional)
-  # ──────────────────────────────────────────────────────────────────────────
-  security-scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    needs: [detect-version, build-and-push]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.ref_type == 'tag'
-    
-    permissions:
-      contents: read
-      security-events: write
-    
-    steps:
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ needs.build-and-push.outputs.image-ref }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-      
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
