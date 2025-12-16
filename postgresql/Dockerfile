@@ -39,4 +39,4 @@ ENTRYPOINT ["/usr/local/bin/backup-entrypoint.sh"]
 CMD ["postgres"]
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=30s \
-    CMD pg_isready -U postgres -d postgres
+    CMD pg_isready -h localhost -U postgres -d postgres
