@@ -4,7 +4,8 @@ datadir = /var/lib/mysql
 socket = /run/mysqld/mysqld.sock
 pid-file = /run/mysqld/mysqld.pid
 
-# Network settings
+# Network settings - explicitly disable skip-networking from Alpine default
+skip-networking = 0
 bind-address = 0.0.0.0
 port = 3306
 
