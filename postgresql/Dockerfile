@@ -12,6 +12,7 @@ RUN apk add --no-cache \
     bzip2 \
     tzdata \
     su-exec \
+    coreutils \
     && mkdir -p /run/postgresql \
     && chown -R postgres:postgres /run/postgresql \
     && mkdir -p /var/lib/postgresql/data \
