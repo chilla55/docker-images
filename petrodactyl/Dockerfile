@@ -38,7 +38,8 @@ RUN apk add --no-cache \
     php83-session \
     php83-posix \
     php83-sodium \
-    php83-bcmath
+    php83-bcmath \
+    php83-intl
 
 # Create php symlink
 RUN ln -sf /usr/bin/php83 /usr/bin/php
@@ -107,12 +108,17 @@ RUN apk add --no-cache \
     php83-gd \
     php83-zip \
     php83-xml \
+    php83-dom \
+    php83-xmlwriter \
+    php83-xmlreader \
+    php83-simplexml \
     php83-tokenizer \
     php83-fileinfo \
     php83-openssl \
     php83-ctype \
     php83-posix \
     php83-sodium \
+    php83-intl \
     caddy \
     supervisor \
     mariadb-client && \
