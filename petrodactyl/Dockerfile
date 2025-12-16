@@ -123,8 +123,9 @@ RUN apk add --no-cache \
     mkdir -p \
         ${APP_DIR} \
         /var/log/ptero \
-        /run/php && \
-    chown -R www-data:www-data /var/log/ptero /run/php
+        /run/php \
+        /run/php-fpm && \
+    chown -R www-data:www-data /var/log/ptero /run/php /run/php-fpm
 
 WORKDIR ${APP_DIR}
 
@@ -149,7 +150,7 @@ RUN sed -i \
     sed -i \
     -e 's/^user = nobody/user = www-data/' \
     -e 's/^group = nobody/group = www-data/' \
-    -e 's/^listen = 127.0.0.1:9000/listen = 0.0.0.0:9000/' \
+    -e 's/^listen = 127.0.0.1:9000/listen = \/run\/php-fpm\/pterodactyl.sock/' \
     -e 's/^;listen.owner = nobody/listen.owner = www-data/' \
     -e 's/^;listen.group = nobody/listen.group = www-data/' \
     -e 's/^;listen.mode = 0660/listen.mode = 0660/' \
