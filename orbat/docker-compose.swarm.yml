@@ -5,6 +5,7 @@ services:
     image: ghcr.io/chilla55/orbat:latest
     networks:
       - web-net
+      - postgresql-net
     
     deploy:
       mode: replicated
@@ -72,9 +73,8 @@ services:
       - database_password
     
     volumes:
-      # Persist git repository and node_modules
+      # Persist git repository and node_modules in single volume
       - orbat_app:/app
-      - orbat_node_modules:/app/node_modules
     
     healthcheck:
       test: ["CMD", "/healthcheck.sh"]
@@ -98,9 +98,9 @@ secrets:
 volumes:
   orbat_app:
     driver: local
-  orbat_node_modules:
-    driver: local
 
 networks:
   web-net:
+    external: true
+  postgresql-net:
     external: true

@@ -102,9 +102,8 @@ make deploy
 
 ## Volume Persistence
 
-Two volumes store persistent data:
-- `orbat_app` - Git repository and application files
-- `orbat_node_modules` - Node.js dependencies
+One volume stores all persistent data:
+- `orbat_app` - Git repository, node_modules, and all application files
 
 ## Update Process
 

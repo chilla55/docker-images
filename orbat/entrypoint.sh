@@ -161,14 +161,10 @@ if [ ! -d "$APP_DIR/.git" ]; then
     echo "[Orbat] First run - cloning repository..."
     update_status "cloning" "Cloning repository from GitHub" 5 "Getting latest code from 6th-Maroon-Division/Homepage"
     
-    # Clean up if directory exists but is not a git repo (skip node_modules volume)
-    if [ -d "$APP_DIR" ] && [ ! -d "$APP_DIR/.git" ]; then
-        echo "[Orbat] Cleaning up incomplete app directory..."
-        find "$APP_DIR" -mindepth 1 -maxdepth 1 ! -name 'node_modules' -exec rm -rf {} + 2>/dev/null || true
-    fi
-    
-    git clone "$REPO_URL" "$APP_DIR"
     cd "$APP_DIR"
+    
+    # Clone into current directory (which is the mounted volume)
+    git clone "$REPO_URL" .
 else
     echo "[Orbat] Checking for updates..."
     cd "$APP_DIR"
