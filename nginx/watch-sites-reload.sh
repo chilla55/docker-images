@@ -17,8 +17,10 @@ debug() {
 extract_upstreams() {
   local config_file="$1"
   # Extract hostnames from proxy_pass http://hostname or upstream "hostname"
+  # Strip port numbers (everything after :) since getent hosts doesn't accept ports
   grep -E 'proxy_pass http://|upstream "' "$config_file" 2>/dev/null | \
     sed -E 's/.*proxy_pass http:\/\/([^/:;]+).*/\1/; s/.*upstream "([^"]+)".*/\1/' | \
+    sed 's/:[0-9]*$//' | \
     sort -u
 }
 
