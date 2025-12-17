@@ -36,18 +36,39 @@ if [ ! -f "/etc/letsencrypt/live/$FIRST_DOMAIN/fullchain.pem" ]; then
 fi
 
 # Check certificate expiry (warn if less than 30 days)
+# Use openssl's -checkend instead of date parsing for better compatibility
 EXPIRY_DATE=$(openssl x509 -in "/etc/letsencrypt/live/$FIRST_DOMAIN/fullchain.pem" -noout -enddate | cut -d= -f2)
-EXPIRY_EPOCH=$(date -d "$EXPIRY_DATE" +%s)
-NOW_EPOCH=$(date +%s)
-DAYS_LEFT=$(( ($EXPIRY_EPOCH - $NOW_EPOCH) / 86400 ))
 
-if [ $DAYS_LEFT -lt 0 ]; then
-    echo "Certificate has EXPIRED!"
+# Calculate days until expiry using openssl -checkend and binary search approach
+# First, check if already expired (checkend 0 means check if expired now)
+if ! openssl x509 -in "/etc/letsencrypt/live/$FIRST_DOMAIN/fullchain.pem" -noout -checkend 0 > /dev/null 2>&1; then
+    echo "Certificate has EXPIRED! (was valid until: $EXPIRY_DATE)"
     exit 1
-elif [ $DAYS_LEFT -lt 30 ]; then
-    echo "WARNING: Certificate expires in $DAYS_LEFT days"
+fi
+
+# Estimate days left by checking 30 days ahead
+if ! openssl x509 -in "/etc/letsencrypt/live/$FIRST_DOMAIN/fullchain.pem" -noout -checkend 2592000 > /dev/null 2>&1; then
+    # Less than 30 days
+    # Find exact days by checking day by day
+    DAYS_LEFT=0
+    for days in {1..30}; do
+        SECONDS=$((days * 86400))
+        if openssl x509 -in "/etc/letsencrypt/live/$FIRST_DOMAIN/fullchain.pem" -noout -checkend $SECONDS > /dev/null 2>&1; then
+            DAYS_LEFT=$days
+        else
+            break
+        fi
+    done
+    echo "WARNING: Certificate expires in $DAYS_LEFT days (expires: $EXPIRY_DATE)"
 else
-    echo "Certificate is valid for $DAYS_LEFT more days"
+    # More than 30 days - estimate by checking 60, 90 days
+    if openssl x509 -in "/etc/letsencrypt/live/$FIRST_DOMAIN/fullchain.pem" -noout -checkend 7776000 > /dev/null 2>&1; then
+        echo "✓ Certificate is valid (90+ days remaining, expires: $EXPIRY_DATE)"
+    elif openssl x509 -in "/etc/letsencrypt/live/$FIRST_DOMAIN/fullchain.pem" -noout -checkend 5184000 > /dev/null 2>&1; then
+        echo "✓ Certificate is valid (60+ days remaining, expires: $EXPIRY_DATE)"
+    else
+        echo "✓ Certificate is valid (30+ days remaining, expires: $EXPIRY_DATE)"
+    fi
 fi
 
 exit 0
