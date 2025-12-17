@@ -13,6 +13,15 @@ debug() {
   [ "$DEBUG" = "1" ] && echo "[sites-watch-debug] $*"
 }
 
+# Extract upstreams from nginx config (BusyBox compatible)
+extract_upstreams() {
+  local config_file="$1"
+  # Extract hostnames from proxy_pass http://hostname or upstream "hostname"
+  grep -E 'proxy_pass http://|upstream "' "$config_file" 2>/dev/null | \
+    sed -E 's/.*proxy_pass http:\/\/([^/:;]+).*/\1/; s/.*upstream "([^"]+)".*/\1/' | \
+    sort -u
+}
+
 # Source directory where all site configs are stored (before symlinking)
 SITES_SOURCE_DIR="${SITES_SOURCE_DIR:-/etc/nginx/sites-available}"
 
@@ -53,7 +62,7 @@ while :; do
       site_name=$(basename "$enabled_site")
       
       # Extract upstream hostnames and check if they're still resolvable
-      upstreams=$(grep -oP '(?<=upstream ")[^"]+|(?<=proxy_pass http://)[^/;]+' "$enabled_site" 2>/dev/null | sort -u)
+      upstreams=$(extract_upstreams "$enabled_site")
       
       if [ -n "$upstreams" ]; then
         for upstream in $upstreams; do
@@ -88,7 +97,7 @@ while :; do
       debug "Found unlinked site: $site_name"
       
       # Extract upstream hostnames from the config and check if they're resolvable
-      upstreams=$(grep -oP '(?<=upstream ")[^"]+|(?<=proxy_pass http://)[^/;]+' "$source_site" 2>/dev/null | sort -u)
+      upstreams=$(extract_upstreams "$source_site")
       
       can_resolve=true
       if [ -n "$upstreams" ]; then
