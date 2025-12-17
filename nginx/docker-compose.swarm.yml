@@ -53,7 +53,7 @@ services:
       # Sites watcher - watches for site configuration changes
       SITES_WATCH_PATH: "/etc/nginx/sites-enabled"
       SITES_WATCH_INTERVAL: "30"  # Check every 30 seconds
-      SITES_WATCH_DEBUG: "0"
+      SITES_WATCH_DEBUG: "1"
     
     configs:
       - source: nginx_conf
