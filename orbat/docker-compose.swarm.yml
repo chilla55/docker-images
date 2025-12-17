@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  orbat:
+    image: ghcr.io/chilla55/orbat:latest
+    networks:
+      - web-net
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.web.node == web
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    environment:
+      # Node.js environment
+      NODE_ENV: "production"
+      PORT: "3000"
+      
+      # Auto-update settings
+      UPDATE_CHECK_INTERVAL: "300"  # Check for updates every 5 minutes (in seconds)
+      SHOW_EXTENDED_INFO: "false"  # Set to "true" to show detailed progress info
+      
+      # Application URLs
+      NEXTAUTH_URL: "https://orbat.chilla55.de"
+      
+      # Database connection (constructed from individual components)
+      DATABASE_HOST: "postgresql"
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: "orbat"
+      DATABASE_USER: "orbat"
+      DATABASE_SCHEMA: "public"
+      # DATABASE_PASSWORD comes from secret
+      
+      # Secrets will be available as files in /run/secrets/
+      # NEXTAUTH_SECRET, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, STEAM_API_KEY, DATABASE_PASSWORD
+      # These are read from the secret files at runtime by Next.js
+      
+      # Discord OAuth (from secrets)
+      DISCORD_CLIENT_ID: ""  # Will be populated from secret
+      DISCORD_CLIENT_SECRET: ""  # Will be populated from secret
+      DISCORD_REDIRECT_URI: "https://orbat.chilla55.de/api/auth/callback/discord"
+      
+      # Steam OAuth (from secrets)
+      STEAM_API_KEY: ""  # Will be populated from secret
+      STEAM_REDIRECT_URI: "https://orbat.chilla55.de/api/auth/callback/steam"
+      
+      # Next.js configuration
+      NEXT_TELEMETRY_DISABLED: "1"
+    
+    secrets:
+      - nextauth_secret
+      - discord_client_id
+      - discord_client_secret
+      - steam_api_key
+      - database_password
+    
+    volumes:
+      # Persist git repository and node_modules
+      - orbat_app:/app
+      - orbat_node_modules:/app/node_modules
+    
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+secrets:
+  nextauth_secret:
+    external: true
+  discord_client_id:
+    external: true
+  discord_client_secret:
+    external: true
+  steam_api_key:
+    external: true
+  database_password:
+    external: true
+
+volumes:
+  orbat_app:
+    driver: local
+  orbat_node_modules:
+    driver: local
+
+networks:
+  web-net:
+    external: true
