@@ -5,7 +5,7 @@ services:
     image: ghcr.io/chilla55/orbat:latest
     networks:
       - web-net
-      - postgresql-net
+      - postgres-net
     
     deploy:
       mode: replicated
@@ -102,5 +102,5 @@ volumes:
 networks:
   web-net:
     external: true
-  postgresql-net:
+  postgres-net:
     external: true
