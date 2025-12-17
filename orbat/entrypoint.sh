@@ -2,7 +2,7 @@
 set -e
 
 REPO_URL="https://github.com/6th-Maroon-Division/Homepage.git"
-APP_DIR="/app"
+APP_DIR="/app/repo"
 MAINTENANCE_PAGE="/maintenance.html"
 MAINTENANCE_ACTIVE="/tmp/maintenance_active"
 STATUS_FILE="/tmp/status.json"
@@ -161,10 +161,8 @@ if [ ! -d "$APP_DIR/.git" ]; then
     echo "[Orbat] First run - cloning repository..."
     update_status "cloning" "Cloning repository from GitHub" 5 "Getting latest code from 6th-Maroon-Division/Homepage"
     
+    git clone "$REPO_URL" "$APP_DIR"
     cd "$APP_DIR"
-    
-    # Clone into current directory (which is the mounted volume)
-    git clone "$REPO_URL" .
 else
     echo "[Orbat] Checking for updates..."
     cd "$APP_DIR"
