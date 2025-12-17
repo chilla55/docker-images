@@ -81,7 +81,7 @@ services:
         constraints:
           - node.labels.certbot.node == srv2
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 5s
         max_attempts: 3
         window: 120s

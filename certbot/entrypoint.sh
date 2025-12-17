@@ -254,9 +254,9 @@ main() {
     
     while :; do
         sleep "$sleep_seconds" &
-        wait $!
+        wait $! || true
         
-        renew_certificates
+        renew_certificates || true
     done
 }
 
