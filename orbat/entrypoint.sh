@@ -160,6 +160,14 @@ start_update_checker() {
 if [ ! -d "$APP_DIR/.git" ]; then
     echo "[Orbat] First run - cloning repository..."
     update_status "cloning" "Cloning repository from GitHub" 5 "Getting latest code from 6th-Maroon-Division/Homepage"
+    
+    # Clean up if directory exists but is not a git repo
+    if [ -d "$APP_DIR" ] && [ ! -d "$APP_DIR/.git" ]; then
+        echo "[Orbat] Cleaning up incomplete app directory..."
+        rm -rf "$APP_DIR"/*
+        rm -rf "$APP_DIR"/.* 2>/dev/null || true
+    fi
+    
     git clone "$REPO_URL" "$APP_DIR"
     cd "$APP_DIR"
 else
