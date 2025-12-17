@@ -96,7 +96,7 @@ fi
 # Cert watcher loop (only if path is set)
 if [ -n "${CERT_WATCH_PATH:-}" ]; then
   echo "[entrypoint] Starting cert watcher for: $CERT_WATCH_PATH"
-  /usr/local/bin/watch-cert-reload.sh >> /dev/stdout 2>> /dev/stderr &
+  /usr/local/bin/watch-cert-reload.sh &
   CERT_WATCHER_PID=$!
   echo "[entrypoint] Cert watcher PID: $CERT_WATCHER_PID"
 else
@@ -106,7 +106,7 @@ fi
 # Sites watcher loop (watches for site configuration changes)
 if [ -n "${SITES_WATCH_PATH:-}" ]; then
   echo "[entrypoint] Starting sites watcher for: $SITES_WATCH_PATH"
-  /usr/local/bin/watch-sites-reload.sh >> /dev/stdout 2>> /dev/stderr &
+  /usr/local/bin/watch-sites-reload.sh &
   SITES_WATCHER_PID=$!
   echo "[entrypoint] Sites watcher PID: $SITES_WATCHER_PID"
 else

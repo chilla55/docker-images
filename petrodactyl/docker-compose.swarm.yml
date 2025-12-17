@@ -145,8 +145,6 @@ services:
       placement:
         constraints:
           - node.labels.web.node == web
-        preferences:
-          - spread: node.labels.zone
       
       # Resource limits
       resources:
