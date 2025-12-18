@@ -40,6 +40,17 @@ options:
     burst_size: 20                # Allow bursts for WebSocket
     per_ip: true
 
+  # Web Application Firewall (Phase 1 - Task #15)
+  waf:
+    enabled: true
+    block_mode: true              # Block attacks
+    sensitivity: medium           # Medium sensitivity for game panel
+    check_path: true
+    check_headers: true
+    check_query: true
+    check_body: true              # Important for upload protection
+    max_body_size: 2097152        # 2 MB inspection limit
+
   # Health check configuration
   health_check_path: /up
   health_check_interval: 10s

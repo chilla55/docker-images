@@ -358,3 +358,37 @@ func (db *DB) LogRateLimitViolation(ip, route, reason string, requestCount int) 
 
 	return nil
 }
+
+// LogWAFBlock logs a WAF block event to the database
+func (db *DB) LogWAFBlock(ip, route, attackType, payload, userAgent string) error {
+	query := `
+		INSERT INTO waf_blocks (
+			timestamp, ip_address, route, attack_type,
+			payload, user_agent, blocked, metadata
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(
+		query,
+		time.Now().Unix(),
+		ip,
+		route,
+		attackType,
+		payload,
+		userAgent,
+		1,  // blocked = true
+		"", // metadata (JSON for additional info)
+	)
+
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("ip", ip).
+			Str("route", route).
+			Str("attack_type", attackType).
+			Msg("Failed to log WAF block")
+		return err
+	}
+
+	return nil
+}

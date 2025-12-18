@@ -41,6 +41,17 @@ options:
       - "10.0.0.0/8"              # Internal network
       - "192.168.0.0/16"          # Private network
 
+  # Web Application Firewall (Phase 1 - Task #15)
+  waf:
+    enabled: true
+    block_mode: true              # Block malicious requests
+    sensitivity: high             # High sensitivity for password manager
+    check_path: true
+    check_headers: true
+    check_query: true
+    check_body: true
+    max_body_size: 1048576        # 1 MB inspection limit
+
   # Aggressive health checks
   health_check_path: /alive
   health_check_interval: 5s
