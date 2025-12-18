@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -88,5 +89,119 @@ func TestBlackholeCounts(t *testing.T) {
 	s.ServeHTTP(rw, req)
 	if s.GetBlackholeCount() != 1 {
 		t.Fatalf("expected blackhole count=1")
+	}
+}
+
+func TestCircuitBreakerOpensAndBlocks(t *testing.T) {
+	// Backend returns 500 to trigger failures
+	failSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream error", http.StatusInternalServerError)
+	}))
+	defer failSrv.Close()
+
+	s := NewServer(Config{})
+	u, _ := url.Parse(failSrv.URL)
+	opts := map[string]interface{}{
+		"circuit_breaker": map[string]interface{}{
+			"enabled":           true,
+			"failure_threshold": 3,
+			"success_threshold": 1,
+			"timeout":           100 * time.Millisecond,
+			"window":            1 * time.Second,
+		},
+	}
+	if err := s.AddRoute([]string{"cb.test"}, "/", u.String(), nil, false, opts); err != nil {
+		t.Fatalf("AddRoute error: %v", err)
+	}
+
+	// Perform 3 failing requests (should proxy to upstream and get 500)
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, "http://cb.test/", nil)
+		rr := httptest.NewRecorder()
+		s.ServeHTTP(rr, req)
+		if rr.Code != http.StatusInternalServerError && rr.Code != http.StatusBadGateway {
+			t.Fatalf("expected upstream failure status, got %d", rr.Code)
+		}
+	}
+
+	// Next request should be blocked by open circuit (503)
+	req := httptest.NewRequest(http.MethodGet, "http://cb.test/", nil)
+	rr := httptest.NewRecorder()
+	s.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when circuit open, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+
+	// After timeout, circuit moves to half-open; if backend still fails, it should re-open
+	time.Sleep(120 * time.Millisecond)
+	req2 := httptest.NewRequest(http.MethodGet, "http://cb.test/", nil)
+	rr2 := httptest.NewRecorder()
+	s.ServeHTTP(rr2, req2)
+	// This request goes to upstream again (half-open), still 500, but then circuit should open again
+	if rr2.Code != http.StatusInternalServerError && rr2.Code != http.StatusBadGateway {
+		t.Fatalf("expected upstream failure during half-open, got %d", rr2.Code)
+	}
+}
+
+func TestCircuitBreakerHalfOpenRecovery(t *testing.T) {
+	var count int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		if count <= 3 {
+			http.Error(w, "fail", http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprint(w, "ok")
+	}))
+	defer srv.Close()
+
+	s := NewServer(Config{})
+	u, _ := url.Parse(srv.URL)
+	opts := map[string]interface{}{
+		"circuit_breaker": map[string]interface{}{
+			"enabled":           true,
+			"failure_threshold": 3,
+			"success_threshold": 2,
+			"timeout":           50 * time.Millisecond,
+			"window":            1 * time.Second,
+		},
+	}
+	if err := s.AddRoute([]string{"cb2.test"}, "/", u.String(), nil, false, opts); err != nil {
+		t.Fatalf("AddRoute error: %v", err)
+	}
+
+	// Trip the circuit with 3 failures
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, "http://cb2.test/", nil)
+		rr := httptest.NewRecorder()
+		s.ServeHTTP(rr, req)
+	}
+
+	// Should be open now
+	reqOpen := httptest.NewRequest(http.MethodGet, "http://cb2.test/", nil)
+	rrOpen := httptest.NewRecorder()
+	s.ServeHTTP(rrOpen, reqOpen)
+	if rrOpen.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when open, got %d", rrOpen.Code)
+	}
+
+	// Wait for half-open
+	time.Sleep(60 * time.Millisecond)
+	// Two successful requests should close the circuit
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "http://cb2.test/", nil)
+		rr := httptest.NewRecorder()
+		s.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 during recovery, got %d", rr.Code)
+		}
+	}
+
+	// Circuit should be closed; requests continue normally
+	reqFinal := httptest.NewRequest(http.MethodGet, "http://cb2.test/", nil)
+	rrFinal := httptest.NewRecorder()
+	s.ServeHTTP(rrFinal, reqFinal)
+	if rrFinal.Code != http.StatusOK {
+		t.Fatalf("expected 200 after close, got %d", rrFinal.Code)
 	}
 }

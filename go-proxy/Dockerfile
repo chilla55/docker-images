@@ -36,6 +36,9 @@ RUN apk add --no-cache \
     curl \
     tzdata \
     sqlite \
+    rsync \
+    gzip \
+    dcron \
     && rm -rf /var/cache/apk/*
 
 # Create non-root user
@@ -52,6 +55,9 @@ RUN mkdir -p \
 
 # Copy binary from builder
 COPY --from=builder /build/proxy-manager /usr/local/bin/proxy-manager
+COPY --chmod=755 backup-*.sh cleanup-retention.sh /usr/local/bin/
+COPY --chmod=755 entrypoint.sh /usr/local/bin/
+COPY --chown=proxy:proxy crontab /etc/crontabs/proxy
 
 # Copy default configs
 COPY global.yaml /etc/proxy/global.yaml.example
@@ -78,4 +84,4 @@ ENV SITES_PATH=/etc/proxy/sites-available \
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-ENTRYPOINT ["/usr/local/bin/proxy-manager"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

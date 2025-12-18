@@ -71,6 +71,17 @@ type Backend struct {
 	websocketPing      time.Duration
 	websocketActive    int64
 	metrics            *metrics.Collector
+	// Circuit breaker (Phase 6)
+	cbEnabled          bool
+	cbFailureThreshold int
+	cbSuccessThreshold int
+	cbTimeout          time.Duration
+	cbWindow           time.Duration
+	cbState            string // "closed", "open", "half-open"
+	cbFailures         int
+	cbSuccesses        int
+	cbOpenedAt         time.Time
+	cbLastFailure      time.Time
 }
 
 // Route represents a routing rule
@@ -207,12 +218,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if backend is healthy
-	backend.mu.RLock()
+	// Check if backend is healthy or circuit open
+	backend.mu.Lock()
 	healthy := backend.Healthy
-	backend.mu.RUnlock()
+	cbOpen := false
+	if backend.cbEnabled {
+		switch backend.cbState {
+		case "open":
+			if backend.cbTimeout > 0 && time.Since(backend.cbOpenedAt) >= backend.cbTimeout {
+				backend.cbState = "half-open"
+				backend.cbSuccesses = 0
+			} else {
+				cbOpen = true
+			}
+		}
+	}
+	backend.mu.Unlock()
 
-	if !healthy {
+	if !healthy || cbOpen {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -443,9 +466,15 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 			"application/json":       {},
 			"image/svg+xml":          {},
 		},
-		websocketMaxDur: 24 * time.Hour,
-		websocketIdle:   5 * time.Minute,
-		websocketPing:   30 * time.Second,
+		websocketMaxDur:    24 * time.Hour,
+		websocketIdle:      5 * time.Minute,
+		websocketPing:      30 * time.Second,
+		cbEnabled:          false,
+		cbFailureThreshold: 5,
+		cbSuccessThreshold: 2,
+		cbTimeout:          30 * time.Second,
+		cbWindow:           60 * time.Second,
+		cbState:            "closed",
 	}
 
 	if mc, ok := s.metricsCollector.(*metrics.Collector); ok {
@@ -566,12 +595,107 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 				backend.websocketPing = v
 			}
 		}
+		// Circuit breaker
+		if cbm, ok := options["circuit_breaker"].(map[string]interface{}); ok {
+			if v, ok := cbm["enabled"].(bool); ok {
+				backend.cbEnabled = v
+			}
+			if v, ok := cbm["failure_threshold"].(int); ok && v > 0 {
+				backend.cbFailureThreshold = v
+			}
+			if v, ok := cbm["success_threshold"].(int); ok && v > 0 {
+				backend.cbSuccessThreshold = v
+			}
+			if v, ok := cbm["timeout"].(time.Duration); ok && v > 0 {
+				backend.cbTimeout = v
+			}
+			if v, ok := cbm["window"].(time.Duration); ok && v > 0 {
+				backend.cbWindow = v
+			}
+		}
 	}
 
-	// Attach compression handler (no-op if disabled)
-	proxy.ModifyResponse = backend.compressionHandler()
+	// Attach response modifiers and error handler
+	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
+		// Record circuit breaker failure on transport errors
+		backend.cbRecordFailure()
+		log.Error().Err(err).Str("host", req.Host).Str("path", req.URL.Path).Msg("Upstream transport error")
+		rw.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(rw, "Bad Gateway")
+	}
+	proxy.ModifyResponse = backend.buildModifyResponse()
 
 	return backend
+}
+
+// buildModifyResponse composes response modifiers (compression + circuit breaker updates)
+func (b *Backend) buildModifyResponse() func(*http.Response) error {
+	compress := b.compressionHandler()
+	return func(res *http.Response) error {
+		// Update circuit breaker state based on status
+		if res != nil {
+			code := res.StatusCode
+			if code >= 500 {
+				b.cbRecordFailure()
+			} else if code >= 200 {
+				b.cbRecordSuccess()
+			}
+		}
+		// Apply compression if eligible
+		return compress(res)
+	}
+}
+
+// cbRecordFailure records a failure and possibly opens the breaker
+func (b *Backend) cbRecordFailure() {
+	if !b.cbEnabled {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now()
+	if b.cbWindow > 0 && !b.cbLastFailure.IsZero() && now.Sub(b.cbLastFailure) > b.cbWindow {
+		b.cbFailures = 0
+	}
+	b.cbLastFailure = now
+	if b.cbState == "half-open" {
+		// Any failure in half-open re-opens
+		b.cbOpenNow(now)
+		return
+	}
+	b.cbFailures++
+	if b.cbState == "closed" && b.cbFailures >= b.cbFailureThreshold {
+		b.cbOpenNow(now)
+	}
+}
+
+// cbRecordSuccess records a success and may close the breaker in half-open
+func (b *Backend) cbRecordSuccess() {
+	if !b.cbEnabled {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.cbState == "half-open" {
+		b.cbSuccesses++
+		if b.cbSuccesses >= b.cbSuccessThreshold {
+			b.cbState = "closed"
+			b.cbFailures = 0
+			b.cbSuccesses = 0
+			b.cbLastFailure = time.Time{}
+		}
+	} else if b.cbState == "closed" {
+		// On steady success, decay failures
+		if b.cbFailures > 0 {
+			b.cbFailures = 0
+		}
+	}
+}
+
+func (b *Backend) cbOpenNow(now time.Time) {
+	b.cbState = "open"
+	b.cbOpenedAt = now
+	b.cbSuccesses = 0
 }
 
 // retryTransport wraps a base RoundTripper with retry logic
