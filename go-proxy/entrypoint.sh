@@ -3,11 +3,12 @@ set -e
 
 echo "Starting proxy-manager with internal cron..."
 
-: "${PROXY_SITES_DIR:=/etc/nginx/sites-enabled}"
-: "${PROXY_CERTS_DIR:=/mnt/storagebox/certs}"
+# Use proxy manager environment defaults
+: "${SITES_PATH:=/etc/proxy/sites-available}"
+: "${PROXY_CERTS_DIR:=/etc/proxy/certs}"
 
-if [ ! -d "$PROXY_SITES_DIR" ]; then
-    echo "ERROR: Sites directory not found: $PROXY_SITES_DIR" >&2
+if [ ! -d "$SITES_PATH" ]; then
+    echo "ERROR: Sites directory not found: $SITES_PATH" >&2
     exit 1
 fi
 

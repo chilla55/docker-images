@@ -54,6 +54,12 @@ services:
       DEBUG: "0"
       SITES_PATH: "/etc/proxy/sites-available"
       GLOBAL_CONFIG: "/etc/proxy/global.yaml"
+      DB_PATH: "/data/proxy.db"
+      BACKUP_DIR: "/mnt/storagebox/backups/proxy"
+      TZ: "UTC"
+      DB_PATH: "/data/proxy.db"
+      BACKUP_DIR: "/mnt/storagebox/backups/proxy"
+      TZ: "UTC"
     
     configs:
       - source: proxy_global_config
@@ -76,6 +82,29 @@ services:
         read_only: true
         bind:
           propagation: rslave
+      # Persist SQLite database
+      - type: volume
+        source: proxy-data
+        target: /data
+      # Backups directory on Storage Box
+      - type: bind
+        source: /mnt/storagebox/backups/proxy
+        target: /mnt/storagebox/backups/proxy
+        read_only: false
+        bind:
+          propagation: rslave
+
+      # Persist SQLite DB
+      - type: volume
+        source: proxy-data
+        target: /data
+
+      # Backups directory (bind from Storage Box)
+      - type: bind
+        source: /mnt/storagebox/backups/proxy
+        target: /mnt/storagebox/backups/proxy
+        bind:
+          propagation: rslave
     
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -90,3 +119,9 @@ configs:
 networks:
   web-net:
     external: true
+
+volumes:
+  proxy-data:
+
+volumes:
+  proxy-data:

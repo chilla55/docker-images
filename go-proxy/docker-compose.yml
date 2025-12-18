@@ -14,10 +14,15 @@ services:
       - ./sites-available:/etc/proxy/sites-available:ro
       - ./global.yaml:/etc/proxy/global.yaml:ro
       - ./certs:/etc/proxy/certs:ro  # Mount your certificates directory
+      - proxy-data:/data             # Persist SQLite DB
+      - ./backups:/mnt/storagebox/backups/proxy  # Local backups directory (dev)
     environment:
       - DEBUG=1
       - SITES_PATH=/etc/proxy/sites-available
       - GLOBAL_CONFIG=/etc/proxy/global.yaml
+      - DB_PATH=/data/proxy.db
+      - BACKUP_DIR=/mnt/storagebox/backups/proxy
+      - TZ=UTC
     networks:
       - web
     restart: unless-stopped
@@ -39,3 +44,6 @@ services:
 networks:
   web:
     driver: bridge
+
+volumes:
+  proxy-data:
