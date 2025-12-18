@@ -23,16 +23,16 @@ import (
 )
 
 var (
-	sitesPath        = flag.String("sites-path", getEnv("SITES_PATH", "/etc/proxy/sites-available"), "Path to site YAML configs")
-	globalConfig     = flag.String("global-config", getEnv("GLOBAL_CONFIG", "/etc/proxy/global.yaml"), "Path to global config")
-	httpAddr         = flag.String("http-addr", getEnv("HTTP_ADDR", ":80"), "HTTP listen address")
-	httpsAddr        = flag.String("https-addr", getEnv("HTTPS_ADDR", ":443"), "HTTPS listen address")
-	registryPort     = flag.Int("registry-port", getIntEnv("REGISTRY_PORT", 81), "Service registry port")
-	healthPort       = flag.Int("health-port", getIntEnv("HEALTH_PORT", 8080), "Health check HTTP port")
-	upstreamTimeout  = flag.Duration("upstream-timeout", getDurationEnv("UPSTREAM_CHECK_TIMEOUT", 2*time.Second), "Upstream check timeout")
-	shutdownTimeout  = flag.Duration("shutdown-timeout", getDurationEnv("SHUTDOWN_TIMEOUT", 30*time.Second), "Graceful shutdown timeout")
-	debug            = flag.Bool("debug", getEnv("DEBUG", "0") == "1", "Enable debug logging")
-	dbPath           = flag.String("db-path", getEnv("DB_PATH", "/data/proxy.db"), "Path to SQLite database")
+	sitesPath       = flag.String("sites-path", getEnv("SITES_PATH", "/etc/proxy/sites-available"), "Path to site YAML configs")
+	globalConfig    = flag.String("global-config", getEnv("GLOBAL_CONFIG", "/etc/proxy/global.yaml"), "Path to global config")
+	httpAddr        = flag.String("http-addr", getEnv("HTTP_ADDR", ":80"), "HTTP listen address")
+	httpsAddr       = flag.String("https-addr", getEnv("HTTPS_ADDR", ":443"), "HTTPS listen address")
+	registryPort    = flag.Int("registry-port", getIntEnv("REGISTRY_PORT", 81), "Service registry port")
+	healthPort      = flag.Int("health-port", getIntEnv("HEALTH_PORT", 8080), "Health check HTTP port")
+	upstreamTimeout = flag.Duration("upstream-timeout", getDurationEnv("UPSTREAM_CHECK_TIMEOUT", 2*time.Second), "Upstream check timeout")
+	shutdownTimeout = flag.Duration("shutdown-timeout", getDurationEnv("SHUTDOWN_TIMEOUT", 30*time.Second), "Graceful shutdown timeout")
+	debug           = flag.Bool("debug", getEnv("DEBUG", "0") == "1", "Enable debug logging")
+	dbPath          = flag.String("db-path", getEnv("DB_PATH", "/data/proxy.db"), "Path to SQLite database")
 )
 
 func main() {
@@ -73,11 +73,11 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to load TLS certificates")
 	}
-	
+
 	if len(certificates) == 0 {
 		log.Fatal().Msg("No TLS certificates configured. Please add certificates to global.yaml")
 	}
-	
+
 	log.Info().Int("count", len(certificates)).Msg("Loaded TLS certificates")
 
 	// Initialize database
@@ -91,7 +91,7 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -156,21 +156,21 @@ func main() {
 	sig := <-sigChan
 
 	log.Info().Str("signal", sig.String()).Msg("Shutdown signal received")
-	
+
 	// Create shutdown context with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), *shutdownTimeout)
 	defer shutdownCancel()
-	
+
 	// Notify all connected services
 	log.Info().Msg("Notifying connected services...")
 	reg.NotifyShutdown()
-	
+
 	// Give services time to receive shutdown notification
 	time.Sleep(2 * time.Second)
-	
+
 	// Cancel main context to stop all goroutines
 	cancel()
-	
+
 	// Wait for graceful shutdown or timeout
 	done := make(chan struct{})
 	go func() {
@@ -178,7 +178,7 @@ func main() {
 		time.Sleep(1 * time.Second)
 		close(done)
 	}()
-	
+
 	select {
 	case <-done:
 		log.Info().Msg("Shutdown complete")
@@ -284,7 +284,7 @@ func validateConfiguration() error {
 
 func buildSecurityHeaders(cfg *config.GlobalConfig) proxy.SecurityHeaders {
 	headers := proxy.SecurityHeaders{}
-	
+
 	if cfg.Defaults.Headers != nil {
 		headers.HSTS = cfg.Defaults.Headers["Strict-Transport-Security"]
 		headers.XFrameOptions = cfg.Defaults.Headers["X-Frame-Options"]
@@ -294,7 +294,7 @@ func buildSecurityHeaders(cfg *config.GlobalConfig) proxy.SecurityHeaders {
 		headers.ReferrerPolicy = cfg.Defaults.Headers["Referrer-Policy"]
 		headers.PermissionsPolicy = cfg.Defaults.Headers["Permissions-Policy"]
 	}
-	
+
 	return headers
 }
 
@@ -303,50 +303,50 @@ func loadCertificates(cfg *config.GlobalConfig) ([]proxy.CertMapping, error) {
 	if len(cfg.TLS.Certificates) == 0 {
 		return nil, fmt.Errorf("no certificates defined in global config")
 	}
-	
+
 	certificates := make([]proxy.CertMapping, 0, len(cfg.TLS.Certificates))
-	
+
 	for i, certCfg := range cfg.TLS.Certificates {
 		// Load certificate and private key
 		cert, err := tls.LoadX509KeyPair(certCfg.CertFile, certCfg.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load certificate %d (%s): %w", i+1, certCfg.CertFile, err)
 		}
-		
+
 		if len(certCfg.Domains) == 0 {
 			return nil, fmt.Errorf("certificate %d has no domains defined", i+1)
 		}
-		
+
 		mapping := proxy.CertMapping{
 			Domains: certCfg.Domains,
 			Cert:    cert,
 		}
-		
+
 		certificates = append(certificates, mapping)
 		log.Info().Strs("domains", certCfg.Domains).Msg("Loaded certificate")
 	}
-	
+
 	return certificates, nil
 }
 
 func getDefaultGlobalConfig() *config.GlobalConfig {
 	cfg := &config.GlobalConfig{}
-	
+
 	// Set sensible defaults
 	cfg.Defaults.Headers = map[string]string{
-		"Strict-Transport-Security":  "max-age=31536000; includeSubDomains",
-		"X-Frame-Options":            "DENY",
-		"X-Content-Type-Options":     "nosniff",
-		"X-XSS-Protection":           "1; mode=block",
-		"Referrer-Policy":            "strict-origin-when-cross-origin",
+		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+		"X-Frame-Options":           "DENY",
+		"X-Content-Type-Options":    "nosniff",
+		"X-XSS-Protection":          "1; mode=block",
+		"Referrer-Policy":           "strict-origin-when-cross-origin",
 	}
-	
+
 	cfg.Blackhole.UnknownDomains = true
 	cfg.Blackhole.MetricsOnly = true
-	
+
 	// No default TLS config - certificates must be explicitly provided
 	cfg.TLS.Certificates = []config.CertConfig{}
-	
+
 	return cfg
 }
 

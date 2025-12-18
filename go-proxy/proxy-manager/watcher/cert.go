@@ -59,7 +59,7 @@ func (w *CertWatcher) Start(ctx context.Context) error {
 				}
 			}
 		}
-		
+
 		keyDir := filepath.Dir(certCfg.KeyFile)
 		if !certDirs[keyDir] && keyDir != certDir {
 			if err := watcher.Add(keyDir); err != nil {
@@ -108,7 +108,7 @@ func (w *CertWatcher) Start(ctx context.Context) error {
 					if w.debug {
 						log.Printf("[cert-watcher] Certificate file changed: %s", event.Name)
 					}
-					
+
 					// Debounce: wait a bit for certbot to finish writing all files
 					time.Sleep(2 * time.Second)
 					w.reloadCertificates()
@@ -127,19 +127,19 @@ func (w *CertWatcher) Start(ctx context.Context) error {
 // isCertFile checks if the file is a certificate or key we're watching
 func (w *CertWatcher) isCertFile(path string, cfg *config.GlobalConfig) bool {
 	filename := filepath.Base(path)
-	
+
 	// Check if it's a fullchain.pem or privkey.pem (Let's Encrypt names)
 	if filename == "fullchain.pem" || filename == "privkey.pem" {
 		return true
 	}
-	
+
 	// Check if it matches any configured cert/key path
 	for _, certCfg := range cfg.TLS.Certificates {
 		if path == certCfg.CertFile || path == certCfg.KeyFile {
 			return true
 		}
 	}
-	
+
 	return false
 }
 

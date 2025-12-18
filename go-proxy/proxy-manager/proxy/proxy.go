@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rs/zerolog/log"
 	"github.com/quic-go/quic-go/http3"
+	"github.com/rs/zerolog/log"
 )
 
 // SecurityHeaders defines HTTP security headers
@@ -43,17 +43,17 @@ type Backend struct {
 
 // Route represents a routing rule
 type Route struct {
-	Domains       []string
-	Path          string
-	Backend       *Backend
-	Headers       map[string]string
-	WebSocket     bool
-	Priority      int // For sorting (longer paths = higher priority)
+	Domains   []string
+	Path      string
+	Backend   *Backend
+	Headers   map[string]string
+	WebSocket bool
+	Priority  int // For sorting (longer paths = higher priority)
 }
 
 // CertMapping maps domain patterns to certificates
 type CertMapping struct {
-	Domains []string          // ["*.example.com", "example.com"]
+	Domains []string // ["*.example.com", "example.com"]
 	Cert    tls.Certificate
 }
 
@@ -64,12 +64,12 @@ type Server struct {
 	routeMap        map[string]*Backend // domain+path -> backend
 	globalHeaders   SecurityHeaders
 	blackholeMetric int64
-	
+
 	httpServer   *http.Server
 	httpsServer  *http.Server
 	http3Server  *http3.Server
 	certificates []CertMapping // Loaded TLS certificates
-	
+
 	db    interface{} // Database connection (interface to avoid import cycle)
 	debug bool
 }
@@ -153,7 +153,7 @@ func (s *Server) Start(ctx context.Context, httpAddr, httpsAddr string) error {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Find backend for this request
 	backend := s.findBackend(r.Host, r.URL.Path)
-	
+
 	if backend == nil {
 		// Unknown domain - blackhole
 		s.blackhole(w, r)
@@ -172,7 +172,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Get route for headers
 	route := s.findRoute(r.Host, r.URL.Path)
-	
+
 	// Apply security headers
 	s.applyHeaders(w, route)
 
@@ -255,7 +255,7 @@ func (s *Server) GetBlackholeCount() int64 {
 func (s *Server) UpdateCertificates(certificates []CertMapping) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	s.certificates = certificates
 	log.Info().Int("count", len(certificates)).Msg("Certificates updated")
 }
@@ -326,7 +326,7 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 
 	// Create new backend
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	
+
 	// Customize transport
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
@@ -412,7 +412,7 @@ func (s *Server) applyHeaders(w http.ResponseWriter, route *Route) {
 // blackhole handles unknown domains
 func (s *Server) blackhole(w http.ResponseWriter, r *http.Request) {
 	atomic.AddInt64(&s.blackholeMetric, 1)
-	
+
 	// Just close the connection without response
 	if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
 		conn.Close()
@@ -437,10 +437,10 @@ func (s *Server) tlsConfig() *tls.Config {
 // getCertificate returns the appropriate certificate for a domain (supports wildcards)
 func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	domain := strings.ToLower(hello.ServerName)
-	
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	// Try exact match first
 	for _, mapping := range s.certificates {
 		for _, pattern := range mapping.Domains {
@@ -449,7 +449,7 @@ func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 			}
 		}
 	}
-	
+
 	// Try wildcard match
 	for _, mapping := range s.certificates {
 		for _, pattern := range mapping.Domains {
@@ -458,13 +458,13 @@ func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 			}
 		}
 	}
-	
+
 	// Fallback to first certificate if available
 	if len(s.certificates) > 0 {
 		log.Warn().Str("domain", domain).Msg("No matching certificate, using fallback")
 		return &s.certificates[0].Cert, nil
 	}
-	
+
 	return nil, fmt.Errorf("no certificate available for %s", domain)
 }
 
@@ -472,38 +472,38 @@ func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 func (s *Server) matchWildcard(pattern, domain string) bool {
 	pattern = strings.ToLower(pattern)
 	domain = strings.ToLower(domain)
-	
+
 	// Not a wildcard pattern
 	if !strings.HasPrefix(pattern, "*.") {
 		return false
 	}
-	
+
 	// Extract base domain from pattern
 	baseDomain := pattern[2:] // Remove "*."
-	
+
 	// Domain must end with base domain
 	if !strings.HasSuffix(domain, baseDomain) {
 		return false
 	}
-	
+
 	// Ensure there's at least one subdomain character
 	prefix := domain[:len(domain)-len(baseDomain)]
 	if len(prefix) == 0 {
 		return false
 	}
-	
+
 	// Check that we're matching subdomain (not partial match)
 	if prefix[len(prefix)-1] != '.' {
 		return false
 	}
-	
+
 	// Wildcard should only match one level
 	// e.g., *.example.com matches sub.example.com but not deep.sub.example.com
 	subdomain := prefix[:len(prefix)-1]
 	if strings.Contains(subdomain, ".") {
 		return false
 	}
-	
+
 	return true
 }
 
@@ -559,7 +559,7 @@ func (s *Server) routeMatches(route *Route, domains []string, path string) bool 
 // Shutdown gracefully shuts down all servers
 func (s *Server) Shutdown(ctx context.Context) error {
 	log.Info().Msg("Shutting down servers...")
-	
+
 	var err error
 	if s.httpServer != nil {
 		if e := s.httpServer.Shutdown(ctx); e != nil {
@@ -576,6 +576,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			err = e
 		}
 	}
-	
+
 	return err
 }

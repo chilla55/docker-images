@@ -114,8 +114,8 @@ func (t *TimeoutConfig) GetTimeouts() TimeoutConfig {
 // GetLimits returns limit configuration with defaults
 func (l *LimitConfig) GetLimits() LimitConfig {
 	defaults := LimitConfig{
-		MaxRequestBody:  10 * 1024 * 1024,  // 10 MB
-		MaxResponseBody: 10 * 1024 * 1024,  // 10 MB
+		MaxRequestBody:  10 * 1024 * 1024, // 10 MB
+		MaxResponseBody: 10 * 1024 * 1024, // 10 MB
 	}
 
 	if l.MaxRequestBody > 0 {

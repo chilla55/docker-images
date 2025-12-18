@@ -9,11 +9,11 @@ import (
 
 // Controller manages nginx reload operations and batches multiple reload requests
 type Controller struct {
-	mu              sync.Mutex
-	pendingReload   bool
-	reloadTimer     *time.Timer
-	batchWindow     time.Duration
-	debug           bool
+	mu            sync.Mutex
+	pendingReload bool
+	reloadTimer   *time.Timer
+	batchWindow   time.Duration
+	debug         bool
 }
 
 func NewController(debug bool) *Controller {

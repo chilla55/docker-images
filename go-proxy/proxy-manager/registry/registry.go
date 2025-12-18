@@ -22,7 +22,7 @@ type Service struct {
 	Connection      net.Conn
 	Connected       time.Time
 	SessionID       string
-	
+
 	// Routes and config
 	Routes  []ServiceRoute
 	Headers map[string]string
@@ -40,17 +40,17 @@ type ServiceRoute struct {
 
 // Registry manages service registrations and maintenance handshakes
 type Registry struct {
-	mu               sync.RWMutex
-	services         map[string]*Service          // key: hostname:port
-	sessions         map[string]*Service          // key: sessionID for reconnect
-	disconnected     map[string]time.Time         // track unexpected disconnections
-	port             int
-	upstreamTimeout  time.Duration
-	gracefulPeriod   time.Duration
-	proxyServer      ProxyServer
-	debug            bool
-	maintenanceReqs  chan maintenanceRequest
-	switchbackReqs   chan switchbackRequest
+	mu              sync.RWMutex
+	services        map[string]*Service  // key: hostname:port
+	sessions        map[string]*Service  // key: sessionID for reconnect
+	disconnected    map[string]time.Time // track unexpected disconnections
+	port            int
+	upstreamTimeout time.Duration
+	gracefulPeriod  time.Duration
+	proxyServer     ProxyServer
+	debug           bool
+	maintenanceReqs chan maintenanceRequest
+	switchbackReqs  chan switchbackRequest
 }
 
 type ProxyServer interface {
@@ -115,17 +115,17 @@ func (r *Registry) Start(ctx context.Context) {
 
 func (r *Registry) handleConnection(ctx context.Context, conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		parts := strings.Split(line, "|")
-		
+
 		if len(parts) == 0 {
 			continue
 		}
 
 		command := parts[0]
-		
+
 		switch command {
 		case "REGISTER":
 			r.handleRegister(ctx, conn, parts)
@@ -220,7 +220,7 @@ func (r *Registry) handleReconnect(ctx context.Context, conn net.Conn, parts []s
 	service.Connected = time.Now()
 
 	serviceKey := fmt.Sprintf("%s:%d", service.Hostname, service.Port)
-	
+
 	r.mu.Lock()
 	r.services[serviceKey] = service
 	delete(r.disconnected, serviceKey)
@@ -337,7 +337,7 @@ func (r *Registry) handleOptions(ctx context.Context, conn net.Conn, parts []str
 
 	// Parse value based on key
 	var parsedValue interface{} = value
-	
+
 	switch key {
 	case "timeout", "health_check_interval", "health_check_timeout":
 		if dur, err := time.ParseDuration(value); err == nil {
@@ -380,7 +380,7 @@ func (r *Registry) handleValidate(ctx context.Context, conn net.Conn, parts []st
 
 	// Calculate server hash from routes
 	serverHash := r.calculateRoutesHash(service)
-	
+
 	if clientHash == serverHash {
 		parity := r.calculateParity(serverHash)
 		conn.Write([]byte(fmt.Sprintf("VALID|%d\n", parity)))
@@ -407,12 +407,12 @@ func (r *Registry) handleShutdown(ctx context.Context, conn net.Conn, parts []st
 	}
 
 	serviceKey := fmt.Sprintf("%s:%d", service.Hostname, service.Port)
-	
+
 	// Remove all routes
 	for _, route := range service.Routes {
 		r.proxyServer.RemoveRoute(route.Domains, route.Path)
 	}
-	
+
 	// Graceful shutdown - remove immediately
 	delete(r.services, serviceKey)
 	delete(r.sessions, sessionID)
@@ -420,7 +420,7 @@ func (r *Registry) handleShutdown(ctx context.Context, conn net.Conn, parts []st
 	r.mu.Unlock()
 
 	log.Printf("[registry] Graceful shutdown: %s at %s (routes removed immediately)", service.Name, serviceKey)
-	
+
 	conn.Write([]byte("SHUTDOWN_OK\n"))
 	conn.Close()
 }
@@ -519,7 +519,7 @@ func (r *Registry) approveMaintenanceMode(service string, maintPort int) {
 	defer conn.Close()
 
 	conn.Write([]byte("MAINT_APPROVED\n"))
-	
+
 	buf := make([]byte, 4)
 	conn.SetReadDeadline(time.Now().Add(r.upstreamTimeout))
 	conn.Read(buf)
@@ -550,7 +550,7 @@ func (r *Registry) approveSwitchback(service string, maintPort int) {
 	defer conn.Close()
 
 	conn.Write([]byte("SWITCHBACK_APPROVED\n"))
-	
+
 	buf := make([]byte, 4)
 	conn.SetReadDeadline(time.Now().Add(r.upstreamTimeout))
 	conn.Read(buf)
@@ -577,7 +577,7 @@ func (r *Registry) cleanupExpiredSessions(ctx context.Context) {
 							for _, route := range service.Routes {
 								r.proxyServer.RemoveRoute(route.Domains, route.Path)
 							}
-							
+
 							delete(r.sessions, sessionID)
 							log.Printf("[registry] Expired session cleanup: %s at %s (disconnected %v ago)", service.Name, serviceKey, now.Sub(disconnectTime))
 							break
@@ -596,7 +596,7 @@ func (r *Registry) NotifyShutdown() {
 	defer r.mu.RUnlock()
 
 	log.Printf("[registry] Notifying %d connected services of shutdown", len(r.services))
-	
+
 	for serviceKey, service := range r.services {
 		if service.Connection != nil {
 			_, err := service.Connection.Write([]byte("SHUTDOWN\n"))
@@ -631,18 +631,18 @@ func (r *Registry) GetMaintenancePort(hostname string, port int) (int, bool) {
 
 func (r *Registry) calculateRoutesHash(service *Service) string {
 	var data strings.Builder
-	
+
 	for _, route := range service.Routes {
 		data.WriteString(strings.Join(route.Domains, ","))
 		data.WriteString(route.Path)
 		data.WriteString(route.Backend)
 	}
-	
+
 	for k, v := range service.Headers {
 		data.WriteString(k)
 		data.WriteString(v)
 	}
-	
+
 	hash := sha256.Sum256([]byte(data.String()))
 	return hex.EncodeToString(hash[:])
 }

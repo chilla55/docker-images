@@ -170,11 +170,11 @@ func (w *SiteWatcher) loadSite(filename string) {
 func (w *SiteWatcher) reloadSite(filename string) {
 	// Small delay to ensure file write is complete
 	time.Sleep(100 * time.Millisecond)
-	
+
 	if w.debug {
 		log.Printf("[watcher] Reloading %s", filepath.Base(filename))
 	}
-	
+
 	w.loadSite(filename)
 }
 
@@ -186,14 +186,14 @@ func (w *SiteWatcher) removeSite(filename string) {
 
 	w.removeSiteRoutes(cfg)
 	delete(w.loadedSites, filename)
-	
+
 	log.Printf("[watcher] Removed site config: %s", filepath.Base(filename))
 }
 
 func (w *SiteWatcher) removeSiteRoutes(cfg *config.SiteConfig) {
 	for _, route := range cfg.Routes {
 		w.proxyServer.RemoveRoute(route.Domains, route.Path)
-		
+
 		if w.debug {
 			log.Printf("[watcher] Removed route: %v%s", route.Domains, route.Path)
 		}

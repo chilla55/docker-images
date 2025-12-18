@@ -57,10 +57,6 @@ USER proxy
 # Expose ports
 EXPOSE 80 443 443/udp 81 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
-
 # Environment variables with defaults
 ENV SITES_PATH=/etc/proxy/sites-available \
     GLOBAL_CONFIG=/etc/proxy/global.yaml \
@@ -74,15 +70,8 @@ ENV SITES_PATH=/etc/proxy/sites-available \
     SHUTDOWN_TIMEOUT=30s \
     TZ=UTC
 
-CMD ["/usr/local/bin/proxy-manager"]
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
-
-# Run as non-root user
-RUN addgroup -g 1000 proxy && \
-    adduser -D -u 1000 -G proxy proxy && \
-    chown -R proxy:proxy /etc/proxy /var/log/proxy
-
-USER proxy
 
 ENTRYPOINT ["/usr/local/bin/proxy-manager"]

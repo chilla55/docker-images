@@ -84,7 +84,7 @@ func (u *CloudflareUpdater) updateCloudflareIPs() {
 
 	configLines = append(configLines, "")
 	configLines = append(configLines, "real_ip_header CF-Connecting-IP;")
-	
+
 	newContent := strings.Join(configLines, "\n") + "\n"
 
 	// Check if content changed
@@ -108,7 +108,7 @@ func (u *CloudflareUpdater) updateCloudflareIPs() {
 
 func (u *CloudflareUpdater) fetchIPRanges(url string) ([]string, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	
+
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, err
@@ -127,7 +127,7 @@ func (u *CloudflareUpdater) fetchIPRanges(url string) ([]string, error) {
 
 	// Combine IPv4 and IPv6 ranges
 	allRanges := append(cfResp.Result.IPv4CIDRs, cfResp.Result.IPv6CIDRs...)
-	
+
 	if len(allRanges) == 0 {
 		return nil, fmt.Errorf("no IP ranges returned from Cloudflare API")
 	}

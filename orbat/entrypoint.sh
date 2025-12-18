@@ -6,13 +6,29 @@ APP_DIR="/app/repo"
 MAINTENANCE_PAGE="/maintenance.html"
 MAINTENANCE_ACTIVE="/tmp/maintenance_active"
 STATUS_FILE="/tmp/status.json"
+MAINTENANCE_APPROVED="/tmp/maintenance_approved"
+SWITCHBACK_APPROVED="/tmp/switchback_approved"
 UPDATE_CHECK_INTERVAL="${UPDATE_CHECK_INTERVAL:-300}"  # Check every 5 minutes by default
+MAINTENANCE_PORT="${MAINTENANCE_PORT:-3001}"  # Maintenance on separate port
+NGINX_HOST="${NGINX_HOST:-nginx_nginx}"  # Nginx service name for notifications
+SERVICE_NAME="${SERVICE_NAME:-orbat}"  # Service name for registration
 
 # Environment variable for extended info display (default: false)
 SHOW_EXTENDED_INFO="${SHOW_EXTENDED_INFO:-false}"
 
 echo "[Orbat] Starting entrypoint..."
+echo "[Orbat] Service: $SERVICE_NAME, Port: $PORT, Maintenance: $MAINTENANCE_PORT"
 echo "[Orbat] Auto-update check interval: ${UPDATE_CHECK_INTERVAL}s"
+
+# Cleanup function
+cleanup() {
+    echo "[Orbat] Shutting down, closing persistent connection..."
+    if [ ! -z "$REGISTRATION_PID" ]; then
+        kill $REGISTRATION_PID 2>/dev/null || true
+    fi
+}
+
+trap cleanup EXIT INT TERM
 
 # Construct DATABASE_URL from environment variables and secret
 if [ -f "/run/secrets/database_password" ]; then
@@ -42,17 +58,125 @@ update_status() {
 EOF
 }
 
-# Function to show maintenance page
+# Register with nginx and maintain persistent connection
+register_with_nginx() {
+    echo "[Orbat] Registering with nginx and establishing persistent connection..."
+    
+    local nginx_port=$((PORT + 1))
+    # Format: REGISTER|service_name|hostname|service_port|maintenance_port
+    local message="REGISTER|$SERVICE_NAME|$(hostname)|$PORT|$MAINTENANCE_PORT"
+    
+    # Keep connection open in background - when this dies, nginx knows service is down
+    ( 
+        echo "$message" | nc "$NGINX_HOST" "$nginx_port" 2>/dev/null
+        # Connection stays open until nginx or this process dies
+    ) &
+    
+    REGISTRATION_PID=$!
+    echo "[Orbat] Registered with nginx (persistent connection PID: $REGISTRATION_PID)"
+    
+    # Give it a moment to establish
+    sleep 2
+}
+
+# Request maintenance mode from nginx via TCP (handshake step 1)
+request_maintenance_mode() {
+    echo "[Orbat] Requesting maintenance mode from nginx via TCP..."
+    rm -f "$MAINTENANCE_APPROVED"
+    
+    local nginx_port=$((PORT + 1))
+    # Send: MAINT_ENTER|hostname:port|maintenance_port
+    local message="MAINT_ENTER|$(hostname):$PORT|$MAINTENANCE_PORT"
+    
+    if echo "$message" | timeout 5 nc "$NGINX_HOST" "$nginx_port" 2>/dev/null | grep -q "ACK"; then
+        echo "[Orbat] Maintenance mode request sent to nginx"
+        
+        # Wait for nginx approval (it will connect to our port and send MAINT_APPROVED)
+        local wait_count=0
+        while [ $wait_count -lt 30 ]; do
+            if [ -f "$MAINTENANCE_APPROVED" ]; then
+                echo "[Orbat] Maintenance mode approved by nginx"
+                return 0
+            fi
+            sleep 1
+            wait_count=$((wait_count + 1))
+        done
+        
+        echo "[Orbat] Warning: No approval received from nginx, proceeding anyway"
+        return 1
+    else
+        echo "[Orbat] Could not contact nginx, proceeding with local maintenance"
+        return 1
+    fi
+}
+
+# Notify nginx that main service is ready via TCP (handshake step 1)
+notify_service_ready() {
+    echo "[Orbat] Notifying nginx that main service is ready via TCP..."
+    rm -f "$SWITCHBACK_APPROVED"
+    
+    local nginx_port=$((PORT + 1))
+    # Send: MAINT_EXIT|hostname:port
+    local message="MAINT_EXIT|$(hostname):$PORT"
+    
+    if echo "$message" | timeout 5 nc "$NGINX_HOST" "$nginx_port" 2>/dev/null | grep -q "ACK"; then
+        echo "[Orbat] Ready notification sent to nginx"
+        
+        # Wait for nginx to confirm switchback
+        local wait_count=0
+        while [ $wait_count -lt 30 ]; do
+            if [ -f "$SWITCHBACK_APPROVED" ]; then
+                echo "[Orbat] Switchback approved by nginx"
+                return 0
+            fi
+            sleep 1
+            wait_count=$((wait_count + 1))
+        done
+        
+        echo "[Orbat] Warning: No switchback confirmation from nginx"
+        return 1
+    else
+        echo "[Orbat] Could not contact nginx for switchback"
+        return 1
+    fi
+}
+
+# Function to show maintenance page on separate port with handshake API
 show_maintenance() {
-    echo "[Orbat] Showing maintenance page..."
+    echo "[Orbat] Starting maintenance server on port $MAINTENANCE_PORT..."
     touch "$MAINTENANCE_ACTIVE"
     update_status "initializing" "Starting maintenance mode" 0 "Preparing to update application"
     
-    # Start a simple HTTP server showing maintenance and status API
+    # Start TCP listener for handshake + HTTP server for maintenance page
     ( cd / && exec node -e "
         const http = require('http');
+        const net = require('net');
         const fs = require('fs');
-        const server = http.createServer((req, res) => {
+        
+        // TCP listener for handshake protocol
+        const tcpServer = net.createServer((socket) => {
+            socket.on('data', (data) => {
+                const message = data.toString().trim();
+                console.log('[Maintenance] TCP message:', message);
+                
+                if (message === 'MAINT_APPROVED') {
+                    console.log('[Maintenance] Nginx approved maintenance mode');
+                    fs.writeFileSync('$MAINTENANCE_APPROVED', Date.now().toString());
+                    socket.write('ACK\n');
+                } else if (message === 'SWITCHBACK_APPROVED') {
+                    console.log('[Maintenance] Nginx approved switchback to main service');
+                    fs.writeFileSync('$SWITCHBACK_APPROVED', Date.now().toString());
+                    socket.write('ACK\n');
+                    setTimeout(() => process.exit(0), 1000);
+                }
+                socket.end();
+            });
+        });
+        tcpServer.listen($MAINTENANCE_PORT);
+        console.log('TCP handshake listener on port $MAINTENANCE_PORT');
+        
+        // HTTP server for maintenance page and status API
+        const httpServer = http.createServer((req, res) => {
             // Status API endpoint
             if (req.url === '/api/status') {
                 res.writeHead(200, {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'});
@@ -74,19 +198,26 @@ show_maintenance() {
                 res.end('Service starting...');
             }
         });
-        server.listen($PORT);
-        console.log('Maintenance server listening on port $PORT');
+        httpServer.listen($MAINTENANCE_PORT + 1000);  // HTTP on different port to avoid conflict
+        console.log('HTTP maintenance server on port ' + ($MAINTENANCE_PORT + 1000));
     " ) &
     MAINTENANCE_PID=$!
     sleep 2
+    echo "[Orbat] Maintenance server ready on port $MAINTENANCE_PORT (PID: $MAINTENANCE_PID)"
 }
 
-# Function to stop maintenance page
+# Function to stop maintenance and switch back to main service
 stop_maintenance() {
-    echo "[Orbat] Stopping maintenance page..."
+    echo "[Orbat] Stopping maintenance and switching back to main service..."
     rm -f "$MAINTENANCE_ACTIVE"
+    
+    # Notify nginx that we're ready and wait for approval
+    notify_service_ready
+    
+    # Maintenance server will exit on switchback approval
     if [ ! -z "$MAINTENANCE_PID" ]; then
-        kill $MAINTENANCE_PID 2>/dev/null || true
+        wait $MAINTENANCE_PID 2>/dev/null || true
+        echo "[Orbat] Maintenance server stopped"
     fi
 }
 
@@ -95,7 +226,12 @@ perform_update() {
     echo "[Orbat] Performing update..."
     cd "$APP_DIR"
     
+    # Request maintenance mode from nginx first
+    request_maintenance_mode
+    
+    # Start maintenance server
     show_maintenance
+    
     update_status "pulling" "Pulling latest changes" 10 "Downloading updated code from repository"
     git pull origin main
     
@@ -214,6 +350,9 @@ start_update_checker
 # Start the application
 echo "[Orbat] Starting Next.js application..."
 update_status "running" "Application running" 100 "Service is now available"
+
+# Register with nginx (persistent connection)
+register_with_nginx
 
 # Start npm in background so we can track its PID
 npm start &
