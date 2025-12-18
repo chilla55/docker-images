@@ -4,7 +4,8 @@
 # Includes SQLite database for metrics and logging
 # -----------------------------------------------
 
-FROM golang:1.21-alpine AS builder
+# Use Go 1.24 to match the module's go/toolchain declarations
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /build
 
