@@ -26,6 +26,22 @@ type Collector struct {
 	// Active connections
 	activeConnections int64
 
+	// WebSocket tracking
+	websocketActive         int64
+	websocketConnections    uint64
+	websocketBytesToClient  uint64
+	websocketBytesToBackend uint64
+	websocketDurationSum    uint64 // nanoseconds
+
+	// Retry tracking
+	retryAttempts  uint64
+	retrySuccesses uint64
+	retryFailures  uint64
+
+	// Slow requests
+	slowWarnings  uint64
+	slowCriticals uint64
+
 	// Rate limiting
 	rateLimitViolations uint64
 
@@ -193,6 +209,49 @@ func (c *Collector) RecordRateLimitViolation() {
 	atomic.AddUint64(&c.rateLimitViolations, 1)
 }
 
+// IncrementWebSocketActive increments active websocket connections and total count
+func (c *Collector) IncrementWebSocketActive() {
+	atomic.AddInt64(&c.websocketActive, 1)
+	atomic.AddUint64(&c.websocketConnections, 1)
+}
+
+// DecrementWebSocketActive decrements active websocket connections
+func (c *Collector) DecrementWebSocketActive() {
+	atomic.AddInt64(&c.websocketActive, -1)
+}
+
+// RecordWebSocketTransfer records bytes and duration for a websocket session
+func (c *Collector) RecordWebSocketTransfer(bytesToClient, bytesToBackend uint64, duration time.Duration) {
+	atomic.AddUint64(&c.websocketBytesToClient, bytesToClient)
+	atomic.AddUint64(&c.websocketBytesToBackend, bytesToBackend)
+	atomic.AddUint64(&c.websocketDurationSum, uint64(duration.Nanoseconds()))
+}
+
+// RecordRetryAttempt increments retry attempts
+func (c *Collector) RecordRetryAttempt() {
+	atomic.AddUint64(&c.retryAttempts, 1)
+}
+
+// RecordRetrySuccess increments retry successes
+func (c *Collector) RecordRetrySuccess() {
+	atomic.AddUint64(&c.retrySuccesses, 1)
+}
+
+// RecordRetryFailure increments retry failures
+func (c *Collector) RecordRetryFailure() {
+	atomic.AddUint64(&c.retryFailures, 1)
+}
+
+// RecordSlowRequest records slow request events
+func (c *Collector) RecordSlowRequest(level string) {
+	switch level {
+	case "warning":
+		atomic.AddUint64(&c.slowWarnings, 1)
+	case "critical":
+		atomic.AddUint64(&c.slowCriticals, 1)
+	}
+}
+
 // RecordWAFBlock records a WAF block
 func (c *Collector) RecordWAFBlock() {
 	atomic.AddUint64(&c.wafBlocks, 1)
@@ -204,16 +263,30 @@ func (c *Collector) GetStats() Stats {
 	defer c.mu.RUnlock()
 
 	stats := Stats{
-		Uptime:              time.Since(c.startTime).Seconds(),
-		TotalRequests:       atomic.LoadUint64(&c.totalRequests),
-		TotalErrors:         atomic.LoadUint64(&c.totalErrors),
-		TotalBytesSent:      atomic.LoadUint64(&c.totalBytesSent),
-		TotalBytesReceived:  atomic.LoadUint64(&c.totalBytesReceived),
-		ActiveConnections:   atomic.LoadInt64(&c.activeConnections),
-		RateLimitViolations: atomic.LoadUint64(&c.rateLimitViolations),
-		WAFBlocks:           atomic.LoadUint64(&c.wafBlocks),
-		RequestsByStatus:    make(map[int]uint64),
-		RouteMetrics:        make(map[string]RouteStats),
+		Uptime:                  time.Since(c.startTime).Seconds(),
+		TotalRequests:           atomic.LoadUint64(&c.totalRequests),
+		TotalErrors:             atomic.LoadUint64(&c.totalErrors),
+		TotalBytesSent:          atomic.LoadUint64(&c.totalBytesSent),
+		TotalBytesReceived:      atomic.LoadUint64(&c.totalBytesReceived),
+		ActiveConnections:       atomic.LoadInt64(&c.activeConnections),
+		WebSocketActive:         atomic.LoadInt64(&c.websocketActive),
+		WebSocketConnections:    atomic.LoadUint64(&c.websocketConnections),
+		WebSocketBytesToClient:  atomic.LoadUint64(&c.websocketBytesToClient),
+		WebSocketBytesToBackend: atomic.LoadUint64(&c.websocketBytesToBackend),
+		RateLimitViolations:     atomic.LoadUint64(&c.rateLimitViolations),
+		WAFBlocks:               atomic.LoadUint64(&c.wafBlocks),
+		RetryAttempts:           atomic.LoadUint64(&c.retryAttempts),
+		RetrySuccesses:          atomic.LoadUint64(&c.retrySuccesses),
+		RetryFailures:           atomic.LoadUint64(&c.retryFailures),
+		SlowWarnings:            atomic.LoadUint64(&c.slowWarnings),
+		SlowCriticals:           atomic.LoadUint64(&c.slowCriticals),
+		RequestsByStatus:        make(map[int]uint64),
+		RouteMetrics:            make(map[string]RouteStats),
+	}
+
+	wsDurSum := atomic.LoadUint64(&c.websocketDurationSum)
+	if stats.WebSocketConnections > 0 && wsDurSum > 0 {
+		stats.WebSocketAverageDuration = float64(wsDurSum) / float64(stats.WebSocketConnections) / 1e9
 	}
 
 	// Copy status code counters
@@ -247,17 +320,27 @@ func (c *Collector) GetStats() Stats {
 
 // Stats represents current metrics statistics
 type Stats struct {
-	Uptime              float64               `json:"uptime_seconds"`
-	TotalRequests       uint64                `json:"total_requests"`
-	TotalErrors         uint64                `json:"total_errors"`
-	ErrorRate           float64               `json:"error_rate_percent"`
-	TotalBytesSent      uint64                `json:"total_bytes_sent"`
-	TotalBytesReceived  uint64                `json:"total_bytes_received"`
-	ActiveConnections   int64                 `json:"active_connections"`
-	RateLimitViolations uint64                `json:"rate_limit_violations"`
-	WAFBlocks           uint64                `json:"waf_blocks"`
-	RequestsByStatus    map[int]uint64        `json:"requests_by_status"`
-	RouteMetrics        map[string]RouteStats `json:"route_metrics"`
+	Uptime                   float64               `json:"uptime_seconds"`
+	TotalRequests            uint64                `json:"total_requests"`
+	TotalErrors              uint64                `json:"total_errors"`
+	ErrorRate                float64               `json:"error_rate_percent"`
+	TotalBytesSent           uint64                `json:"total_bytes_sent"`
+	TotalBytesReceived       uint64                `json:"total_bytes_received"`
+	ActiveConnections        int64                 `json:"active_connections"`
+	WebSocketActive          int64                 `json:"websocket_active"`
+	WebSocketConnections     uint64                `json:"websocket_connections"`
+	WebSocketBytesToClient   uint64                `json:"websocket_bytes_to_client"`
+	WebSocketBytesToBackend  uint64                `json:"websocket_bytes_to_backend"`
+	WebSocketAverageDuration float64               `json:"websocket_average_duration_seconds"`
+	RateLimitViolations      uint64                `json:"rate_limit_violations"`
+	WAFBlocks                uint64                `json:"waf_blocks"`
+	RetryAttempts            uint64                `json:"retry_attempts"`
+	RetrySuccesses           uint64                `json:"retry_successes"`
+	RetryFailures            uint64                `json:"retry_failures"`
+	SlowWarnings             uint64                `json:"slow_request_warnings"`
+	SlowCriticals            uint64                `json:"slow_request_criticals"`
+	RequestsByStatus         map[int]uint64        `json:"requests_by_status"`
+	RouteMetrics             map[string]RouteStats `json:"route_metrics"`
 }
 
 // RouteStats represents metrics for a specific route
@@ -308,6 +391,26 @@ func (c *Collector) PrometheusMetrics() string {
 	out += "# TYPE proxy_active_connections gauge\n"
 	out += formatMetric("proxy_active_connections", stats.ActiveConnections)
 
+	out += "# HELP proxy_websocket_active Current active WebSocket connections\n"
+	out += "# TYPE proxy_websocket_active gauge\n"
+	out += formatMetric("proxy_websocket_active", stats.WebSocketActive)
+
+	out += "# HELP proxy_websocket_connections_total Total WebSocket connections established\n"
+	out += "# TYPE proxy_websocket_connections_total counter\n"
+	out += formatMetric("proxy_websocket_connections_total", stats.WebSocketConnections)
+
+	out += "# HELP proxy_websocket_bytes_to_client_total Total WebSocket bytes sent to clients\n"
+	out += "# TYPE proxy_websocket_bytes_to_client_total counter\n"
+	out += formatMetric("proxy_websocket_bytes_to_client_total", stats.WebSocketBytesToClient)
+
+	out += "# HELP proxy_websocket_bytes_to_backend_total Total WebSocket bytes sent to backends\n"
+	out += "# TYPE proxy_websocket_bytes_to_backend_total counter\n"
+	out += formatMetric("proxy_websocket_bytes_to_backend_total", stats.WebSocketBytesToBackend)
+
+	out += "# HELP proxy_websocket_average_duration_seconds Average WebSocket session duration in seconds\n"
+	out += "# TYPE proxy_websocket_average_duration_seconds gauge\n"
+	out += formatMetric("proxy_websocket_average_duration_seconds", stats.WebSocketAverageDuration)
+
 	// rate limiting
 	out += "# HELP proxy_rate_limit_violations_total Total rate limit violations\n"
 	out += "# TYPE proxy_rate_limit_violations_total counter\n"
@@ -317,6 +420,26 @@ func (c *Collector) PrometheusMetrics() string {
 	out += "# HELP proxy_waf_blocks_total Total WAF blocks\n"
 	out += "# TYPE proxy_waf_blocks_total counter\n"
 	out += formatMetric("proxy_waf_blocks_total", stats.WAFBlocks)
+
+	out += "# HELP proxy_retry_attempts_total Total retry attempts\n"
+	out += "# TYPE proxy_retry_attempts_total counter\n"
+	out += formatMetric("proxy_retry_attempts_total", stats.RetryAttempts)
+
+	out += "# HELP proxy_retry_successes_total Successful retries\n"
+	out += "# TYPE proxy_retry_successes_total counter\n"
+	out += formatMetric("proxy_retry_successes_total", stats.RetrySuccesses)
+
+	out += "# HELP proxy_retry_failures_total Failed retries\n"
+	out += "# TYPE proxy_retry_failures_total counter\n"
+	out += formatMetric("proxy_retry_failures_total", stats.RetryFailures)
+
+	out += "# HELP proxy_slow_request_warnings_total Slow request warnings (>= warning threshold)\n"
+	out += "# TYPE proxy_slow_request_warnings_total counter\n"
+	out += formatMetric("proxy_slow_request_warnings_total", stats.SlowWarnings)
+
+	out += "# HELP proxy_slow_request_criticals_total Slow request criticals (>= critical threshold)\n"
+	out += "# TYPE proxy_slow_request_criticals_total counter\n"
+	out += formatMetric("proxy_slow_request_criticals_total", stats.SlowCriticals)
 
 	// requests by status code
 	out += "# HELP proxy_requests_by_status_total Total requests by HTTP status code\n"

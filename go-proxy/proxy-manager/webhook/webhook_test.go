@@ -389,8 +389,8 @@ func TestClearAllThrottles(t *testing.T) {
 
 func TestClearThrottle_Disabled(t *testing.T) {
 	notifier := &Notifier{enabled: false}
-	notifier.ClearThrottle(EventServiceDown)   // Should not panic
-	notifier.ClearAllThrottles()               // Should not panic
+	notifier.ClearThrottle(EventServiceDown) // Should not panic
+	notifier.ClearAllThrottles()             // Should not panic
 }
 
 func TestMultipleWebhooks(t *testing.T) {

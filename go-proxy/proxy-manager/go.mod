@@ -1,10 +1,14 @@
 module github.com/chilla55/proxy-manager
 
-go 1.21
+go 1.22
+
+toolchain go1.24.4
 
 require (
+	github.com/andybalholm/brotli v1.2.0
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/google/uuid v1.5.0
+	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/quic-go/quic-go v0.40.1
 	github.com/rs/zerolog v1.31.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -20,7 +24,6 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/onsi/ginkgo/v2 v2.9.5 // indirect
-	github.com/oschwald/geoip2-golang v1.13.0 // indirect
 	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
 	github.com/quic-go/qpack v0.4.0 // indirect
 	github.com/quic-go/qtls-go1-20 v0.4.1 // indirect

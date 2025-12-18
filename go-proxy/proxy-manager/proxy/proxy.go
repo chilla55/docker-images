@@ -1,9 +1,12 @@
 package proxy
 
 import (
+	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -13,6 +16,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/andybalholm/brotli"
+	"github.com/chilla55/proxy-manager/database"
+	"github.com/chilla55/proxy-manager/metrics"
+	"github.com/chilla55/proxy-manager/tracing"
+	"github.com/chilla55/proxy-manager/webhook"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/rs/zerolog/log"
 )
@@ -39,6 +47,30 @@ type Backend struct {
 	MaxBodySize   int64
 	WebSocket     bool
 	mu            sync.RWMutex
+	// Phase 4 configs
+	slowEnabled        bool
+	slowWarning        time.Duration
+	slowCritical       time.Duration
+	slowTimeout        time.Duration
+	alertWebhook       bool
+	retryEnabled       bool
+	retryMax           int
+	retryBackoff       string
+	retryInitial       time.Duration
+	retryMaxDelay      time.Duration
+	retryOn            map[string]struct{}
+	compressionEnabled bool
+	compressionAlgos   []string
+	compressionLevel   int
+	compressionMinSize int64
+	compressionTypes   map[string]struct{}
+	websocketEnabled   bool
+	websocketMaxConn   int
+	websocketMaxDur    time.Duration
+	websocketIdle      time.Duration
+	websocketPing      time.Duration
+	websocketActive    int64
+	metrics            *metrics.Collector
 }
 
 // Route represents a routing rule
@@ -71,10 +103,11 @@ type Server struct {
 	certificates []CertMapping // Loaded TLS certificates
 
 	db               interface{} // Database connection (interface to avoid import cycle)
-	metricsCollector interface{} // Metrics collector
-	accessLogger     interface{} // Access logger
-	certMonitor      interface{} // Certificate monitor
-	healthChecker    interface{} // Health checker
+	metricsCollector interface{} // Metrics collector (interface to avoid import cycle)
+	accessLogger     interface{} // Access logger (interface to avoid import cycle)
+	certMonitor      interface{} // Certificate monitor (interface to avoid import cycle)
+	healthChecker    interface{} // Health checker (interface to avoid import cycle)
+	notifier         interface{} // Webhook notifier (optional)
 	debug            bool
 }
 
@@ -91,6 +124,7 @@ type Config struct {
 	AccessLogger     interface{} // Access logger
 	CertMonitor      interface{} // Certificate monitor
 	HealthChecker    interface{} // Health checker
+	Notifier         interface{} // Webhook notifier
 }
 
 // NewServer creates a new proxy server
@@ -105,6 +139,7 @@ func NewServer(cfg Config) *Server {
 		accessLogger:     cfg.AccessLogger,
 		certMonitor:      cfg.CertMonitor,
 		healthChecker:    cfg.HealthChecker,
+		notifier:         cfg.Notifier,
 		debug:            cfg.Debug,
 	}
 
@@ -185,11 +220,38 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get route for headers
 	route := s.findRoute(r.Host, r.URL.Path)
 
+	// Handle WebSocket upgrade separately
+	if isWebSocketRequest(r) {
+		if route != nil && route.WebSocket {
+			s.handleWebSocket(w, r, route, backend)
+		} else {
+			http.Error(w, "WebSocket not allowed", http.StatusBadRequest)
+		}
+		return
+	}
+
 	// Apply security headers
 	s.applyHeaders(w, route)
 
-	// Proxy request
+	// Proxy request with slow-request tracking
+	start := time.Now()
 	backend.Proxy.ServeHTTP(w, r)
+	elapsed := time.Since(start)
+	if backend.slowEnabled {
+		if backend.slowCritical > 0 && elapsed >= backend.slowCritical {
+			log.Error().Dur("duration", elapsed).Str("host", r.Host).Str("path", r.URL.Path).Msg("Critical slow request")
+			s.recordSlowMetric("critical")
+			if backend.alertWebhook {
+				s.sendSlowAlert(route, r, elapsed, "critical")
+			}
+		} else if backend.slowWarning > 0 && elapsed >= backend.slowWarning {
+			log.Warn().Dur("duration", elapsed).Str("host", r.Host).Str("path", r.URL.Path).Msg("Slow request warning")
+			s.recordSlowMetric("warning")
+			if backend.alertWebhook {
+				s.sendSlowAlert(route, r, elapsed, "warning")
+			}
+		}
+	}
 }
 
 // AddRoute adds or updates a route
@@ -364,13 +426,30 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 	}
 
 	backend := &Backend{
-		URL:           target,
-		Proxy:         proxy,
-		Healthy:       true,
-		HealthPath:    "/",
-		HealthTimeout: 5 * time.Second,
-		Timeout:       30 * time.Second,
-		MaxBodySize:   100 * 1024 * 1024, // 100MB
+		URL:                target,
+		Proxy:              proxy,
+		Healthy:            true,
+		HealthPath:         "/",
+		HealthTimeout:      5 * time.Second,
+		Timeout:            30 * time.Second,
+		MaxBodySize:        100 * 1024 * 1024, // 100MB
+		compressionAlgos:   []string{"br", "gzip"},
+		compressionLevel:   5,
+		compressionMinSize: 1024,
+		compressionTypes: map[string]struct{}{
+			"text/html":              {},
+			"text/css":               {},
+			"application/javascript": {},
+			"application/json":       {},
+			"image/svg+xml":          {},
+		},
+		websocketMaxDur: 24 * time.Hour,
+		websocketIdle:   5 * time.Minute,
+		websocketPing:   30 * time.Second,
+	}
+
+	if mc, ok := s.metricsCollector.(*metrics.Collector); ok {
+		backend.metrics = mc
 	}
 
 	// Apply options
@@ -380,10 +459,601 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 		}
 		if v, ok := options["timeout"].(time.Duration); ok {
 			backend.Timeout = v
+			transport.ResponseHeaderTimeout = v
+		}
+		// Connection pool settings
+		if pm, ok := options["pool"].(map[string]interface{}); ok {
+			if v, ok := pm["max_idle_conns"].(int); ok && v > 0 {
+				transport.MaxIdleConns = v
+			}
+			if v, ok := pm["max_idle_conns_per_host"].(int); ok && v > 0 {
+				transport.MaxIdleConnsPerHost = v
+			}
+			if v, ok := pm["max_conns_per_host"].(int); ok && v > 0 {
+				transport.MaxConnsPerHost = v
+			}
+			if v, ok := pm["idle_timeout"].(time.Duration); ok && v > 0 {
+				transport.IdleConnTimeout = v
+			}
+		}
+		// Slow request detection
+		if sm, ok := options["slow_request"].(map[string]interface{}); ok {
+			if v, ok := sm["enabled"].(bool); ok {
+				backend.slowEnabled = v
+			}
+			if v, ok := sm["warning"].(time.Duration); ok {
+				backend.slowWarning = v
+			}
+			if v, ok := sm["critical"].(time.Duration); ok {
+				backend.slowCritical = v
+			}
+			if v, ok := sm["timeout"].(time.Duration); ok {
+				backend.slowTimeout = v
+			}
+			if v, ok := sm["alert_webhook"].(bool); ok {
+				backend.alertWebhook = v
+			}
+			if backend.slowTimeout > 0 {
+				transport.ResponseHeaderTimeout = backend.slowTimeout
+			}
+		}
+		// Retry logic
+		if rm, ok := options["retry"].(map[string]interface{}); ok {
+			if v, ok := rm["enabled"].(bool); ok {
+				backend.retryEnabled = v
+			}
+			if v, ok := rm["max_attempts"].(int); ok && v > 0 {
+				backend.retryMax = v
+			}
+			if v, ok := rm["backoff"].(string); ok {
+				backend.retryBackoff = v
+			}
+			if v, ok := rm["initial_delay"].(time.Duration); ok {
+				backend.retryInitial = v
+			}
+			if v, ok := rm["max_delay"].(time.Duration); ok {
+				backend.retryMaxDelay = v
+			}
+			if arr, ok := rm["retry_on"].([]string); ok {
+				backend.retryOn = make(map[string]struct{}, len(arr))
+				for _, s := range arr {
+					backend.retryOn[s] = struct{}{}
+				}
+			}
+			if backend.retryEnabled && backend.retryMax > 0 {
+				proxy.Transport = newRetryTransport(transport, backend)
+			}
+		}
+		// Compression
+		if cm, ok := options["compression"].(map[string]interface{}); ok {
+			if v, ok := cm["enabled"].(bool); ok {
+				backend.compressionEnabled = v
+			}
+			if v, ok := cm["level"].(int); ok {
+				backend.compressionLevel = v
+			}
+			if v, ok := cm["min_size"].(int64); ok {
+				backend.compressionMinSize = v
+			}
+			if v, ok := cm["min_size"].(int); ok {
+				backend.compressionMinSize = int64(v)
+			}
+			if arr, ok := cm["algorithms"].([]string); ok && len(arr) > 0 {
+				backend.compressionAlgos = normalizeAlgorithms(arr)
+			}
+			if arr, ok := cm["content_types"].([]string); ok && len(arr) > 0 {
+				backend.compressionTypes = make(map[string]struct{}, len(arr))
+				for _, ct := range arr {
+					backend.compressionTypes[strings.ToLower(ct)] = struct{}{}
+				}
+			}
+		}
+		// WebSocket tuning
+		if wm, ok := options["websocket"].(map[string]interface{}); ok {
+			if v, ok := wm["enabled"].(bool); ok {
+				backend.websocketEnabled = v
+			}
+			if v, ok := wm["max_connections"].(int); ok {
+				backend.websocketMaxConn = v
+			}
+			if v, ok := wm["max_duration"].(time.Duration); ok && v > 0 {
+				backend.websocketMaxDur = v
+			}
+			if v, ok := wm["idle_timeout"].(time.Duration); ok && v > 0 {
+				backend.websocketIdle = v
+			}
+			if v, ok := wm["ping_interval"].(time.Duration); ok && v > 0 {
+				backend.websocketPing = v
+			}
 		}
 	}
 
+	// Attach compression handler (no-op if disabled)
+	proxy.ModifyResponse = backend.compressionHandler()
+
 	return backend
+}
+
+// retryTransport wraps a base RoundTripper with retry logic
+type retryTransport struct {
+	base    http.RoundTripper
+	backend *Backend
+}
+
+func newRetryTransport(base http.RoundTripper, be *Backend) http.RoundTripper {
+	return &retryTransport{base: base, backend: be}
+}
+
+func (rt *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	attempts := 0
+	delay := rt.backend.retryInitial
+	if delay <= 0 {
+		delay = 100 * time.Millisecond
+	}
+	maxDelay := rt.backend.retryMaxDelay
+	if maxDelay <= 0 {
+		maxDelay = 2 * time.Second
+	}
+
+	for {
+		if rt.backend.metrics != nil {
+			rt.backend.metrics.RecordRetryAttempt()
+		}
+
+		resp, err := rt.base.RoundTrip(req)
+
+		// Determine if we should retry
+		should := false
+		if err != nil {
+			// Network errors
+			if _, ok := err.(net.Error); ok {
+				should = rt.shouldRetryReason("timeout")
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "connection refused") {
+				should = should || rt.shouldRetryReason("connection_refused")
+			}
+		} else if resp != nil {
+			// Retry on specific status codes
+			code := resp.StatusCode
+			if code == 502 && rt.shouldRetryReason("502") {
+				should = true
+			}
+			if code == 503 && rt.shouldRetryReason("503") {
+				should = true
+			}
+			if code == 504 && rt.shouldRetryReason("504") {
+				should = true
+			}
+			if should {
+				// Ensure body is closed before retry
+				resp.Body.Close()
+			}
+		}
+
+		// Stop if no retry or max attempts reached
+		if !should || !rt.backend.retryEnabled || attempts >= rt.backend.retryMax-1 {
+			if rt.backend.metrics != nil {
+				if err == nil {
+					rt.backend.metrics.RecordRetrySuccess()
+				} else {
+					rt.backend.metrics.RecordRetryFailure()
+				}
+			}
+			return resp, err
+		}
+
+		attempts++
+		time.Sleep(delay)
+		// Backoff
+		if rt.backend.retryBackoff == "exponential" {
+			delay *= 2
+			if delay > maxDelay {
+				delay = maxDelay
+			}
+		}
+		// For linear, delay remains constant
+	}
+}
+
+func (rt *retryTransport) shouldRetryReason(reason string) bool {
+	if rt.backend.retryOn == nil {
+		return false
+	}
+	_, ok := rt.backend.retryOn[reason]
+	return ok
+}
+
+// compressionHandler builds a response modifier that compresses responses when eligible
+func (b *Backend) compressionHandler() func(*http.Response) error {
+	return func(res *http.Response) error {
+		algo, ok := b.shouldCompress(res)
+		if !ok {
+			return nil
+		}
+		return b.applyCompression(res, algo)
+	}
+}
+
+func (b *Backend) shouldCompress(res *http.Response) (string, bool) {
+	if !b.compressionEnabled || res == nil || res.Request == nil {
+		return "", false
+	}
+
+	// Skip on WebSocket or already encoded responses
+	if isWebSocketRequest(res.Request) {
+		return "", false
+	}
+	if res.Header.Get("Content-Encoding") != "" {
+		return "", false
+	}
+	if res.Request.Method == http.MethodHead {
+		return "", false
+	}
+	if res.StatusCode < 200 || res.StatusCode == http.StatusNoContent || res.StatusCode == http.StatusNotModified {
+		return "", false
+	}
+
+	ct := strings.ToLower(res.Header.Get("Content-Type"))
+	if ct != "" && !b.contentTypeAllowed(ct) {
+		return "", false
+	}
+
+	if res.ContentLength >= 0 && b.compressionMinSize > 0 && res.ContentLength < b.compressionMinSize {
+		return "", false
+	}
+
+	algo := selectAlgorithm(res.Request.Header.Get("Accept-Encoding"), b.compressionAlgos)
+	if algo == "" {
+		return "", false
+	}
+
+	return algo, true
+}
+
+func (b *Backend) applyCompression(res *http.Response, algo string) error {
+	// Remove length because it will change
+	res.Header.Del("Content-Length")
+	res.ContentLength = -1
+	res.Header.Set("Content-Encoding", algo)
+	res.Header.Add("Vary", "Accept-Encoding")
+
+	originalBody := res.Body
+	pr, pw := io.Pipe()
+	res.Body = pr
+
+	go func() {
+		defer originalBody.Close()
+		var writer io.WriteCloser
+		switch algo {
+		case "br":
+			level := b.compressionLevelFor(algo)
+			writer = brotli.NewWriterLevel(pw, level)
+		case "gzip":
+			level := b.compressionLevelFor(algo)
+			gz, err := gzip.NewWriterLevel(pw, level)
+			if err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+			writer = gz
+		default:
+			pw.Close()
+			return
+		}
+
+		_, err := io.Copy(writer, originalBody)
+		if err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		writer.Close()
+		pw.Close()
+	}()
+
+	return nil
+}
+
+func (b *Backend) compressionLevelFor(algo string) int {
+	level := b.compressionLevel
+	switch algo {
+	case "gzip":
+		if level == 0 {
+			return gzip.DefaultCompression
+		}
+		if level < gzip.HuffmanOnly {
+			return gzip.BestSpeed
+		}
+		if level > gzip.BestCompression {
+			return gzip.BestCompression
+		}
+	case "br":
+		if level < 0 {
+			return 0
+		}
+		if level > 11 {
+			return 11
+		}
+	}
+	return level
+}
+
+func normalizeAlgorithms(list []string) []string {
+	var out []string
+	seen := make(map[string]struct{})
+	for _, v := range list {
+		v = strings.TrimSpace(strings.ToLower(v))
+		if v == "" {
+			continue
+		}
+		if v == "brotli" {
+			v = "br"
+		}
+		if v == "gzip" || v == "br" {
+			if _, ok := seen[v]; !ok {
+				seen[v] = struct{}{}
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+func selectAlgorithm(acceptEncoding string, algos []string) string {
+	accept := strings.ToLower(acceptEncoding)
+	for _, algo := range algos {
+		if algo == "br" && strings.Contains(accept, "br") {
+			return "br"
+		}
+		if algo == "gzip" && strings.Contains(accept, "gzip") {
+			return "gzip"
+		}
+	}
+	return ""
+}
+
+func (b *Backend) contentTypeAllowed(ct string) bool {
+	if len(b.compressionTypes) == 0 {
+		return true
+	}
+	for allowed := range b.compressionTypes {
+		if strings.HasPrefix(ct, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+func isWebSocketRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if strings.ToLower(r.Header.Get("Upgrade")) != "websocket" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
+}
+
+// handleWebSocket proxies WebSocket connections with metrics and DB logging
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, route *Route, backend *Backend) {
+	routePath := ""
+	if route != nil {
+		routePath = route.Path
+	}
+
+	if backend.websocketMaxConn > 0 && atomic.LoadInt64(&backend.websocketActive) >= int64(backend.websocketMaxConn) {
+		http.Error(w, "WebSocket capacity reached", http.StatusServiceUnavailable)
+		return
+	}
+
+	backendConn, err := s.dialBackend(backend)
+	if err != nil {
+		http.Error(w, "Upstream connection failed", http.StatusBadGateway)
+		return
+	}
+
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "WebSocket not supported", http.StatusInternalServerError)
+		backendConn.Close()
+		return
+	}
+
+	clientConn, _, err := hj.Hijack()
+	if err != nil {
+		http.Error(w, "Hijack failed", http.StatusInternalServerError)
+		backendConn.Close()
+		return
+	}
+
+	requestID := r.Header.Get("X-Request-ID")
+	if requestID == "" {
+		requestID = tracing.GenerateRequestID()
+	}
+
+	outbound := r.Clone(r.Context())
+	outbound.URL.Scheme = backend.URL.Scheme
+	outbound.URL.Host = backend.URL.Host
+	outbound.Host = backend.URL.Host
+	outbound.RequestURI = r.URL.RequestURI()
+	outbound.Header.Set("Connection", "Upgrade")
+	outbound.Header.Set("Upgrade", "websocket")
+	outbound.Header.Set("X-Request-ID", requestID)
+	outbound.Header.Set("X-Forwarded-For", r.RemoteAddr)
+
+	if err := outbound.Write(backendConn); err != nil {
+		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
+		clientConn.Close()
+		backendConn.Close()
+		return
+	}
+
+	backendReader := bufio.NewReader(backendConn)
+	resp, err := http.ReadResponse(backendReader, outbound)
+	if err != nil {
+		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
+		clientConn.Close()
+		backendConn.Close()
+		return
+	}
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		resp.Write(clientConn)
+		clientConn.Close()
+		backendConn.Close()
+		return
+	}
+
+	resp.Header.Del("Content-Length")
+	resp.Header.Del("Transfer-Encoding")
+	if err := resp.Write(clientConn); err != nil {
+		clientConn.Close()
+		backendConn.Close()
+		return
+	}
+
+	if s.debug {
+		log.Debug().Str("host", r.Host).Str("path", routePath).Msg("WebSocket upgrade established")
+	}
+
+	atomic.AddInt64(&backend.websocketActive, 1)
+	if backend.metrics != nil {
+		backend.metrics.IncrementWebSocketActive()
+	}
+
+	start := time.Now()
+	if backend.websocketMaxDur > 0 {
+		deadline := time.Now().Add(backend.websocketMaxDur)
+		clientConn.SetDeadline(deadline)
+		backendConn.SetDeadline(deadline)
+	}
+
+	var dbConnID int64
+	if db, ok := s.db.(*database.DB); ok {
+		dbConnID, _ = db.InsertWebSocketConnection(&database.WebSocketConnection{
+			RequestID:   requestID,
+			ClientIP:    r.RemoteAddr,
+			ConnectedAt: start.Unix(),
+		})
+	}
+
+	var toClient, toBackend uint64
+	var lastActivity int64
+	atomic.StoreInt64(&lastActivity, time.Now().UnixNano())
+	done := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		io.Copy(&countingWriter{w: backendConn, counter: &toBackend, activity: &lastActivity}, clientConn)
+	}()
+	go func() {
+		defer wg.Done()
+		io.Copy(&countingWriter{w: clientConn, counter: &toClient, activity: &lastActivity}, backendConn)
+	}()
+
+	if backend.websocketIdle > 0 {
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					if time.Since(time.Unix(0, atomic.LoadInt64(&lastActivity))) > backend.websocketIdle {
+						clientConn.Close()
+						backendConn.Close()
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(done)
+
+	duration := time.Since(start)
+	if backend.metrics != nil {
+		backend.metrics.RecordWebSocketTransfer(toClient, toBackend, duration)
+		backend.metrics.DecrementWebSocketActive()
+	}
+	atomic.AddInt64(&backend.websocketActive, -1)
+
+	if db, ok := s.db.(*database.DB); ok && dbConnID != 0 {
+		_ = db.CloseWebSocketConnection(dbConnID, time.Now().Unix(), toClient, toBackend, 0, 0, "")
+	}
+
+	clientConn.Close()
+	backendConn.Close()
+}
+
+// countingWriter wraps a writer and tracks bytes plus last-activity time
+type countingWriter struct {
+	w        io.Writer
+	counter  *uint64
+	activity *int64
+}
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	if n > 0 {
+		if cw.counter != nil {
+			atomic.AddUint64(cw.counter, uint64(n))
+		}
+		if cw.activity != nil {
+			atomic.StoreInt64(cw.activity, time.Now().UnixNano())
+		}
+	}
+	return n, err
+}
+
+func (s *Server) dialBackend(backend *Backend) (net.Conn, error) {
+	dialer := &net.Dialer{
+		Timeout:   backend.Timeout,
+		KeepAlive: 30 * time.Second,
+	}
+	if backend.URL.Scheme == "https" {
+		return tls.DialWithDialer(dialer, "tcp", backend.URL.Host, &tls.Config{ServerName: backend.URL.Hostname()})
+	}
+	return dialer.Dial("tcp", backend.URL.Host)
+}
+
+func (s *Server) recordSlowMetric(level string) {
+	if mc, ok := s.metricsCollector.(*metrics.Collector); ok {
+		mc.RecordSlowRequest(level)
+	}
+}
+
+func (s *Server) sendSlowAlert(route *Route, r *http.Request, duration time.Duration, severity string) {
+	notifier, ok := s.notifier.(*webhook.Notifier)
+	if !ok || notifier == nil {
+		return
+	}
+
+	fields := map[string]string{
+		"host":     r.Host,
+		"path":     r.URL.Path,
+		"method":   r.Method,
+		"duration": duration.String(),
+	}
+	if route != nil {
+		fields["route"] = route.Path
+	}
+
+	alert := webhook.Alert{
+		Event:       webhook.EventSlowRequest,
+		Title:       "Slow request detected",
+		Description: fmt.Sprintf("%s %s took %s", r.Method, r.URL.Path, duration),
+		Severity:    severity,
+		Fields:      fields,
+		Timestamp:   time.Now(),
+	}
+
+	if err := notifier.Send(alert); err != nil {
+		log.Warn().Err(err).Msg("Failed to send slow request alert")
+	}
 }
 
 // applyHeaders applies security headers to response

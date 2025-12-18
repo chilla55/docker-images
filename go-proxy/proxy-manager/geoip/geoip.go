@@ -11,15 +11,15 @@ import (
 
 // Tracker handles GeoIP lookups for client IP addresses
 type Tracker struct {
-	db                     *geoip2.Reader
-	enabled                bool
-	alertOnUnusualCountry  bool
-	expectedCountries      map[string]bool // Expected countries for this service
-	locationCache          map[string]*Location
-	cacheMutex             sync.RWMutex
-	stats                  Stats
-	statsMutex             sync.RWMutex
-	cacheExpiry            time.Duration
+	db                    *geoip2.Reader
+	enabled               bool
+	alertOnUnusualCountry bool
+	expectedCountries     map[string]bool // Expected countries for this service
+	locationCache         map[string]*Location
+	cacheMutex            sync.RWMutex
+	stats                 Stats
+	statsMutex            sync.RWMutex
+	cacheExpiry           time.Duration
 }
 
 // Location represents a GeoIP lookup result
@@ -36,22 +36,22 @@ type Location struct {
 
 // Stats tracks GeoIP system statistics
 type Stats struct {
-	LookupsTotal       int64            `json:"lookups_total"`
-	LookupsSuccess     int64            `json:"lookups_success"`
-	LookupsFailed      int64            `json:"lookups_failed"`
-	CacheHits          int64            `json:"cache_hits"`
-	CacheMisses        int64            `json:"cache_misses"`
-	UnusualCountries   int64            `json:"unusual_countries"`
+	LookupsTotal        int64            `json:"lookups_total"`
+	LookupsSuccess      int64            `json:"lookups_success"`
+	LookupsFailed       int64            `json:"lookups_failed"`
+	CacheHits           int64            `json:"cache_hits"`
+	CacheMisses         int64            `json:"cache_misses"`
+	UnusualCountries    int64            `json:"unusual_countries"`
 	CountryDistribution map[string]int64 `json:"country_distribution"`
 }
 
 // Config represents GeoIP configuration
 type Config struct {
-	Enabled                bool     `yaml:"enabled"`
-	DatabasePath           string   `yaml:"database_path"`
-	AlertOnUnusualCountry  bool     `yaml:"alert_on_unusual_country"`
-	ExpectedCountries      []string `yaml:"expected_countries"` // Empty = all allowed
-	CacheExpiryMinutes     int      `yaml:"cache_expiry_minutes"`
+	Enabled               bool     `yaml:"enabled"`
+	DatabasePath          string   `yaml:"database_path"`
+	AlertOnUnusualCountry bool     `yaml:"alert_on_unusual_country"`
+	ExpectedCountries     []string `yaml:"expected_countries"` // Empty = all allowed
+	CacheExpiryMinutes    int      `yaml:"cache_expiry_minutes"`
 }
 
 // New creates a new GeoIP tracker

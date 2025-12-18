@@ -34,6 +34,21 @@ type AccessLogEntry struct {
 	Error          string `json:"error,omitempty"`
 }
 
+// WebSocketConnection represents a WebSocket session entry
+type WebSocketConnection struct {
+	ConnID           int64  `json:"conn_id"`
+	RequestID        string `json:"request_id"`
+	RouteID          *int64 `json:"route_id,omitempty"`
+	ClientIP         string `json:"client_ip"`
+	ConnectedAt      int64  `json:"connected_at"`
+	DisconnectedAt   *int64 `json:"disconnected_at,omitempty"`
+	BytesSent        uint64 `json:"bytes_sent"`
+	BytesReceived    uint64 `json:"bytes_received"`
+	MessagesSent     uint64 `json:"messages_sent"`
+	MessagesReceived uint64 `json:"messages_received"`
+	CloseReason      string `json:"close_reason,omitempty"`
+}
+
 // HealthCheckResult represents a health check result from database
 type HealthCheckResult struct {
 	Timestamp  int64  `json:"timestamp"`
@@ -284,6 +299,74 @@ func (db *DB) LogRequest(req *RequestLog) error {
 		req.Timestamp, req.RouteID, req.ServiceID, req.RequestID, req.ClientIP,
 		req.Method, req.Path, req.StatusCode, req.ResponseTimeMs,
 		req.BytesSent, req.BytesReceived, req.UserAgent, req.Referer, req.ErrorMessage,
+	)
+
+	return err
+}
+
+// InsertWebSocketConnection inserts a new websocket connection record and returns its ID
+func (db *DB) InsertWebSocketConnection(conn *WebSocketConnection) (int64, error) {
+	if conn == nil {
+		return 0, fmt.Errorf("nil websocket connection")
+	}
+	if conn.ConnectedAt == 0 {
+		conn.ConnectedAt = time.Now().Unix()
+	}
+
+	res, err := db.Exec(`
+		INSERT INTO websocket_connections (
+			request_id, route_id, client_ip, connected_at,
+			bytes_sent, bytes_received, messages_sent, messages_received, close_reason
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		conn.RequestID,
+		conn.RouteID,
+		conn.ClientIP,
+		conn.ConnectedAt,
+		conn.BytesSent,
+		conn.BytesReceived,
+		conn.MessagesSent,
+		conn.MessagesReceived,
+		conn.CloseReason,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	return id, nil
+}
+
+// CloseWebSocketConnection updates an existing websocket connection with completion stats
+func (db *DB) CloseWebSocketConnection(connID int64, disconnectedAt int64, bytesSent, bytesReceived, messagesSent, messagesReceived uint64, reason string) error {
+	if connID == 0 {
+		return fmt.Errorf("conn_id is required")
+	}
+	if disconnectedAt == 0 {
+		disconnectedAt = time.Now().Unix()
+	}
+
+	_, err := db.Exec(`
+		UPDATE websocket_connections
+		SET disconnected_at = ?,
+			bytes_sent = ?,
+			bytes_received = ?,
+			messages_sent = ?,
+			messages_received = ?,
+			close_reason = ?
+		WHERE conn_id = ?
+	`,
+		disconnectedAt,
+		bytesSent,
+		bytesReceived,
+		messagesSent,
+		messagesReceived,
+		reason,
+		connID,
 	)
 
 	return err

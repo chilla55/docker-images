@@ -1,17 +1,17 @@
 package main
 
 import (
-    "bytes"
-    "encoding/json"
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"strings"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -159,6 +159,7 @@ func main() {
 		AccessLogger:     accessLogger,
 		CertMonitor:      certMonitor,
 		HealthChecker:    healthChecker,
+		Notifier:         notifier,
 	})
 
 	// Initialize service registry
@@ -374,7 +375,10 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 		}
 
 		// Convert to slice and sort desc
-		type item struct{ Route string `json:"route"`; Count int `json:"count"` }
+		type item struct {
+			Route string `json:"route"`
+			Count int    `json:"count"`
+		}
 		var list []item
 		for route, count := range counts {
 			list = append(list, item{Route: route, Count: count})
@@ -543,7 +547,7 @@ func initWebhookNotifier(globalConfigPath string) *webhook.Notifier {
 	// Minimal loader that looks for a top-level 'webhooks' and optional 'enabled'
 	type raw struct {
 		Webhooks []webhook.Webhook `yaml:"webhooks"`
-		Enabled  *bool              `yaml:"webhooks_enabled"`
+		Enabled  *bool             `yaml:"webhooks_enabled"`
 	}
 	data, err := os.ReadFile(globalConfigPath)
 	if err != nil {
@@ -610,9 +614,9 @@ func monitorCertAlerts(ctx context.Context, cm *certmonitor.Monitor, notifier *w
 					Description: fmt.Sprintf("%s expires in %d days", info.Domain, info.DaysRemaining),
 					Severity:    "warning",
 					Fields: map[string]string{
-						"Domain":        info.Domain,
+						"Domain":         info.Domain,
 						"Days Remaining": fmt.Sprintf("%d", info.DaysRemaining),
-						"Expiry":        info.NotAfter.UTC().Format(time.RFC3339),
+						"Expiry":         info.NotAfter.UTC().Format(time.RFC3339),
 					},
 					Timestamp: time.Now(),
 				})
@@ -625,9 +629,9 @@ func monitorCertAlerts(ctx context.Context, cm *certmonitor.Monitor, notifier *w
 					Description: fmt.Sprintf("%s expires in %d days", info.Domain, info.DaysRemaining),
 					Severity:    "warning",
 					Fields: map[string]string{
-						"Domain":        info.Domain,
+						"Domain":         info.Domain,
 						"Days Remaining": fmt.Sprintf("%d", info.DaysRemaining),
-						"Expiry":        info.NotAfter.UTC().Format(time.RFC3339),
+						"Expiry":         info.NotAfter.UTC().Format(time.RFC3339),
 					},
 					Timestamp: time.Now(),
 				})
@@ -640,9 +644,9 @@ func monitorCertAlerts(ctx context.Context, cm *certmonitor.Monitor, notifier *w
 					Description: fmt.Sprintf("%s expires in %d days", info.Domain, info.DaysRemaining),
 					Severity:    "info",
 					Fields: map[string]string{
-						"Domain":        info.Domain,
+						"Domain":         info.Domain,
 						"Days Remaining": fmt.Sprintf("%d", info.DaysRemaining),
-						"Expiry":        info.NotAfter.UTC().Format(time.RFC3339),
+						"Expiry":         info.NotAfter.UTC().Format(time.RFC3339),
 					},
 					Timestamp: time.Now(),
 				})

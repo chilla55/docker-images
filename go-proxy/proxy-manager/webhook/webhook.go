@@ -43,6 +43,7 @@ const (
 	EventWAFBlockSpike     EventType = "waf_block_spike"
 	EventUnusualCountry    EventType = "unusual_country"
 	EventRateLimitExceeded EventType = "rate_limit_exceeded"
+	EventSlowRequest       EventType = "slow_request"
 )
 
 // Alert represents an alert to be sent
