@@ -52,6 +52,21 @@ options:
     check_body: true
     max_body_size: 1048576        # 1 MB inspection limit
 
+  # PII Masking (Phase 1 - Task #16) - GDPR Compliance
+  pii:
+    enabled: true                 # Required for GDPR
+    mask_ip_method: last_octet    # 203.0.113.45 -> 203.0.113.xxx
+    mask_ipv6_method: last_64     # Mask last 64 bits
+    preserve_localhost: true      # Don't mask internal IPs
+    strip_headers:
+      - Authorization
+      - Cookie
+      - X-API-Key
+    mask_query_params:
+      - token
+      - password
+      - secret
+
   # Aggressive health checks
   health_check_path: /alive
   health_check_interval: 5s
