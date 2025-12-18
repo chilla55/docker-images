@@ -1,0 +1,31 @@
+defaults:
+  headers:
+    Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+    X-Frame-Options: DENY
+    X-Content-Type-Options: nosniff
+    X-XSS-Protection: 1; mode=block
+    Referrer-Policy: strict-origin-when-cross-origin
+    Permissions-Policy: geolocation=(), microphone=(), camera=()
+  
+  options:
+    health_check_interval: 30s
+    health_check_timeout: 5s
+    timeout: 30s
+    max_body_size: 100M
+    compression: true
+    http2: true
+    http3: true
+
+blackhole:
+  unknown_domains: true
+  metrics_only: true
+
+tls:
+  # List of SSL certificates (supports wildcards)
+  # Using Let's Encrypt certificates: fullchain.pem + privkey.pem
+  certificates:
+    - domains:
+        - "*.chilla55.de"
+        - "chilla55.de"
+      cert_file: /etc/proxy/certs/chilla55.de/fullchain.pem
+      key_file: /etc/proxy/certs/chilla55.de/privkey.pem

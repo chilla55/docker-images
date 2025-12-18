@@ -1,0 +1,55 @@
+# Example site configuration with Phase 0 features
+# Pterodactyl Game Panel
+
+enabled: true
+
+service:
+  name: pterodactyl_panel
+  maintenance_port: 8080
+
+# Route configurations
+routes:
+  - domains:
+      - gpanel.chilla55.de
+    path: /
+    backend: http://pterodactyl_panel:80
+    websocket: true  # Required for server console
+    headers:
+      # Additional headers specific to this route
+      X-Proxy-Service: "pterodactyl"
+      X-Frame-Options: "SAMEORIGIN"  # Override global setting for iframes
+
+# Timeout configurations (Phase 0 - Task #23)
+options:
+  timeouts:
+    connect: 5s       # Backend connection timeout
+    read: 30s         # Read timeout for backend response
+    write: 30s        # Write timeout for client response
+    idle: 120s        # Idle connection timeout
+
+  # Size limits (Phase 0 - Task #24)
+  limits:
+    max_request_body: 104857600   # 100 MB (allows server backup uploads)
+    max_response_body: 52428800   # 50 MB
+
+  # Health check configuration
+  health_check_path: /up
+  health_check_interval: 10s
+  health_check_timeout: 5s
+
+  # General options
+  timeout: 30s
+  compression: true
+  websocket: true
+  http2: true
+  http3: false  # Disabled for compatibility
+
+# Security headers (Phase 0 - Task #25)
+headers:
+  Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"
+  X-Frame-Options: "SAMEORIGIN"  # Allow iframes from same origin
+  X-Content-Type-Options: "nosniff"
+  X-XSS-Protection: "1; mode=block"
+  Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' wss:"
+  Referrer-Policy: "strict-origin-when-cross-origin"
+  Permissions-Policy: "geolocation=(), microphone=(), camera=()"

@@ -1,0 +1,45 @@
+# Example: Multi-domain platform with per-domain security headers
+
+enabled: true
+
+service:
+  name: web-platform
+  maintenance_port: 8081
+
+routes:
+  # Main website
+  - domains:
+      - example.com
+      - www.example.com
+    path: /
+    backend: http://web:80
+    headers:
+      X-Frame-Options: SAMEORIGIN
+      Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'
+  
+  # Admin panel (stricter security)
+  - domains:
+      - admin.example.com
+    path: /
+    backend: http://admin:3000
+    headers:
+      X-Frame-Options: DENY
+      Content-Security-Policy: default-src 'self'; script-src 'self'
+  
+  # API subdomain
+  - domains:
+      - api.example.com
+    path: /
+    backend: http://api:8080
+    headers:
+      Access-Control-Allow-Origin: https://example.com
+      Access-Control-Allow-Credentials: "true"
+
+# Global headers (applied to all routes unless overridden)
+headers:
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+  X-Content-Type-Options: nosniff
+
+options:
+  health_check_interval: 30s
+  timeout: 30s

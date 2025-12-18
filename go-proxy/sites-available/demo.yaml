@@ -1,0 +1,24 @@
+# Demo application config for testing
+
+enabled: true
+
+service:
+  name: demo-app
+  maintenance_port: 81
+
+routes:
+  - domains:
+      - demo.test.local
+      - www.demo.test.local
+    path: /
+    backend: http://demo-app:80
+
+headers:
+  X-Frame-Options: SAMEORIGIN
+  X-Demo-Header: "Powered by Go Proxy"
+
+options:
+  health_check_path: /health
+  health_check_interval: 30s
+  timeout: 30s
+  compression: true

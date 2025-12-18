@@ -1,0 +1,53 @@
+# Example site configuration with Phase 0 features
+# Vaultwarden (Private Password Manager)
+
+enabled: true
+
+service:
+  name: vaultwarden
+  maintenance_port: 8080
+
+routes:
+  - domains:
+      - vault.chilla55.de
+    path: /
+    backend: http://vaultwarden:80
+    websocket: true  # Required for live sync
+    headers:
+      X-Proxy-Service: "vaultwarden"
+      X-Robots-Tag: "noindex, nofollow"  # Prevent indexing
+
+# Strict timeouts for private service (Phase 0 - Task #23)
+options:
+  timeouts:
+    connect: 3s       # Faster timeout for local service
+    read: 15s         # Shorter read timeout
+    write: 15s        # Shorter write timeout
+    idle: 60s         # Shorter idle timeout
+
+  # Strict size limits (Phase 0 - Task #24)
+  limits:
+    max_request_body: 10485760    # 10 MB (vault exports)
+    max_response_body: 10485760   # 10 MB
+
+  # Aggressive health checks
+  health_check_path: /alive
+  health_check_interval: 5s
+  health_check_timeout: 2s
+
+  timeout: 15s
+  compression: true
+  websocket: true
+  http2: true
+  http3: false
+
+# Strict security headers (Phase 0 - Task #25)
+headers:
+  Strict-Transport-Security: "max-age=63072000; includeSubDomains; preload"
+  X-Frame-Options: "DENY"
+  X-Content-Type-Options: "nosniff"
+  X-XSS-Protection: "1; mode=block"
+  Content-Security-Policy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://icons.bitwarden.net; font-src 'self' data:; connect-src 'self' wss: https://api.pwnedpasswords.com https://twofactorauth.org; frame-ancestors 'none'"
+  Referrer-Policy: "same-origin"
+  Permissions-Policy: "geolocation=(), microphone=(), camera=(), payment=()"
+  X-Robots-Tag: "noindex, nofollow"

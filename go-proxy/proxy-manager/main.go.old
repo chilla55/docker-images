@@ -1,0 +1,173 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/chilla55/nginx-manager/nginx"
+	"github.com/chilla55/nginx-manager/registry"
+	"github.com/chilla55/nginx-manager/updater"
+	"github.com/chilla55/nginx-manager/watcher"
+)
+
+var (
+	sitesPath          = flag.String("sites-path", getEnv("SITES_WATCH_PATH", "/etc/nginx/sites-enabled"), "Path to nginx sites-enabled directory")
+	sitesSourcePath    = flag.String("sites-source", getEnv("SITES_SOURCE_DIR", "/etc/nginx/sites-available"), "Path to nginx sites-available directory")
+	certPath           = flag.String("cert-path", getEnv("CERT_WATCH_PATH", "/etc/nginx/certs/live/chilla55.de/fullchain.pem"), "Path to certificate file to watch")
+	interval           = flag.Duration("interval", getDurationEnv("SITES_WATCH_INTERVAL", 30*time.Second), "Site watch interval")
+	fastCheckInterval  = flag.Duration("fast-check", getDurationEnv("FAST_CHECK_INTERVAL", 5*time.Second), "Fast check interval for disabled sites")
+	certInterval       = flag.Duration("cert-interval", getDurationEnv("CERT_WATCH_INTERVAL", 5*time.Minute), "Certificate watch interval")
+	cfInterval         = flag.Duration("cf-interval", getDurationEnv("CF_REALIP_INTERVAL", 6*time.Hour), "Cloudflare IP update interval")
+	upstreamTimeout    = flag.Duration("upstream-timeout", getDurationEnv("UPSTREAM_CHECK_TIMEOUT", 2*time.Second), "Upstream check timeout")
+	port               = flag.Int("port", getIntEnv("PORT", 80), "Nginx main port (for port+1 convention)")
+	healthPort         = flag.Int("health-port", getIntEnv("HEALTH_PORT", 8080), "Health check HTTP port")
+	debug              = flag.Bool("debug", getEnv("SITES_WATCH_DEBUG", "0") == "1", "Enable debug logging")
+	cfRealIPAuto       = flag.Bool("cf-auto", getEnv("CF_REALIP_AUTO", "true") == "true", "Enable automatic Cloudflare IP updates")
+)
+
+func main() {
+	flag.Parse()
+
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Println("[nginx-manager] Starting unified nginx management service")
+	log.Printf("[nginx-manager] Sites path: %s", *sitesPath)
+	log.Printf("[nginx-manager] Cert path: %s", *certPath)
+	log.Printf("[nginx-manager] Service registry listening on port %d", *port+1)
+
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Initialize nginx controller (coordinates reloads)
+	nginxCtrl := nginx.NewController(*debug)
+	// Initialize service registry (handles persistent connections and maintenance handshake)
+	serviceReg := registry.NewRegistry(*port+1, *upstreamTimeout, nginxCtrl, *debug)
+	go serviceReg.Start(ctx)
+
+	// Start health check HTTP server
+	go startHealthServer(*healthPort, nginxCtrl)
+
+	// Initialize site watcher
+	// Initialize site watcher
+	siteWatch := watcher.NewSiteWatcher(
+		*sitesPath,
+		*sitesSourcePath,
+		*interval,
+		*fastCheckInterval,
+		*upstreamTimeout,
+		serviceReg,
+		nginxCtrl,
+		*debug,
+	)
+	go siteWatch.Start(ctx)
+
+	// Initialize certificate watcher
+	certWatch := watcher.NewCertWatcher(*certPath, *certInterval, nginxCtrl, *debug)
+	go certWatch.Start(ctx)
+
+	// Initialize Cloudflare updater
+	if *cfRealIPAuto {
+		cfUpdater := updater.NewCloudflareUpdater(*cfInterval, nginxCtrl, *debug)
+		go cfUpdater.Start(ctx)
+	}
+
+	log.Println("[nginx-manager] All services started successfully")
+
+	// Wait for shutdown signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	log.Println("[nginx-manager] Shutdown signal received, cleaning up...")
+	
+	// Notify all connected services
+	reg.NotifyShutdown()
+	
+	// Give services time to receive shutdown notification
+	time.Sleep(2 * time.Second)
+	
+	cancel() // Stop all goroutines
+	log.Println("[nginx-manager] Shutdown complete")
+}
+
+func startHealthServer(port int, nginxCtrl *nginx.Controller) {
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// Check if nginx is running
+		cmd := exec.Command("pgrep", "-x", "nginx")
+		if err := cmd.Run(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("nginx not running"))
+			return
+		}
+
+		// Check if nginx config is valid
+		if err := nginxCtrl.TestConfig(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("nginx config invalid"))
+			return
+		}
+
+		// Check if we can reach nginx
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Get("http://127.0.0.1:80")
+		if err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("nginx not responding"))
+			return
+		}
+		resp.Body.Close()
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("healthy"))
+	})
+
+	http.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+		// Simple readiness check - manager is running
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ready"))
+	})
+
+	addr := fmt.Sprintf(":%d", port)
+	log.Printf("[nginx-manager] Health check server listening on %s", addr)
+	if err := http.ListenAndServe(addr, nil); err != nil {
+		log.Printf("[nginx-manager] Health server error: %s", err)
+	}
+}
+
+func getEnv(key, defaultValue string) string {
+	log.Println("[nginx-manager] Shutdown complete")
+}
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func getIntEnv(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		var intVal int
+		if _, err := fmt.Sscanf(value, "%d", &intVal); err == nil {
+			return intVal
+		}
+	}
+	return defaultValue
+}
+
+func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		if duration, err := time.ParseDuration(value + "s"); err == nil {
+			return duration
+		}
+	}
+	return defaultValue
+}
