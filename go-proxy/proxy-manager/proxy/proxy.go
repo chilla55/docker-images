@@ -70,12 +70,12 @@ type Server struct {
 	http3Server  *http3.Server
 	certificates []CertMapping // Loaded TLS certificates
 
-	db    interface{} // Database connection (interface to avoid import cycle)
-        metricsCollector interface{} // Metrics collector
-        accessLogger     interface{} // Access logger
-        certMonitor      interface{} // Certificate monitor
-        healthChecker    interface{} // Health checker
-	debug bool
+	db               interface{} // Database connection (interface to avoid import cycle)
+	metricsCollector interface{} // Metrics collector
+	accessLogger     interface{} // Access logger
+	certMonitor      interface{} // Certificate monitor
+	healthChecker    interface{} // Health checker
+	debug            bool
 }
 
 // Config holds server configuration

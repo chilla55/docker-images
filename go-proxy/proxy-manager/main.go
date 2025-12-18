@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/chilla55/proxy-manager/accesslog"
+	"github.com/chilla55/proxy-manager/analytics"
 	"github.com/chilla55/proxy-manager/certmonitor"
 	"github.com/chilla55/proxy-manager/config"
 	"github.com/chilla55/proxy-manager/database"
@@ -23,6 +24,7 @@ import (
 	"github.com/chilla55/proxy-manager/metrics"
 	"github.com/chilla55/proxy-manager/proxy"
 	"github.com/chilla55/proxy-manager/registry"
+	"github.com/chilla55/proxy-manager/traffic"
 	"github.com/chilla55/proxy-manager/watcher"
 )
 
@@ -96,6 +98,8 @@ func main() {
 	accessLogger := accesslog.NewLogger(db, 1000) // 1000-entry ring buffer
 	certMonitor := certmonitor.NewMonitor()
 	healthChecker := health.NewChecker(db)
+	analyticsAggregator := analytics.NewAggregator(1000, 10*time.Second) // 1000 samples, 10s period
+	trafficAnalyzer := traffic.NewAnalyzer(1 * time.Hour)                // 1 hour window
 
 	// Add certificates to certificate monitor
 	for i, certMapping := range certificates {
@@ -154,7 +158,7 @@ func main() {
 	certWatcher := watcher.NewCertWatcher(*globalConfig, proxyServer, *debug)
 
 	// Start health check server
-	go startHealthServer(*healthPort, proxyServer, metricsCollector, accessLogger, certMonitor, healthChecker)
+	go startHealthServer(*healthPort, proxyServer, metricsCollector, accessLogger, certMonitor, healthChecker, analyticsAggregator, trafficAnalyzer)
 
 	// Start site watcher
 	go siteWatcher.Start(ctx)
@@ -215,7 +219,7 @@ func main() {
 	}
 }
 
-func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *metrics.Collector, accessLogger *accesslog.Logger, certMonitor *certmonitor.Monitor, healthChecker *health.Checker) {
+func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *metrics.Collector, accessLogger *accesslog.Logger, certMonitor *certmonitor.Monitor, healthChecker *health.Checker, analyticsAggregator *analytics.Aggregator, trafficAnalyzer *traffic.Analyzer) {
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		// Check if proxy is responding
 		// Simple check - server is running if we got here
@@ -288,6 +292,43 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 		w.Header().Set("Content-Type", "application/json")
 		unhealthy := healthChecker.GetUnhealthyServices()
 		fmt.Fprintf(w, "%v", unhealthy) // TODO: proper JSON marshaling
+	})
+
+	// Phase 2 Task #3: Advanced metrics aggregation API
+	http.HandleFunc("/api/analytics/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		aggregated := analyticsAggregator.GetAggregatedMetrics()
+		fmt.Fprintf(w, "%v", aggregated) // TODO: proper JSON marshaling
+	})
+
+	// Phase 2 Task #4: Traffic analysis API
+	http.HandleFunc("/api/traffic/analysis", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		topN := 10
+		if n := r.URL.Query().Get("top"); n != "" {
+			if parsed, err := fmt.Sscanf(n, "%d", &topN); err == nil && parsed == 1 {
+				// Use parsed value
+			}
+		}
+		analysis := trafficAnalyzer.Analyze(topN)
+		fmt.Fprintf(w, "%v", analysis) // TODO: proper JSON marshaling
+	})
+
+	http.HandleFunc("/api/traffic/ip", func(w http.ResponseWriter, r *http.Request) {
+		ip := r.URL.Query().Get("ip")
+		if ip == "" {
+			http.Error(w, "Missing ip parameter", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		reputation := trafficAnalyzer.GetIPReputation(ip)
+		fmt.Fprintf(w, `{"ip":"%s","reputation_score":%.2f}`, ip, reputation)
+	})
+
+	http.HandleFunc("/api/traffic/anomalies", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		analysis := trafficAnalyzer.Analyze(10)
+		fmt.Fprintf(w, "%v", analysis.AnomalousPatterns) // TODO: proper JSON marshaling
 	})
 
 	// Legacy blackhole metrics
