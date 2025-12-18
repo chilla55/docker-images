@@ -13,13 +13,16 @@ RUN apk add --no-cache git ca-certificates tzdata gcc musl-dev
 
 # Copy go module files first for better caching
 COPY proxy-manager/go.mod proxy-manager/go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy source code
 COPY proxy-manager/ ./
 
-# Build the binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+# Build the binary with build cache
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
     -o proxy-manager .
 
