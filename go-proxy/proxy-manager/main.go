@@ -1,10 +1,13 @@
 package main
 
 import (
+    "bytes"
+    "encoding/json"
 	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"strings"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,6 +29,8 @@ import (
 	"github.com/chilla55/proxy-manager/registry"
 	"github.com/chilla55/proxy-manager/traffic"
 	"github.com/chilla55/proxy-manager/watcher"
+	"github.com/chilla55/proxy-manager/webhook"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -101,6 +106,9 @@ func main() {
 	analyticsAggregator := analytics.NewAggregator(1000, 10*time.Second) // 1000 samples, 10s period
 	trafficAnalyzer := traffic.NewAnalyzer(1 * time.Hour)                // 1 hour window
 
+	// Initialize webhook notifier from global config (if present)
+	notifier := initWebhookNotifier(*globalConfig)
+
 	// Add certificates to certificate monitor
 	for i, certMapping := range certificates {
 		for _, domain := range certMapping.Domains {
@@ -114,6 +122,11 @@ func main() {
 
 	// Start periodic certificate expiry checks (every 6 hours)
 	certMonitor.StartPeriodicCheck(6 * time.Hour)
+
+	// Start alert monitors (Phase 3 Task #19)
+	go monitorHealthAlerts(ctx, healthChecker, notifier)
+	go monitorCertAlerts(ctx, certMonitor, notifier)
+	go monitorErrorRateAlerts(ctx, metricsCollector, notifier)
 
 	// Start daily cleanup job
 	go func() {
@@ -339,10 +352,333 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 		fmt.Fprintf(w, "blackhole_requests_total %d\n", blackholeCount)
 	})
 
+	// Phase 3 Task #17: Traffic Analytics APIs
+	// Top routes by traffic volume
+	http.HandleFunc("/api/analytics/top-routes", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		period := r.URL.Query().Get("period")
+		window := parsePeriod(period) // default 24h
+		limit := 10
+		if l := r.URL.Query().Get("limit"); l != "" {
+			_, _ = fmt.Sscanf(l, "%d", &limit)
+		}
+
+		entries := accessLogger.GetRecentRequests(1000)
+		cutoff := time.Now().Add(-window).Unix()
+		counts := map[string]int{}
+		for _, e := range entries {
+			if e.Timestamp < cutoff {
+				continue
+			}
+			counts[e.Domain]++
+		}
+
+		// Convert to slice and sort desc
+		type item struct{ Route string `json:"route"`; Count int `json:"count"` }
+		var list []item
+		for route, count := range counts {
+			list = append(list, item{Route: route, Count: count})
+		}
+		for i := 0; i < len(list); i++ {
+			for j := i + 1; j < len(list); j++ {
+				if list[j].Count > list[i].Count {
+					list[i], list[j] = list[j], list[i]
+				}
+			}
+		}
+		if limit > 0 && limit < len(list) {
+			list = list[:limit]
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"routes": list,
+			"period": period,
+		})
+	})
+
+	// Heatmap of peak traffic hours (counts per hour-of-day)
+	http.HandleFunc("/api/analytics/heatmap", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		period := r.URL.Query().Get("period")
+		window := parsePeriod(period)
+		entries := accessLogger.GetRecentRequests(1000)
+		cutoff := time.Now().Add(-window).Unix()
+
+		// 24-hour buckets
+		buckets := make([]int, 24)
+		for _, e := range entries {
+			if e.Timestamp < cutoff {
+				continue
+			}
+			hour := time.Unix(e.Timestamp, 0).UTC().Hour()
+			buckets[hour]++
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"hours":  buckets,
+			"period": period,
+		})
+	})
+
+	// Per-route bandwidth tracking
+	http.HandleFunc("/api/analytics/bandwidth", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		route := r.URL.Query().Get("route")
+		period := r.URL.Query().Get("period")
+		window := parsePeriod(period)
+
+		entries := accessLogger.GetRecentRequests(1000)
+		cutoff := time.Now().Add(-window).Unix()
+		var sent, recv uint64
+		for _, e := range entries {
+			if e.Timestamp < cutoff {
+				continue
+			}
+			if route == "" || e.Domain == route || e.Path == route {
+				sent += e.BytesSent
+				recv += e.BytesReceived
+			}
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"route":            route,
+			"period":           period,
+			"bytes_sent_total": sent,
+			"bytes_recv_total": recv,
+		})
+	})
+
+	// Phase 3 Task #3: AI-Ready Context Export (Markdown)
+	http.HandleFunc("/api/ai-context", func(w http.ResponseWriter, r *http.Request) {
+		format := r.URL.Query().Get("format")
+		if format == "" {
+			format = "markdown"
+		}
+
+		if format != "markdown" {
+			http.Error(w, "unsupported format", http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+
+		// Gather data
+		stats := metricsCollector.GetStats()
+		certStats := certMonitor.GetStats()
+		recentErrors := accessLogger.GetRecentErrors(10)
+
+		var buf bytes.Buffer
+		// Header
+		fmt.Fprintf(&buf, "# Proxy Status Report - %s\n\n", time.Now().UTC().Format("2006-01-02 15:04:05 MST"))
+
+		// System Overview
+		fmt.Fprintf(&buf, "## System Overview\n")
+		fmt.Fprintf(&buf, "- Uptime: %.0fs\n", stats.Uptime)
+		fmt.Fprintf(&buf, "- Active Connections: %d\n", stats.ActiveConnections)
+		fmt.Fprintf(&buf, "- Error Rate (%%): %.2f\n\n", stats.ErrorRate)
+
+		// Certificate Status
+		fmt.Fprintf(&buf, "## Certificate Status\n")
+		fmt.Fprintf(&buf, "- Total: %d | Healthy: %d | Warning: %d | Urgent: %d | Critical: %d | Expired: %d\n\n",
+			certStats.TotalCertificates,
+			certStats.HealthyCount,
+			certStats.WarningCount,
+			certStats.UrgentCount,
+			certStats.CriticalCount,
+			certStats.ExpiredCount,
+		)
+
+		// Recent Errors
+		fmt.Fprintf(&buf, "## Recent Errors (Last %d)\n", len(recentErrors))
+		for i, e := range recentErrors {
+			fmt.Fprintf(&buf, "%d. [%s] %d %s - %s %s\n",
+				i+1,
+				time.Unix(e.Timestamp, 0).UTC().Format("15:04:05"),
+				e.Status,
+				e.Domain,
+				e.Method,
+				e.Path,
+			)
+		}
+
+		// Suggested Analysis Questions
+		fmt.Fprintf(&buf, "\n## Suggested Analysis Questions:\n")
+		fmt.Fprintf(&buf, "- Are there patterns in error spikes?\n")
+		fmt.Fprintf(&buf, "- Which routes have highest latency?\n")
+		fmt.Fprintf(&buf, "- Any certificates nearing expiry that need action?\n")
+
+		w.Write(buf.Bytes())
+	})
+
 	addr := fmt.Sprintf(":%d", port)
 	log.Info().Str("addr", addr).Msg("Health check server starting")
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Error().Err(err).Msg("Health server error")
+	}
+}
+
+// parsePeriod parses strings like "24h", "7d" into a duration.
+// Defaults to 24h when input is empty or invalid.
+func parsePeriod(s string) time.Duration {
+	if s == "" {
+		return 24 * time.Hour
+	}
+	// support 'd' suffix
+	if strings.HasSuffix(s, "d") {
+		var days int
+		if _, err := fmt.Sscanf(s, "%dd", &days); err == nil && days > 0 {
+			return time.Duration(days) * 24 * time.Hour
+		}
+		return 24 * time.Hour
+	}
+	// fallback to time.ParseDuration for h,m,s
+	if d, err := time.ParseDuration(s); err == nil {
+		return d
+	}
+	return 24 * time.Hour
+}
+
+// initWebhookNotifier loads webhook configuration from the global YAML
+func initWebhookNotifier(globalConfigPath string) *webhook.Notifier {
+	// Minimal loader that looks for a top-level 'webhooks' and optional 'enabled'
+	type raw struct {
+		Webhooks []webhook.Webhook `yaml:"webhooks"`
+		Enabled  *bool              `yaml:"webhooks_enabled"`
+	}
+	data, err := os.ReadFile(globalConfigPath)
+	if err != nil {
+		// Fallback: disabled notifier
+		return webhook.New(webhook.Config{Enabled: false})
+	}
+	var r raw
+	if err := yaml.Unmarshal(data, &r); err != nil {
+		return webhook.New(webhook.Config{Enabled: false})
+	}
+	enabled := true
+	if r.Enabled != nil {
+		enabled = *r.Enabled
+	}
+	return webhook.New(webhook.Config{Enabled: enabled, Webhooks: r.Webhooks})
+}
+
+// monitorHealthAlerts sends alerts on service_down transitions
+func monitorHealthAlerts(ctx context.Context, checker *health.Checker, notifier *webhook.Notifier) {
+	prev := map[string]string{}
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			statuses := checker.GetAllStatuses()
+			for svc, st := range statuses {
+				if prev[svc] != st.Status && st.Status == string(health.StatusDown) {
+					_ = notifier.Send(webhook.Alert{
+						Event:       webhook.EventServiceDown,
+						Title:       "🚨 Service Down Alert",
+						Description: fmt.Sprintf("%s is not responding", svc),
+						Severity:    "critical",
+						Fields: map[string]string{
+							"Service":     svc,
+							"Last Error":  st.LastError,
+							"SuccessRate": fmt.Sprintf("%.1f%%", st.SuccessRate),
+						},
+						Timestamp: time.Now(),
+					})
+				}
+				prev[svc] = st.Status
+			}
+		}
+	}
+}
+
+// monitorCertAlerts sends alerts for certificates expiring soon (7/14/30 days)
+func monitorCertAlerts(ctx context.Context, cm *certmonitor.Monitor, notifier *webhook.Notifier) {
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// 7 days
+			for _, info := range cm.GetExpiringCertificates(certmonitor.LevelCritical) {
+				_ = notifier.Send(webhook.Alert{
+					Event:       webhook.EventCertExpiring7d,
+					Title:       "⚠️ Certificate Expiring <= 7d",
+					Description: fmt.Sprintf("%s expires in %d days", info.Domain, info.DaysRemaining),
+					Severity:    "warning",
+					Fields: map[string]string{
+						"Domain":        info.Domain,
+						"Days Remaining": fmt.Sprintf("%d", info.DaysRemaining),
+						"Expiry":        info.NotAfter.UTC().Format(time.RFC3339),
+					},
+					Timestamp: time.Now(),
+				})
+			}
+			// 14 days
+			for _, info := range cm.GetExpiringCertificates(certmonitor.LevelUrgent) {
+				_ = notifier.Send(webhook.Alert{
+					Event:       webhook.EventCertExpiring14d,
+					Title:       "⚠️ Certificate Expiring <= 14d",
+					Description: fmt.Sprintf("%s expires in %d days", info.Domain, info.DaysRemaining),
+					Severity:    "warning",
+					Fields: map[string]string{
+						"Domain":        info.Domain,
+						"Days Remaining": fmt.Sprintf("%d", info.DaysRemaining),
+						"Expiry":        info.NotAfter.UTC().Format(time.RFC3339),
+					},
+					Timestamp: time.Now(),
+				})
+			}
+			// 30 days
+			for _, info := range cm.GetExpiringCertificates(certmonitor.LevelWarning) {
+				_ = notifier.Send(webhook.Alert{
+					Event:       webhook.EventCertExpiring30d,
+					Title:       "⚠️ Certificate Expiring <= 30d",
+					Description: fmt.Sprintf("%s expires in %d days", info.Domain, info.DaysRemaining),
+					Severity:    "info",
+					Fields: map[string]string{
+						"Domain":        info.Domain,
+						"Days Remaining": fmt.Sprintf("%d", info.DaysRemaining),
+						"Expiry":        info.NotAfter.UTC().Format(time.RFC3339),
+					},
+					Timestamp: time.Now(),
+				})
+			}
+		}
+	}
+}
+
+// monitorErrorRateAlerts sends alerts when error rate spikes above threshold
+func monitorErrorRateAlerts(ctx context.Context, mc *metrics.Collector, notifier *webhook.Notifier) {
+	const threshold = 5.0 // percent
+	prevHigh := false
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			stats := mc.GetStats()
+			high := stats.ErrorRate > threshold
+			if high && !prevHigh {
+				_ = notifier.Send(webhook.Alert{
+					Event:       webhook.EventHighErrorRate,
+					Title:       "⚠️ High Error Rate",
+					Description: fmt.Sprintf("Error rate is %.2f%% (threshold %.2f%%)", stats.ErrorRate, threshold),
+					Severity:    "warning",
+					Fields: map[string]string{
+						"Total Requests": fmt.Sprintf("%d", stats.TotalRequests),
+						"Total Errors":   fmt.Sprintf("%d", stats.TotalErrors),
+					},
+					Timestamp: time.Now(),
+				})
+			}
+			prevHigh = high
+		}
 	}
 }
 
