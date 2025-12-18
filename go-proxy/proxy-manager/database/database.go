@@ -690,3 +690,89 @@ func (db *DB) CleanupHealthChecks(days int) error {
 
 	return nil
 }
+
+// RecordHealthCheck records a health check result
+func (db *DB) RecordHealthCheck(service, url string, success bool, duration time.Duration, statusCode int, errorMsg string) error {
+	query := `
+		INSERT INTO health_checks (
+			timestamp, service_name, url, success, response_time_ms, status_code, error
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(
+		query,
+		time.Now().Unix(),
+		service,
+		url,
+		success,
+		duration.Milliseconds(),
+		statusCode,
+		errorMsg,
+	)
+
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("service", service).
+			Msg("Failed to record health check")
+		return err
+	}
+
+	return nil
+}
+
+// GetHealthCheckHistory retrieves health check history for a service
+func (db *DB) GetHealthCheckHistory(service string, limit int) ([]HealthCheckResult, error) {
+	query := `
+		SELECT timestamp, service_name, url, success, response_time_ms, status_code, error
+		FROM health_checks
+		WHERE service_name = ?
+		ORDER BY timestamp DESC
+		LIMIT ?
+	`
+
+	rows, err := db.Query(query, service, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []HealthCheckResult
+	for rows.Next() {
+		var result HealthCheckResult
+		var errorMsg sql.NullString
+
+		err := rows.Scan(
+			&result.Timestamp,
+			&result.Service,
+			&result.URL,
+			&result.Success,
+			&result.Duration,
+			&result.StatusCode,
+			&errorMsg,
+		)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to scan health check result")
+			continue
+		}
+
+		if errorMsg.Valid {
+			result.Error = errorMsg.String
+		}
+
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// HealthCheckResult represents a health check result from database
+type HealthCheckResult struct {
+	Timestamp  int64  `json:"timestamp"`
+	Service    string `json:"service"`
+	URL        string `json:"url"`
+	Success    bool   `json:"success"`
+	Duration   int64  `json:"duration_ms"`
+	StatusCode int    `json:"status_code"`
+	Error      string `json:"error,omitempty"`
+}
