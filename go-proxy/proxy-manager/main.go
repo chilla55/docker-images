@@ -15,8 +15,12 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/chilla55/proxy-manager/accesslog"
+	"github.com/chilla55/proxy-manager/certmonitor"
 	"github.com/chilla55/proxy-manager/config"
 	"github.com/chilla55/proxy-manager/database"
+	"github.com/chilla55/proxy-manager/health"
+	"github.com/chilla55/proxy-manager/metrics"
 	"github.com/chilla55/proxy-manager/proxy"
 	"github.com/chilla55/proxy-manager/registry"
 	"github.com/chilla55/proxy-manager/watcher"
@@ -87,6 +91,26 @@ func main() {
 	}
 	defer db.Close()
 
+	// Initialize Phase 2 monitoring systems
+	metricsCollector := metrics.NewCollector()
+	accessLogger := accesslog.NewLogger(db, 1000) // 1000-entry ring buffer
+	certMonitor := certmonitor.NewMonitor()
+	healthChecker := health.NewChecker(db)
+
+	// Add certificates to certificate monitor
+	for i, certMapping := range certificates {
+		for _, domain := range certMapping.Domains {
+			if err := certMonitor.AddCertificateFromTLS(domain, &certificates[i].Cert); err != nil {
+				log.Warn().Err(err).Str("domain", domain).Msg("Failed to add certificate to monitor")
+			} else {
+				log.Info().Str("domain", domain).Msg("Added certificate to monitoring")
+			}
+		}
+	}
+
+	// Start periodic certificate expiry checks (every 6 hours)
+	certMonitor.StartPeriodicCheck(6 * time.Hour)
+
 	// Start daily cleanup job
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
@@ -114,6 +138,10 @@ func main() {
 		BlackholeUnknown: globalCfg.Blackhole.UnknownDomains,
 		Debug:            *debug,
 		DB:               db,
+		MetricsCollector: metricsCollector,
+		AccessLogger:     accessLogger,
+		CertMonitor:      certMonitor,
+		HealthChecker:    healthChecker,
 	})
 
 	// Initialize service registry
@@ -126,7 +154,7 @@ func main() {
 	certWatcher := watcher.NewCertWatcher(*globalConfig, proxyServer, *debug)
 
 	// Start health check server
-	go startHealthServer(*healthPort, proxyServer)
+	go startHealthServer(*healthPort, proxyServer, metricsCollector, accessLogger, certMonitor, healthChecker)
 
 	// Start site watcher
 	go siteWatcher.Start(ctx)
@@ -187,7 +215,7 @@ func main() {
 	}
 }
 
-func startHealthServer(port int, proxyServer *proxy.Server) {
+func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *metrics.Collector, accessLogger *accesslog.Logger, certMonitor *certmonitor.Monitor, healthChecker *health.Checker) {
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		// Check if proxy is responding
 		// Simple check - server is running if we got here
@@ -201,8 +229,69 @@ func startHealthServer(port int, proxyServer *proxy.Server) {
 		w.Write([]byte("ready"))
 	})
 
+	// Phase 2: Prometheus-compatible metrics endpoint (Task #2)
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		// Basic metrics
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		w.Write([]byte(metricsCollector.PrometheusMetrics()))
+	})
+
+	// Phase 2: Access log API endpoints (Task #6)
+	http.HandleFunc("/api/logs/recent", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		entries := accessLogger.GetRecentRequests(100)
+		fmt.Fprintf(w, "%v", entries) // TODO: proper JSON marshaling
+	})
+
+	http.HandleFunc("/api/logs/errors", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		entries := accessLogger.GetRecentErrors(50)
+		fmt.Fprintf(w, "%v", entries) // TODO: proper JSON marshaling
+	})
+
+	http.HandleFunc("/api/logs/stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		stats := accessLogger.GetStats()
+		fmt.Fprintf(w, "%v", stats) // TODO: proper JSON marshaling
+	})
+
+	// Phase 2: Certificate expiry monitoring API (Task #7)
+	http.HandleFunc("/api/certs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		certs := certMonitor.GetAllCertificates()
+		fmt.Fprintf(w, "%v", certs) // TODO: proper JSON marshaling
+	})
+
+	http.HandleFunc("/api/certs/expiring", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		level := r.URL.Query().Get("level")
+		if level == "" {
+			level = certmonitor.LevelWarning
+		}
+		certs := certMonitor.GetExpiringCertificates(level)
+		fmt.Fprintf(w, "%v", certs) // TODO: proper JSON marshaling
+	})
+
+	http.HandleFunc("/api/certs/stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		stats := certMonitor.GetStats()
+		fmt.Fprintf(w, "%v", stats) // TODO: proper JSON marshaling
+	})
+
+	// Phase 2: Health check status API (Task #5)
+	http.HandleFunc("/api/health/services", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		statuses := healthChecker.GetAllStatuses()
+		fmt.Fprintf(w, "%v", statuses) // TODO: proper JSON marshaling
+	})
+
+	http.HandleFunc("/api/health/unhealthy", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		unhealthy := healthChecker.GetUnhealthyServices()
+		fmt.Fprintf(w, "%v", unhealthy) // TODO: proper JSON marshaling
+	})
+
+	// Legacy blackhole metrics
+	http.HandleFunc("/api/blackhole", func(w http.ResponseWriter, r *http.Request) {
 		blackholeCount := proxyServer.GetBlackholeCount()
 		fmt.Fprintf(w, "# HELP blackhole_requests_total Total number of blackholed requests\n")
 		fmt.Fprintf(w, "# TYPE blackhole_requests_total counter\n")

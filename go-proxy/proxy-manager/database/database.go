@@ -14,6 +14,37 @@ type DB struct {
 	*sql.DB
 }
 
+// AccessLogEntry represents an HTTP access log entry
+type AccessLogEntry struct {
+	Timestamp      int64  `json:"timestamp"`
+	Domain         string `json:"domain"`
+	Method         string `json:"method"`
+	Path           string `json:"path"`
+	Query          string `json:"query,omitempty"`
+	Status         int    `json:"status"`
+	ResponseTimeMs int64  `json:"response_time_ms"`
+	Backend        string `json:"backend"`
+	BackendIP      string `json:"backend_ip,omitempty"`
+	ClientIP       string `json:"client_ip"`
+	UserAgent      string `json:"user_agent,omitempty"`
+	Referer        string `json:"referer,omitempty"`
+	BytesSent      uint64 `json:"bytes_sent"`
+	BytesReceived  uint64 `json:"bytes_received"`
+	Protocol       string `json:"protocol"`
+	Error          string `json:"error,omitempty"`
+}
+
+// HealthCheckResult represents a health check result from database
+type HealthCheckResult struct {
+	Timestamp  int64  `json:"timestamp"`
+	Service    string `json:"service"`
+	URL        string `json:"url"`
+	Success    bool   `json:"success"`
+	Duration   int64  `json:"duration_ms"`
+	StatusCode int    `json:"status_code"`
+	Error      string `json:"error,omitempty"`
+}
+
 // Open opens a SQLite database connection and initializes schema
 func Open(path string) (*DB, error) {
 	log.Info().Str("path", path).Msg("Opening database")
@@ -766,13 +797,250 @@ func (db *DB) GetHealthCheckHistory(service string, limit int) ([]HealthCheckRes
 	return results, nil
 }
 
-// HealthCheckResult represents a health check result from database
-type HealthCheckResult struct {
-	Timestamp  int64  `json:"timestamp"`
-	Service    string `json:"service"`
-	URL        string `json:"url"`
-	Success    bool   `json:"success"`
-	Duration   int64  `json:"duration_ms"`
-	StatusCode int    `json:"status_code"`
-	Error      string `json:"error,omitempty"`
+// LogAccessRequest logs an HTTP access request to the database
+func (db *DB) LogAccessRequest(entry AccessLogEntry) error {
+	query := `
+	INSERT INTO access_log (
+		timestamp, domain, method, path, query, status, 
+		response_time_ms, backend, backend_ip, client_ip, 
+		user_agent, referer, bytes_sent, bytes_received, 
+		protocol, error
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(query,
+		entry.Timestamp,
+		entry.Domain,
+		entry.Method,
+		entry.Path,
+		entry.Query,
+		entry.Status,
+		entry.ResponseTimeMs,
+		entry.Backend,
+		entry.BackendIP,
+		entry.ClientIP,
+		entry.UserAgent,
+		entry.Referer,
+		entry.BytesSent,
+		entry.BytesReceived,
+		entry.Protocol,
+		entry.Error,
+	)
+
+	return err
+}
+
+// GetRecentRequests returns the most recent N access log entries
+func (db *DB) GetRecentRequests(limit int) ([]AccessLogEntry, error) {
+	query := `
+	SELECT 
+		timestamp, domain, method, path, query, status, 
+		response_time_ms, backend, backend_ip, client_ip, 
+		user_agent, referer, bytes_sent, bytes_received, 
+		protocol, error
+	FROM access_log
+	ORDER BY timestamp DESC
+	LIMIT ?
+	`
+
+	rows, err := db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []AccessLogEntry
+	for rows.Next() {
+		var entry AccessLogEntry
+		var query, backendIP, userAgent, referer, protocol, errMsg sql.NullString
+
+		err := rows.Scan(
+			&entry.Timestamp,
+			&entry.Domain,
+			&entry.Method,
+			&entry.Path,
+			&query,
+			&entry.Status,
+			&entry.ResponseTimeMs,
+			&entry.Backend,
+			&backendIP,
+			&entry.ClientIP,
+			&userAgent,
+			&referer,
+			&entry.BytesSent,
+			&entry.BytesReceived,
+			&protocol,
+			&errMsg,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if query.Valid {
+			entry.Query = query.String
+		}
+		if backendIP.Valid {
+			entry.BackendIP = backendIP.String
+		}
+		if userAgent.Valid {
+			entry.UserAgent = userAgent.String
+		}
+		if referer.Valid {
+			entry.Referer = referer.String
+		}
+		if protocol.Valid {
+			entry.Protocol = protocol.String
+		}
+		if errMsg.Valid {
+			entry.Error = errMsg.String
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return entries, rows.Err()
+}
+
+// GetRequestsByRoute returns access log entries for a specific route
+func (db *DB) GetRequestsByRoute(route string, limit int) ([]AccessLogEntry, error) {
+	query := `
+	SELECT 
+		timestamp, domain, method, path, query, status, 
+		response_time_ms, backend, backend_ip, client_ip, 
+		user_agent, referer, bytes_sent, bytes_received, 
+		protocol, error
+	FROM access_log
+	WHERE path = ? OR domain = ?
+	ORDER BY timestamp DESC
+	LIMIT ?
+	`
+
+	rows, err := db.Query(query, route, route, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []AccessLogEntry
+	for rows.Next() {
+		var entry AccessLogEntry
+		var query, backendIP, userAgent, referer, protocol, errMsg sql.NullString
+
+		err := rows.Scan(
+			&entry.Timestamp,
+			&entry.Domain,
+			&entry.Method,
+			&entry.Path,
+			&query,
+			&entry.Status,
+			&entry.ResponseTimeMs,
+			&entry.Backend,
+			&backendIP,
+			&entry.ClientIP,
+			&userAgent,
+			&referer,
+			&entry.BytesSent,
+			&entry.BytesReceived,
+			&protocol,
+			&errMsg,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if query.Valid {
+			entry.Query = query.String
+		}
+		if backendIP.Valid {
+			entry.BackendIP = backendIP.String
+		}
+		if userAgent.Valid {
+			entry.UserAgent = userAgent.String
+		}
+		if referer.Valid {
+			entry.Referer = referer.String
+		}
+		if protocol.Valid {
+			entry.Protocol = protocol.String
+		}
+		if errMsg.Valid {
+			entry.Error = errMsg.String
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return entries, rows.Err()
+}
+
+// GetErrorRequests returns access log entries with status >= 400
+func (db *DB) GetErrorRequests(limit int) ([]AccessLogEntry, error) {
+	query := `
+	SELECT 
+		timestamp, domain, method, path, query, status, 
+		response_time_ms, backend, backend_ip, client_ip, 
+		user_agent, referer, bytes_sent, bytes_received, 
+		protocol, error
+	FROM access_log
+	WHERE status >= 400
+	ORDER BY timestamp DESC
+	LIMIT ?
+	`
+
+	rows, err := db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []AccessLogEntry
+	for rows.Next() {
+		var entry AccessLogEntry
+		var query, backendIP, userAgent, referer, protocol, errMsg sql.NullString
+
+		err := rows.Scan(
+			&entry.Timestamp,
+			&entry.Domain,
+			&entry.Method,
+			&entry.Path,
+			&query,
+			&entry.Status,
+			&entry.ResponseTimeMs,
+			&entry.Backend,
+			&backendIP,
+			&entry.ClientIP,
+			&userAgent,
+			&referer,
+			&entry.BytesSent,
+			&entry.BytesReceived,
+			&protocol,
+			&errMsg,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if query.Valid {
+			entry.Query = query.String
+		}
+		if backendIP.Valid {
+			entry.BackendIP = backendIP.String
+		}
+		if userAgent.Valid {
+			entry.UserAgent = userAgent.String
+		}
+		if referer.Valid {
+			entry.Referer = referer.String
+		}
+		if protocol.Valid {
+			entry.Protocol = protocol.String
+		}
+		if errMsg.Valid {
+			entry.Error = errMsg.String
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return entries, rows.Err()
 }

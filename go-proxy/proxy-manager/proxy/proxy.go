@@ -71,6 +71,10 @@ type Server struct {
 	certificates []CertMapping // Loaded TLS certificates
 
 	db    interface{} // Database connection (interface to avoid import cycle)
+        metricsCollector interface{} // Metrics collector
+        accessLogger     interface{} // Access logger
+        certMonitor      interface{} // Certificate monitor
+        healthChecker    interface{} // Health checker
 	debug bool
 }
 
@@ -83,17 +87,25 @@ type Config struct {
 	BlackholeUnknown bool
 	Debug            bool
 	DB               interface{} // Database connection
+	MetricsCollector interface{} // Metrics collector
+	AccessLogger     interface{} // Access logger
+	CertMonitor      interface{} // Certificate monitor
+	HealthChecker    interface{} // Health checker
 }
 
 // NewServer creates a new proxy server
 func NewServer(cfg Config) *Server {
 	s := &Server{
-		routes:        make([]*Route, 0),
-		routeMap:      make(map[string]*Backend),
-		globalHeaders: cfg.GlobalHeaders,
-		certificates:  cfg.Certificates,
-		db:            cfg.DB,
-		debug:         cfg.Debug,
+		routes:           make([]*Route, 0),
+		routeMap:         make(map[string]*Backend),
+		globalHeaders:    cfg.GlobalHeaders,
+		certificates:     cfg.Certificates,
+		db:               cfg.DB,
+		metricsCollector: cfg.MetricsCollector,
+		accessLogger:     cfg.AccessLogger,
+		certMonitor:      cfg.CertMonitor,
+		healthChecker:    cfg.HealthChecker,
+		debug:            cfg.Debug,
 	}
 
 	return s

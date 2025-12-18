@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chilla55/proxy-manager/database"
 	"github.com/rs/zerolog/log"
 )
 
@@ -30,7 +31,7 @@ type Checker struct {
 // Database interface for health check persistence
 type Database interface {
 	RecordHealthCheck(service, url string, success bool, duration time.Duration, statusCode int, error string) error
-	GetHealthCheckHistory(service string, limit int) ([]HealthCheckResult, error)
+	GetHealthCheckHistory(service string, limit int) ([]database.HealthCheckResult, error)
 }
 
 // ServiceHealth tracks health for a single service
@@ -52,16 +53,8 @@ type ServiceHealth struct {
 	mu             sync.RWMutex
 }
 
-// HealthCheckResult represents a health check result from database
-type HealthCheckResult struct {
-	Timestamp  int64
-	Service    string
-	URL        string
-	Success    bool
-	Duration   int64 // milliseconds
-	StatusCode int
-	Error      string
-}
+// HealthCheckResult is an alias for database.HealthCheckResult
+type HealthCheckResult = database.HealthCheckResult
 
 // NewChecker creates a new health checker
 func NewChecker(db Database) *Checker {
