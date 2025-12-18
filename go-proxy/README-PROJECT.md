@@ -1,6 +1,4 @@
-# Go-Based HTTP/3 Reverse Proxy
-
-**Modern replacement for nginx** - High-performance reverse proxy written entirely in Go with native HTTP/3 (QUIC) support.
+DEPRECATED: See `README.md` for the authoritative project documentation.
 
 ## 🚀 Why This Proxy?
 
@@ -12,20 +10,7 @@
 - **Blackhole Unknown Domains** - Instant connection drop for security
 - **True Zero Downtime** - No interruption during updates
 
-## 📂 Structure
-
-```
-go-proxy/
-├── proxy-manager/          # Go source code
-│   ├── config/            # YAML configuration parser
-│   ├── proxy/             # HTTP/2/3 reverse proxy server
-│   ├── registry/          # Dynamic service registry
-│   └── watcher/           # File & certificate watchers
-├── sites-available/       # YAML site configurations
-├── global.yaml           # Global proxy configuration
-├── docker-compose.swarm.yml  # Production deployment
-└── Dockerfile            # Multi-stage Go build
-```
+This file is kept for historical context only.
 
 ## 🎯 Quick Start
 

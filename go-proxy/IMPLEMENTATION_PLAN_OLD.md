@@ -1,4 +1,11 @@
-# Go Proxy Implementation Plan
+# DEPRECATED
+
+This document is obsolete and retained only for historical reference.
+
+Please refer to the current documentation:
+- `README.md` for features and usage
+- `IMPLEMENTATION_PLAN.md` for the up-to-date plan
+- `IMPLEMENTATION_STATUS.md` for progress and completed phases
 
 ## Table of Contents
 1. [Project Overview](#project-overview)

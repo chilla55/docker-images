@@ -1,8 +1,8 @@
 # Go Proxy Implementation Progress
 
 **Started**: December 18, 2025  
-**Current Phase**: Phase 0 - Essential Reliability  
-**Status**: In Progress
+**Current Phase**: Phase 6 - Circuit Breaker & Backups  
+**Status**: Complete
 
 ---
 
@@ -174,14 +174,20 @@ headers:
 
 ---
 
-## ✅ Phase 0 Complete!
+## ✅ Phase 0–6 Complete!
 
-**All Phase 0 tasks have been implemented and tested:**
+**All core phases implemented and tested:**
 - ✅ Task #0: Foundation Setup
 - ✅ Task #10: SQLite Database (from Phase 2, implemented early)
 - ✅ Task #23: Timeout Configuration
 - ✅ Task #24: Request/Response Size Limits
 - ✅ Task #25: Header Manipulation
+ - ✅ Phase 1: Rate Limiting, WAF, PII, Audit Logging, Retention
+ - ✅ Phase 2: Metrics, Health Checks, Access Logs, Certificate Monitoring
+ - ✅ Phase 3: Traffic Analytics, GeoIP, Webhooks, Tracing
+ - ✅ Phase 4: WebSockets, Compression, Connection Pooling, Slow Request Detection, Retries
+ - ✅ Phase 5: Dashboard UI, Error Pages, Maintenance Mode
+ - ✅ Phase 6: Circuit Breaker + 3‑tier SQLite Backups with cron
 
 **Test Results:**
 - ✅ Compiled successfully with no errors
@@ -191,7 +197,26 @@ headers:
 - ✅ Structured logging operational
 - ✅ Graceful shutdown tested
 
-**Test Script:** `test-phase0.sh` - All tests passing ✅
+**Test Scripts:**
+- `test-phase0.sh` — Phase 0 checks
+- `test-phase2.sh` — Extended monitoring checks
+- `go test ./...` — Full unit test suite (all passing)
+
+---
+
+## Phase 6 Summary (Completed)
+
+### Circuit Breaker
+- Configurable per‑route via site `options.circuit_breaker`
+- States: closed → open → half‑open with thresholds
+- Transport errors and 5xx responses trip breaker
+- Unit tests cover open/block and half‑open recovery
+
+### Backups (SQLite)
+- `backup-full.sh` weekly, `backup-differential.sh` mid‑week, `backup-incremental.sh` hourly
+- `cleanup-retention.sh` daily with configurable retention
+- Cron managed via container `entrypoint.sh`
+- Compose files mount `/data` and `BACKUP_DIR`
 
 ---
 

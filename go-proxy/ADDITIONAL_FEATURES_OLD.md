@@ -1,63 +1,11 @@
-# Additional Features for Gaming Community Deployment
+# DEPRECATED
 
-## Context
-- 20+ international gaming community users
-- Public-facing Pterodactyl panel and community sites
-- Private Vaultwarden (personal use)
-- Hosted in Germany, GDPR compliance required
-- Dynamic home IP (no static IP whitelist possible)
+This document is obsolete and retained only for historical reference.
 
----
-
-## Additional Tasks to Implement
-
-### 14. Add Rate Limiting System
-**Priority**: CRITICAL (Security)
-
-**Requirements:**
-- Per-IP rate limiting with configurable thresholds per route
-- Per-route global rate limits
-- Path-specific limits (e.g., `/auth/*` = 5 req/min, normal = 100 req/min)
-- Failed login tracking and auto-ban
-- Temporary bans with configurable duration
-- Whitelist/exemption support
-- Redis-like sliding window algorithm
-
-**Configuration Example:**
-```yaml
-# Pterodactyl (public)
-host: gpanel.chilla55.de
-backend: http://pterodactyl_panel:80
-rate_limit:
-  global: 1000  # requests per minute for entire route
-  per_ip: 100   # requests per minute per IP
-  paths:
-    - path: /auth/*
-      per_ip: 5
-      ban_after: 3  # Ban after 3 violations
-      ban_duration: 3600  # 1 hour
-    - path: /api/client/*
-      per_ip: 60
-
-# Vaultwarden (private, strict)
-host: vault.chilla55.de
-backend: http://vaultwarden:80
-rate_limit:
-  per_ip: 10
-  paths:
-    - path: /identity/*  # Login endpoint
-      per_ip: 3
-      ban_after: 3
-      ban_duration: 3600
-      alert_webhook: true  # Discord alert
-```
-
-**Database Schema:**
-```sql
-CREATE TABLE rate_limits (
-  ip_address TEXT NOT NULL,
-  route_id INTEGER NOT NULL,
-  window_start INTEGER NOT NULL,
+Please refer to the current documentation:
+- `README.md` for features and usage
+- `IMPLEMENTATION_PLAN.md` for the up-to-date plan
+- `IMPLEMENTATION_STATUS.md` for progress and completed phases
   request_count INTEGER DEFAULT 0,
   banned_until INTEGER,
   ban_count INTEGER DEFAULT 0,
