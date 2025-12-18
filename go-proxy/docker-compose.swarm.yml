@@ -1,8 +1,8 @@
 version: '3.8'
 
 services:
-  nginx:
-    image: ghcr.io/chilla55/nginx:latest
+  proxy:
+    image: ghcr.io/chilla55/go-proxy:latest
     networks:
       - web-net
     
@@ -57,9 +57,6 @@ services:
       DB_PATH: "/data/proxy.db"
       BACKUP_DIR: "/mnt/storagebox/backups/proxy"
       TZ: "UTC"
-      DB_PATH: "/data/proxy.db"
-      BACKUP_DIR: "/mnt/storagebox/backups/proxy"
-      TZ: "UTC"
     
     configs:
       - source: proxy_global_config
@@ -82,18 +79,6 @@ services:
         read_only: true
         bind:
           propagation: rslave
-      # Persist SQLite database
-      - type: volume
-        source: proxy-data
-        target: /data
-      # Backups directory on Storage Box
-      - type: bind
-        source: /mnt/storagebox/backups/proxy
-        target: /mnt/storagebox/backups/proxy
-        read_only: false
-        bind:
-          propagation: rslave
-
       # Persist SQLite DB
       - type: volume
         source: proxy-data
@@ -119,9 +104,6 @@ configs:
 networks:
   web-net:
     external: true
-
-volumes:
-  proxy-data:
 
 volumes:
   proxy-data:

@@ -3,6 +3,7 @@
 **Version**: 2.0  
 **Last Updated**: December 18, 2025  
 **Total Features**: 30 tasks across 6 phases
+**Status**: Phases 0–6 implemented (circuit breaker + backups landed)
 
 ---
 
@@ -33,7 +34,7 @@ This Go-based reverse proxy (`proxy-manager`) replaces nginx for HTTP/HTTPS traf
 - **Language**: Go 1.21+ (pure Go, no CGO)
 - **Protocols**: HTTP/1.1, HTTP/2, HTTP/3 (QUIC)
 - **TLS**: Hot-reload via fsnotify watching `/mnt/storagebox/certs/`
-- **Configuration**: YAML files in `/etc/nginx/sites-enabled/`
+- **Configuration**: YAML files in `/etc/proxy/sites-available/`
 - **Deployment**: Docker Swarm on Hetzner dedicated server (Germany)
 - **Storage**: SQLite (modernc.org/sqlite) at `/data/proxy.db`
 - **Backend Discovery**: Docker service names (persistent across IP changes)
@@ -1280,15 +1281,24 @@ HALF-OPEN (Test recovery)
   ↓ Failure → OPEN
 ```
 
-**Configuration:**
+**Configuration (site YAML):**
 ```yaml
-host: gpanel.chilla55.de
-circuit_breaker:
-  enabled: true
-  failure_threshold: 5      # Open after N failures
-  success_threshold: 2      # Close after N successes
-  timeout: 30s             # Stay open for duration
-  window: 60s              # Count failures in window
+enabled: true
+service:
+  name: gpanel
+
+routes:
+  - domains: ["gpanel.chilla55.de"]
+    path: /
+    backend: http://gpanel:8080
+
+options:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5      # Open after N failures
+    success_threshold: 2      # Close after N successes
+    timeout: 30s              # Stay open for duration
+    window: 60s               # Count failures in window
 ```
 
 **Dashboard Indicators:**
@@ -1300,7 +1310,7 @@ circuit_breaker:
 
 ### Task #12: Three-Tier SQLite Backup System
 
-**Backup Strategy:**
+**Backup Strategy (DB_PATH=/data/proxy.db, BACKUP_DIR=/mnt/storagebox/backups/proxy):**
 
 **1. Full Backup (Weekly - Sunday 02:00)**
 ```bash
