@@ -392,3 +392,301 @@ func (db *DB) LogWAFBlock(ip, route, attackType, payload, userAgent string) erro
 
 	return nil
 }
+
+// LogAudit logs an audit event to the database
+func (db *DB) LogAudit(user, action, resourceType, resourceID, oldValue, newValue, ipAddress, metadata string) error {
+	query := `
+		INSERT INTO audit_log (
+			timestamp, user, action, resource_type,
+			resource_id, old_value, new_value, ip_address, metadata
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(
+		query,
+		time.Now().Unix(),
+		user,
+		action,
+		resourceType,
+		resourceID,
+		oldValue,
+		newValue,
+		ipAddress,
+		metadata,
+	)
+
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("action", action).
+			Str("resource_type", resourceType).
+			Msg("Failed to log audit entry")
+		return err
+	}
+
+	return nil
+}
+
+// AuditEntry represents an audit log entry
+type AuditEntry struct {
+	ID           int64  `json:"id"`
+	Timestamp    int64  `json:"timestamp"`
+	User         string `json:"user"`
+	Action       string `json:"action"`
+	ResourceType string `json:"resource_type"`
+	ResourceID   string `json:"resource_id"`
+	OldValue     string `json:"old_value,omitempty"`
+	NewValue     string `json:"new_value,omitempty"`
+	IPAddress    string `json:"ip_address,omitempty"`
+	Metadata     string `json:"metadata,omitempty"`
+}
+
+// GetAuditLogs retrieves audit logs with optional filters
+func (db *DB) GetAuditLogs(limit int, action, resourceType string, since time.Time) ([]AuditEntry, error) {
+	query := `
+		SELECT id, timestamp, user, action, resource_type,
+		       resource_id, old_value, new_value, ip_address, metadata
+		FROM audit_log
+		WHERE 1=1
+	`
+	args := []interface{}{}
+
+	if action != "" {
+		query += " AND action = ?"
+		args = append(args, action)
+	}
+
+	if resourceType != "" {
+		query += " AND resource_type = ?"
+		args = append(args, resourceType)
+	}
+
+	if !since.IsZero() {
+		query += " AND timestamp >= ?"
+		args = append(args, since.Unix())
+	}
+
+	query += " ORDER BY timestamp DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []AuditEntry
+	for rows.Next() {
+		var entry AuditEntry
+		err := rows.Scan(
+			&entry.ID,
+			&entry.Timestamp,
+			&entry.User,
+			&entry.Action,
+			&entry.ResourceType,
+			&entry.ResourceID,
+			&entry.OldValue,
+			&entry.NewValue,
+			&entry.IPAddress,
+			&entry.Metadata,
+		)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to scan audit entry")
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
+}
+
+// CleanupAccessLogs removes old access logs based on retention policy
+func (db *DB) CleanupAccessLogs(days int, routePattern string) error {
+	cutoff := time.Now().AddDate(0, 0, -days).Unix()
+
+	var query string
+	var args []interface{}
+
+	if routePattern == "*" {
+		query = "DELETE FROM access_log WHERE timestamp < ?"
+		args = []interface{}{cutoff}
+	} else {
+		query = "DELETE FROM access_log WHERE timestamp < ? AND route LIKE ?"
+		args = []interface{}{cutoff, routePattern}
+	}
+
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Int("days", days).
+			Str("route_pattern", routePattern).
+			Msg("Failed to cleanup access logs")
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		log.Info().
+			Int64("rows_deleted", rows).
+			Int("days", days).
+			Str("route_pattern", routePattern).
+			Msg("Cleaned up access logs")
+	}
+
+	return nil
+}
+
+// CleanupSecurityLogs removes old security logs (WAF blocks, rate limit violations)
+func (db *DB) CleanupSecurityLogs(days int, routePattern string) error {
+	cutoff := time.Now().AddDate(0, 0, -days).Unix()
+
+	var totalRows int64
+
+	// Cleanup WAF blocks
+	var wafQuery string
+	var wafArgs []interface{}
+
+	if routePattern == "*" {
+		wafQuery = "DELETE FROM waf_blocks WHERE timestamp < ?"
+		wafArgs = []interface{}{cutoff}
+	} else {
+		wafQuery = "DELETE FROM waf_blocks WHERE timestamp < ? AND route LIKE ?"
+		wafArgs = []interface{}{cutoff, routePattern}
+	}
+
+	wafResult, err := db.Exec(wafQuery, wafArgs...)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Int("days", days).
+			Str("route_pattern", routePattern).
+			Msg("Failed to cleanup WAF blocks")
+		return err
+	}
+
+	wafRows, _ := wafResult.RowsAffected()
+	totalRows += wafRows
+
+	// Cleanup rate limit violations
+	var rlQuery string
+	var rlArgs []interface{}
+
+	if routePattern == "*" {
+		rlQuery = "DELETE FROM rate_limit_violations WHERE timestamp < ?"
+		rlArgs = []interface{}{cutoff}
+	} else {
+		rlQuery = "DELETE FROM rate_limit_violations WHERE timestamp < ? AND route LIKE ?"
+		rlArgs = []interface{}{cutoff, routePattern}
+	}
+
+	rlResult, err := db.Exec(rlQuery, rlArgs...)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Int("days", days).
+			Str("route_pattern", routePattern).
+			Msg("Failed to cleanup rate limit violations")
+		return err
+	}
+
+	rlRows, _ := rlResult.RowsAffected()
+	totalRows += rlRows
+
+	if totalRows > 0 {
+		log.Info().
+			Int64("rows_deleted", totalRows).
+			Int64("waf_blocks", wafRows).
+			Int64("rate_limit_violations", rlRows).
+			Int("days", days).
+			Str("route_pattern", routePattern).
+			Msg("Cleaned up security logs")
+	}
+
+	return nil
+}
+
+// CleanupAuditLogs removes old audit logs
+func (db *DB) CleanupAuditLogs(days int) error {
+	cutoff := time.Now().AddDate(0, 0, -days).Unix()
+
+	result, err := db.Exec("DELETE FROM audit_log WHERE timestamp < ?", cutoff)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Int("days", days).
+			Msg("Failed to cleanup audit logs")
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		log.Info().
+			Int64("rows_deleted", rows).
+			Int("days", days).
+			Msg("Cleaned up audit logs")
+	}
+
+	return nil
+}
+
+// CleanupMetrics removes old metrics data
+func (db *DB) CleanupMetrics(days int, routePattern string) error {
+	cutoff := time.Now().AddDate(0, 0, -days).Unix()
+
+	var query string
+	var args []interface{}
+
+	if routePattern == "*" {
+		query = "DELETE FROM metrics WHERE timestamp < ?"
+		args = []interface{}{cutoff}
+	} else {
+		query = "DELETE FROM metrics WHERE timestamp < ? AND route LIKE ?"
+		args = []interface{}{cutoff, routePattern}
+	}
+
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Int("days", days).
+			Str("route_pattern", routePattern).
+			Msg("Failed to cleanup metrics")
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		log.Info().
+			Int64("rows_deleted", rows).
+			Int("days", days).
+			Str("route_pattern", routePattern).
+			Msg("Cleaned up metrics")
+	}
+
+	return nil
+}
+
+// CleanupHealthChecks removes old health check logs
+func (db *DB) CleanupHealthChecks(days int) error {
+	cutoff := time.Now().AddDate(0, 0, -days).Unix()
+
+	result, err := db.Exec("DELETE FROM health_checks WHERE timestamp < ?", cutoff)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Int("days", days).
+			Msg("Failed to cleanup health checks")
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		log.Info().
+			Int64("rows_deleted", rows).
+			Int("days", days).
+			Msg("Cleaned up health checks")
+	}
+
+	return nil
+}
