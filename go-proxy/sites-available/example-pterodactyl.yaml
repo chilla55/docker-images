@@ -32,6 +32,14 @@ options:
     max_request_body: 104857600   # 100 MB (allows server backup uploads)
     max_response_body: 52428800   # 50 MB
 
+  # Rate limiting (Phase 1 - Task #14)
+  rate_limit:
+    enabled: true
+    requests_per_min: 120         # Higher limit for game panel
+    requests_per_hour: 2000
+    burst_size: 20                # Allow bursts for WebSocket
+    per_ip: true
+
   # Health check configuration
   health_check_path: /up
   health_check_interval: 10s

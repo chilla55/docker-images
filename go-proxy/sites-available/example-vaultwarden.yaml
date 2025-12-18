@@ -30,6 +30,17 @@ options:
     max_request_body: 10485760    # 10 MB (vault exports)
     max_response_body: 10485760   # 10 MB
 
+  # Rate limiting (Phase 1 - Task #14)
+  rate_limit:
+    enabled: true
+    requests_per_min: 30          # Strict limit for private service
+    requests_per_hour: 500
+    burst_size: 5
+    per_ip: true
+    whitelist:
+      - "10.0.0.0/8"              # Internal network
+      - "192.168.0.0/16"          # Private network
+
   # Aggressive health checks
   health_check_path: /alive
   health_check_interval: 5s

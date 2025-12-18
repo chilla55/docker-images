@@ -326,3 +326,35 @@ type Metric struct {
 	Value     float64
 	Labels    string
 }
+
+// LogRateLimitViolation logs a rate limit violation to the database
+func (db *DB) LogRateLimitViolation(ip, route, reason string, requestCount int) error {
+	query := `
+		INSERT INTO rate_limit_violations (
+			timestamp, ip_address, route, reason, 
+			request_count, metadata
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(
+		query,
+		time.Now().Unix(),
+		ip,
+		route,
+		reason,
+		requestCount,
+		"", // metadata (JSON for additional info)
+	)
+
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("ip", ip).
+			Str("route", route).
+			Str("reason", reason).
+			Msg("Failed to log rate limit violation")
+		return err
+	}
+
+	return nil
+}
