@@ -59,22 +59,22 @@ type RouteConfig struct {
 
 // OptionConfig represents service options
 type OptionConfig struct {
-	HealthCheckPath     string        `yaml:"health_check_path,omitempty"`
-	HealthCheckInterval string        `yaml:"health_check_interval,omitempty"`
-	HealthCheckTimeout  string        `yaml:"health_check_timeout,omitempty"`
-	Timeout             string        `yaml:"timeout,omitempty"`
-	MaxBodySize         string        `yaml:"max_body_size,omitempty"`
-	Compression         CompressionConfig `yaml:"compression,omitempty"`
-	WebSocket           WebSocketConfig   `yaml:"websocket,omitempty"`
-	HTTP2               *bool         `yaml:"http2,omitempty"`
-	HTTP3               *bool         `yaml:"http3,omitempty"`
-	Timeouts            TimeoutConfig     `yaml:"timeouts,omitempty"`
-	Limits              LimitConfig       `yaml:"limits,omitempty"`
-	RateLimit           RateLimitConfig   `yaml:"rate_limit,omitempty"`
-	WAF                 WAFConfig         `yaml:"waf,omitempty"`
-	PII                 PIIConfig         `yaml:"pii,omitempty"`
-	Retention           RetentionConfig   `yaml:"retention,omitempty"`
-	GeoIP               GeoIPConfig       `yaml:"geoip,omitempty"`
+	HealthCheckPath     string               `yaml:"health_check_path,omitempty"`
+	HealthCheckInterval string               `yaml:"health_check_interval,omitempty"`
+	HealthCheckTimeout  string               `yaml:"health_check_timeout,omitempty"`
+	Timeout             string               `yaml:"timeout,omitempty"`
+	MaxBodySize         string               `yaml:"max_body_size,omitempty"`
+	Compression         CompressionConfig    `yaml:"compression,omitempty"`
+	WebSocket           WebSocketConfig      `yaml:"websocket,omitempty"`
+	HTTP2               *bool                `yaml:"http2,omitempty"`
+	HTTP3               *bool                `yaml:"http3,omitempty"`
+	Timeouts            TimeoutConfig        `yaml:"timeouts,omitempty"`
+	Limits              LimitConfig          `yaml:"limits,omitempty"`
+	RateLimit           RateLimitConfig      `yaml:"rate_limit,omitempty"`
+	WAF                 WAFConfig            `yaml:"waf,omitempty"`
+	PII                 PIIConfig            `yaml:"pii,omitempty"`
+	Retention           RetentionConfig      `yaml:"retention,omitempty"`
+	GeoIP               GeoIPConfig          `yaml:"geoip,omitempty"`
 	ConnectionPool      ConnectionPoolConfig `yaml:"connection_pool,omitempty"`
 	SlowRequest         SlowRequestConfig    `yaml:"slow_request,omitempty"`
 	Retry               RetryConfig          `yaml:"retry,omitempty"`
@@ -92,7 +92,7 @@ type GeoIPConfig struct {
 
 // RetentionConfig represents data retention policy settings
 type RetentionConfig struct {
-	Enabled          *bool  `yaml:"enabled,omitempty"`           // Default: true
+	Enabled          *bool  `yaml:"enabled,omitempty"`            // Default: true
 	AccessLogDays    int    `yaml:"access_log_days,omitempty"`    // Default: 30
 	SecurityLogDays  int    `yaml:"security_log_days,omitempty"`  // Default: 90
 	AuditLogDays     int    `yaml:"audit_log_days,omitempty"`     // Default: 365
@@ -105,11 +105,11 @@ type RetentionConfig struct {
 // PIIConfig represents PII masking settings for GDPR compliance
 type PIIConfig struct {
 	Enabled           *bool    `yaml:"enabled,omitempty"`
-	MaskIPMethod      string   `yaml:"mask_ip_method,omitempty"`      // last_octet, hash, full
-	MaskIPv6Method    string   `yaml:"mask_ipv6_method,omitempty"`    // last_64, hash, full
-	StripHeaders      []string `yaml:"strip_headers,omitempty"`       // Headers to remove
-	MaskQueryParams   []string `yaml:"mask_query_params,omitempty"`   // Query params to mask
-	PreserveLocalhost *bool    `yaml:"preserve_localhost,omitempty"`  // Don't mask private IPs
+	MaskIPMethod      string   `yaml:"mask_ip_method,omitempty"`     // last_octet, hash, full
+	MaskIPv6Method    string   `yaml:"mask_ipv6_method,omitempty"`   // last_64, hash, full
+	StripHeaders      []string `yaml:"strip_headers,omitempty"`      // Headers to remove
+	MaskQueryParams   []string `yaml:"mask_query_params,omitempty"`  // Query params to mask
+	PreserveLocalhost *bool    `yaml:"preserve_localhost,omitempty"` // Don't mask private IPs
 }
 
 // WAFConfig represents Web Application Firewall settings
@@ -127,13 +127,13 @@ type WAFConfig struct {
 
 // RateLimitConfig represents rate limiting settings
 type RateLimitConfig struct {
-	Enabled         *bool  `yaml:"enabled,omitempty"`
-	RequestsPerMin  int    `yaml:"requests_per_min,omitempty"`  // Default: 60
-	RequestsPerHour int    `yaml:"requests_per_hour,omitempty"` // Default: 1000
-	BurstSize       int    `yaml:"burst_size,omitempty"`        // Default: 10% of per-min
-	PerIP           *bool  `yaml:"per_ip,omitempty"`            // Default: true
-	PerRoute        *bool  `yaml:"per_route,omitempty"`         // Default: false
-	Whitelist       []string `yaml:"whitelist,omitempty"`       // Whitelisted IPs/CIDRs
+	Enabled         *bool    `yaml:"enabled,omitempty"`
+	RequestsPerMin  int      `yaml:"requests_per_min,omitempty"`  // Default: 60
+	RequestsPerHour int      `yaml:"requests_per_hour,omitempty"` // Default: 1000
+	BurstSize       int      `yaml:"burst_size,omitempty"`        // Default: 10% of per-min
+	PerIP           *bool    `yaml:"per_ip,omitempty"`            // Default: true
+	PerRoute        *bool    `yaml:"per_route,omitempty"`         // Default: false
+	Whitelist       []string `yaml:"whitelist,omitempty"`         // Whitelisted IPs/CIDRs
 }
 
 // TimeoutConfig represents timeout settings for a route
@@ -153,9 +153,9 @@ type LimitConfig struct {
 // CompressionConfig represents response compression settings
 type CompressionConfig struct {
 	Enabled      *bool    `yaml:"enabled,omitempty"`
-	Algorithms   []string `yaml:"algorithms,omitempty"`   // brotli, gzip
-	Level        int      `yaml:"level,omitempty"`        // algorithm-specific level
-	MinSize      int64    `yaml:"min_size,omitempty"`     // bytes
+	Algorithms   []string `yaml:"algorithms,omitempty"` // brotli, gzip
+	Level        int      `yaml:"level,omitempty"`      // algorithm-specific level
+	MinSize      int64    `yaml:"min_size,omitempty"`   // bytes
 	ContentTypes []string `yaml:"content_types,omitempty"`
 }
 
@@ -223,7 +223,7 @@ type SlowRequestConfig struct {
 type RetryConfig struct {
 	Enabled      *bool    `yaml:"enabled,omitempty"`
 	MaxAttempts  int      `yaml:"max_attempts,omitempty"`
-	Backoff      string   `yaml:"backoff,omitempty"`      // exponential, linear
+	Backoff      string   `yaml:"backoff,omitempty"`       // exponential, linear
 	InitialDelay string   `yaml:"initial_delay,omitempty"` // e.g., 100ms
 	MaxDelay     string   `yaml:"max_delay,omitempty"`     // e.g., 2s
 	RetryOn      []string `yaml:"retry_on,omitempty"`      // e.g., ["connection_refused","timeout","502","503"]
@@ -266,8 +266,8 @@ func (t *TimeoutConfig) GetTimeouts() TimeoutConfig {
 // GetLimits returns limit configuration with defaults
 func (l *LimitConfig) GetLimits() LimitConfig {
 	defaults := LimitConfig{
-		MaxRequestBody:  10 * 1024 * 1024,  // 10 MB
-		MaxResponseBody: 10 * 1024 * 1024,  // 10 MB
+		MaxRequestBody:  10 * 1024 * 1024, // 10 MB
+		MaxResponseBody: 10 * 1024 * 1024, // 10 MB
 	}
 
 	if l.MaxRequestBody > 0 {
@@ -457,12 +457,12 @@ func (r *RateLimitConfig) GetRateLimit() RateLimitConfig {
 	falseVal := false
 
 	defaults := RateLimitConfig{
-		Enabled:         &falseVal,       // Disabled by default
-		RequestsPerMin:  60,              // 60 requests per minute
-		RequestsPerHour: 1000,            // 1000 requests per hour
-		BurstSize:       6,               // 10% of per-min
-		PerIP:           &trueVal,        // Per-IP limiting enabled
-		PerRoute:        &falseVal,       // Per-route limiting disabled
+		Enabled:         &falseVal, // Disabled by default
+		RequestsPerMin:  60,        // 60 requests per minute
+		RequestsPerHour: 1000,      // 1000 requests per hour
+		BurstSize:       6,         // 10% of per-min
+		PerIP:           &trueVal,  // Per-IP limiting enabled
+		PerRoute:        &falseVal, // Per-route limiting disabled
 		Whitelist:       make([]string, 0),
 	}
 
@@ -497,14 +497,14 @@ func (w *WAFConfig) GetWAF() WAFConfig {
 	falseVal := false
 
 	defaults := WAFConfig{
-		Enabled:      &falseVal,      // Disabled by default
-		BlockMode:    &trueVal,       // Block mode by default
-		Sensitivity:  "medium",       // Medium sensitivity
-		CheckPath:    &trueVal,       // Check path
-		CheckHeaders: &trueVal,       // Check headers
-		CheckQuery:   &trueVal,       // Check query params
-		CheckBody:    &trueVal,       // Check body
-		MaxBodySize:  1024 * 1024,    // 1 MB
+		Enabled:      &falseVal,   // Disabled by default
+		BlockMode:    &trueVal,    // Block mode by default
+		Sensitivity:  "medium",    // Medium sensitivity
+		CheckPath:    &trueVal,    // Check path
+		CheckHeaders: &trueVal,    // Check headers
+		CheckQuery:   &trueVal,    // Check query params
+		CheckBody:    &trueVal,    // Check body
+		MaxBodySize:  1024 * 1024, // 1 MB
 		Whitelist:    make([]string, 0),
 	}
 
@@ -545,12 +545,12 @@ func (p *PIIConfig) GetPII() PIIConfig {
 	falseVal := false
 
 	defaults := PIIConfig{
-		Enabled:           &falseVal,       // Disabled by default
-		MaskIPMethod:      "last_octet",    // Mask last octet of IPv4
-		MaskIPv6Method:    "last_64",       // Mask last 64 bits of IPv6
-		StripHeaders:      []string{},      // Use package defaults
-		MaskQueryParams:   []string{},      // Use package defaults
-		PreserveLocalhost: &trueVal,        // Don't mask private IPs
+		Enabled:           &falseVal,    // Disabled by default
+		MaskIPMethod:      "last_octet", // Mask last octet of IPv4
+		MaskIPv6Method:    "last_64",    // Mask last 64 bits of IPv6
+		StripHeaders:      []string{},   // Use package defaults
+		MaskQueryParams:   []string{},   // Use package defaults
+		PreserveLocalhost: &trueVal,     // Don't mask private IPs
 	}
 
 	if p.Enabled != nil {
@@ -580,11 +580,11 @@ func (g *GeoIPConfig) GetGeoIP() GeoIPConfig {
 	falseVal := false
 
 	defaults := GeoIPConfig{
-		Enabled:               &falseVal,      // Disabled by default
+		Enabled:               &falseVal, // Disabled by default
 		DatabasePath:          "/data/GeoLite2-City.mmdb",
-		AlertOnUnusualCountry: &falseVal,      // No alerts by default
-		ExpectedCountries:     []string{},     // All countries allowed
-		CacheExpiryMinutes:    30,             // 30 minute cache
+		AlertOnUnusualCountry: &falseVal,  // No alerts by default
+		ExpectedCountries:     []string{}, // All countries allowed
+		CacheExpiryMinutes:    30,         // 30 minute cache
 	}
 
 	if g.Enabled != nil {
@@ -735,10 +735,10 @@ func (c *SiteConfig) GetOptions() (map[string]interface{}, error) {
 	// Connection pool settings
 	pool := c.Options.ConnectionPool.GetConnectionPool()
 	opts["pool"] = map[string]interface{}{
-		"max_idle_conns":        pool.MaxIdleConns,
+		"max_idle_conns":          pool.MaxIdleConns,
 		"max_idle_conns_per_host": pool.MaxIdleConnsPerHost,
-		"max_conns_per_host":    pool.MaxConnsPerHost,
-		"idle_timeout":          pool.IdleTimeout,
+		"max_conns_per_host":      pool.MaxConnsPerHost,
+		"idle_timeout":            pool.IdleTimeout,
 	}
 
 	// Slow request detection
@@ -791,7 +791,12 @@ func (c *SiteConfig) GetOptions() (map[string]interface{}, error) {
 	return opts, nil
 }
 
-func boolValue(p *bool) bool { if p == nil { return false }; return *p }
+func boolValue(p *bool) bool {
+	if p == nil {
+		return false
+	}
+	return *p
+}
 
 // GetRetention returns retention configuration with defaults
 func (c *SiteConfig) GetRetention() RetentionConfig {
@@ -803,11 +808,11 @@ func (c *SiteConfig) GetRetention() RetentionConfig {
 	if c.Options.Retention.Enabled != nil {
 		enabled = *c.Options.Retention.Enabled
 	}
-	
+
 	if !enabled {
 		return RetentionConfig{Enabled: &enabled}
 	}
-	
+
 	// Default retention settings
 	accessLogDays := 30
 	securityLogDays := 90
@@ -816,7 +821,7 @@ func (c *SiteConfig) GetRetention() RetentionConfig {
 	healthCheckDays := 7
 	websocketLogDays := 30
 	policyType := "default"
-	
+
 	// Override with policy type presets
 	if c.Options.Retention.PolicyType == "public" {
 		accessLogDays = 7
@@ -835,7 +840,7 @@ func (c *SiteConfig) GetRetention() RetentionConfig {
 		websocketLogDays = 30
 		policyType = "private"
 	}
-	
+
 	// Override with specific values if provided
 	if c.Options.Retention.AccessLogDays > 0 {
 		accessLogDays = c.Options.Retention.AccessLogDays
@@ -855,7 +860,7 @@ func (c *SiteConfig) GetRetention() RetentionConfig {
 	if c.Options.Retention.WebSocketLogDays > 0 {
 		websocketLogDays = c.Options.Retention.WebSocketLogDays
 	}
-	
+
 	return RetentionConfig{
 		Enabled:          &enabled,
 		AccessLogDays:    accessLogDays,
