@@ -27,5 +27,5 @@ tls:
     - domains:
         - "*.chilla55.de"
         - "chilla55.de"
-      cert_file: /etc/proxy/certs/chilla55.de/fullchain.pem
-      key_file: /etc/proxy/certs/chilla55.de/privkey.pem
+      cert_file: /etc/proxy/certs/live/chilla55.de/fullchain.pem
+      key_file: /etc/proxy/certs/live/chilla55.de/privkey.pem
