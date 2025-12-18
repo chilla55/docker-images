@@ -4,14 +4,15 @@
 BINARY_NAME=proxy-manager
 DOCKER_IMAGE=proxy-manager
 VERSION?=latest
-GO_FILES=$(shell find nginx-manager -name '*.go')
+GO_FILES=$(shell find proxy-manager -name '*.go')
+WORKDIR=proxy-manager
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 build: ## Build the binary locally
 	@echo "Building $(BINARY_NAME)..."
-	cd nginx-manager && go build -ldflags="-w -s" -o ../$(BINARY_NAME) .
+	cd $(WORKDIR) && go build -ldflags="-w -s" -o ../$(BINARY_NAME) .
 	@echo "Build complete: $(BINARY_NAME)"
 
 run: build ## Build and run locally
@@ -22,13 +23,32 @@ run: build ## Build and run locally
 		--debug
 
 test: ## Run tests
-	cd nginx-manager && go test -v ./...
+	@echo "Running unit tests..."
+	cd $(WORKDIR) && go test -v ./...
+
+test-coverage: ## Run tests with coverage
+	@echo "Running tests with coverage..."
+	cd $(WORKDIR) && go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+	cd $(WORKDIR) && go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: $(WORKDIR)/coverage.html"
+
+test-short: ## Run short tests only
+	@echo "Running short tests..."
+	cd $(WORKDIR) && go test -short ./...
+
+test-race: ## Run tests with race detector
+	@echo "Running tests with race detector..."
+	cd $(WORKDIR) && go test -race ./...
+
+bench: ## Run benchmarks
+	@echo "Running benchmarks..."
+	cd $(WORKDIR) && go test -bench=. -benchmem ./...
 
 fmt: ## Format code
-	cd nginx-manager && go fmt ./...
+	cd $(WORKDIR) && go fmt ./...
 
 vet: ## Run go vet
-	cd nginx-manager && go vet ./...
+	cd $(WORKDIR) && go vet ./...
 
 lint: ## Run golangci-lint
 	cd nginx-manager && golangci-lint run
