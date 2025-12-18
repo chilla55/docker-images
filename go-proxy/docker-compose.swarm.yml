@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   proxy:
-    image: ghcr.io/chilla55/go-proxy:latest
+    image: ghcr.io/chilla55/go-proxy:nightly
     networks:
       - web-net
     
@@ -30,28 +30,24 @@ services:
     
     ports:
       - target: 80
-        published: 80
+        published: 8080
         protocol: tcp
         mode: host
       - target: 443
-        published: 443
+        published: 8443
         protocol: tcp
         mode: host
       - target: 443
-        published: 443
+        published: 8443
         protocol: udp
         mode: host
-      - target: 81
-        published: 81
-        protocol: tcp
-        mode: host
       - target: 8080
-        published: 8080
+        published: 9080
         protocol: tcp
         mode: host
     
     environment:
-      DEBUG: "0"
+      DEBUG: "1"
       SITES_PATH: "/etc/proxy/sites-available"
       GLOBAL_CONFIG: "/etc/proxy/global.yaml"
       DB_PATH: "/data/proxy.db"
