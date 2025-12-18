@@ -1,0 +1,33 @@
+?   	github.com/chilla55/proxy-manager	[no test files]
+?   	github.com/chilla55/proxy-manager/accesslog	[no test files]
+PASS
+ok  	github.com/chilla55/proxy-manager/analytics	0.002s
+?   	github.com/chilla55/proxy-manager/audit	[no test files]
+?   	github.com/chilla55/proxy-manager/certmonitor	[no test files]
+PASS
+ok  	github.com/chilla55/proxy-manager/config	0.001s
+?   	github.com/chilla55/proxy-manager/database	[no test files]
+?   	github.com/chilla55/proxy-manager/health	[no test files]
+PASS
+ok  	github.com/chilla55/proxy-manager/metrics	0.001s
+?   	github.com/chilla55/proxy-manager/middleware	[no test files]
+?   	github.com/chilla55/proxy-manager/nginx	[no test files]
+?   	github.com/chilla55/proxy-manager/pii	[no test files]
+?   	github.com/chilla55/proxy-manager/proxy	[no test files]
+{"level":"warn","ip":"203.0.113.1","route":"/route","reason":"exceeded 2 requests per minute (current: 2)","time":"2025-12-18T12:08:08+01:00","message":"Rate limit exceeded"}
+{"level":"info","ip_or_cidr":"203.0.113.0/24","time":"2025-12-18T12:08:08+01:00","message":"Added to rate limit whitelist"}
+PASS
+ok  	github.com/chilla55/proxy-manager/ratelimit	0.002s
+?   	github.com/chilla55/proxy-manager/registry	[no test files]
+?   	github.com/chilla55/proxy-manager/retention	[no test files]
+PASS
+ok  	github.com/chilla55/proxy-manager/traffic	0.002s
+?   	github.com/chilla55/proxy-manager/updater	[no test files]
+{"level":"warn","ip":"192.0.2.1","route":"/api","attack_type":"xss","payload":"<script>alert('x')</script>","time":"2025-12-18T12:08:08+01:00","message":"WAF blocked attack"}
+{"level":"warn","ip":"192.0.2.1","route":"/api","attack_type":"xss","payload":"<script>alert('x')</script>","time":"2025-12-18T12:08:08+01:00","message":"WAF blocked attack"}
+{"level":"info","time":"2025-12-18T12:08:08+01:00","message":"WAF in log-only mode, allowing request"}
+{"level":"warn","ip":"192.0.2.1","route":"/hdr","attack_type":"xss","payload":"X-Whatever: javascript:","time":"2025-12-18T12:08:08+01:00","message":"WAF blocked attack"}
+{"level":"warn","ip":"192.0.2.1","route":"/q","attack_type":"path_traversal","payload":"q=../","time":"2025-12-18T12:08:08+01:00","message":"WAF blocked attack"}
+PASS
+ok  	github.com/chilla55/proxy-manager/waf	0.002s
+?   	github.com/chilla55/proxy-manager/watcher	[no test files]
