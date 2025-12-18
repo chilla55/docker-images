@@ -1,85 +1,67 @@
-# Pure Go Reverse Proxy with HTTP/3
+# Go Reverse Proxy
 
-A high-performance reverse proxy written entirely in Go with native HTTP/2, HTTP/3 (QUIC), automatic HTTPS, and dynamic service registration.
+A high-performance, production-ready HTTP/HTTPS/HTTP3 reverse proxy written in pure Go. Designed for Docker Swarm deployments with enterprise-grade features including circuit breakers, rate limiting, WAF, GDPR compliance, and comprehensive observability.
 
-## Features
+## ✨ Features
 
-- **HTTP/3 (QUIC) Support** - Latest HTTP protocol with 0-RTT connection establishment
-- **HTTP/2 & HTTP/1.1** - Automatic protocol negotiation
-- **Wildcard TLS Certificates** - Load your own SSL certificates with wildcard domain support
-- **Auto-Reload Certificates** - Hot-reload certificates when renewed (Certbot compatible)
-- **Dynamic Service Registry** - TCP-based protocol for runtime route management
-- **YAML Configuration** - Simple, readable config files for static sites
-- **Security Headers** - Configurable per-domain security policies
-- **Blackhole Unknown Domains** - Instant connection drop for unregistered domains
-- **Zero-Downtime Updates** - Hot reload for configuration and certificate changes
-- **Maintenance Mode** - Graceful handshake protocol for service updates
-- **WebSocket Support** - Native proxying for WebSocket connections
-- **Health Checks** - Automatic backend health monitoring
-- **Metrics** - Prometheus-compatible endpoint
+### Core Proxy
+- **HTTP/1.1, HTTP/2, HTTP/3** - Full protocol support including QUIC
+- **Automatic HTTPS** - TLS termination with Let's Encrypt integration
+- **WebSocket Support** - Native WebSocket proxying with configurable timeouts
+- **Dynamic Configuration** - YAML-based configs with live reloading (no restarts)
+- **Service Registry** - Dynamic backend registration on port 81
 
-## Architecture
+### Reliability & Performance
+- **Circuit Breakers** - Automatic failure detection and recovery
+- **Connection Pooling** - Efficient HTTP connection management
+- **Retry Logic** - Configurable retry with exponential backoff
+- **Health Checks** - Active upstream health monitoring
+- **Graceful Shutdown** - Zero-downtime deployments with connection draining
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Proxy Manager                            │
-├──────────────┬──────────────┬──────────────┬────────────────┤
-│   HTTP :80   │ HTTPS :443   │ HTTP/3 :443  │ Registry :81   │
-│  (redirect)  │   (TCP)      │    (UDP)     │    (TCP)       │
-└──────┬───────┴──────┬───────┴──────┬───────┴────────┬───────┘
-       │              │              │                │
-       │              ▼              ▼                ▼
-       │        ┌──────────┐  ┌──────────┐   ┌──────────────┐
-       │        │  TLS     │  │  QUIC    │   │   Service    │
-       ▼        │ (H2/H1)  │  │  (H3)    │   │  Registry    │
-   301 HTTPS    └────┬─────┘  └────┬─────┘   └──────┬───────┘
-                     │             │                 │
-                     ▼             ▼                 ▼
-              ┌────────────────────────────────────────┐
-              │         Route Manager                   │
-              │  - Domain+Path → Backend mapping       │
-              │  - Security headers                     │
-              │  - Blackhole unknown domains           │
-              └──────────┬─────────────────────────────┘
-                         ▼
-                  ┌─────────────┐
-                  │   Backends  │
-                  ├─────────────┤
-                  │ app:8080    │
-                  │ api:9000    │
-                  │ web:80      │
-                  └─────────────┘
-```
+### Security
+- **WAF** (Web Application Firewall) - SQL injection, XSS, path traversal protection
+- **Rate Limiting** - Per-IP and per-route request throttling
+- **GDPR Compliance** - PII masking with configurable IP anonymization
+- **Security Headers** - HSTS, CSP, X-Frame-Options, etc.
+- **GeoIP Filtering** - Country-based access control with alerts
 
-## Quick Start
+### Observability
+- **Metrics** - Prometheus-compatible metrics on `:8080/metrics`
+- **Access Logs** - Structured JSON logging with SQLite persistence
+- **Certificate Monitoring** - Automatic expiry alerts (30/7/1 days)
+- **Health Dashboard** - Real-time status on `:8080/health`
+- **Traffic Analytics** - Request/response time analysis, error rates
+- **Webhook Alerts** - Discord/Slack notifications for incidents
 
-### Docker Compose
+### Operations
+- **Automated Backups** - Full, differential, and incremental SQLite backups
+- **Data Retention** - Configurable retention policies (GDPR-compliant)
+- **Audit Logging** - Compliance-ready security event tracking
+- **Maintenance Mode** - Per-service maintenance pages
+- **Compression** - Brotli and Gzip with intelligent content-type detection
+
+## 🚀 Quick Start
+
+### 1. Create Global Configuration
 
 ```yaml
-version: '3.8'
-services:
-  proxy:
-    image: proxy-manager:latest
-    ports:
-      - "80:80"
-      - "443:443/tcp"
-      - "443:443/udp"  # HTTP/3
-      - "81:81"        # Service registry
-    volumes:
-      - ./sites-available:/etc/proxy/sites-available:ro
-      - ./global.yaml:/etc/proxy/global.yaml:ro
-      - /path/to/certs:/etc/proxy/certs:ro  # Mount your SSL certificates
-    environment:
-      - DEBUG=0
-      - SITES_PATH=/etc/proxy/sites-available
-```
+# global.yaml
+defaults:
+  headers:
+    Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+    X-Frame-Options: DENY
+    X-Content-Type-Options: nosniff
+  
+  options:
+    health_check_interval: 30s
+    timeout: 30s
+    compression: true
+    http2: true
+    http3: true
 
-### TLS Certificate Setup
+blackhole:
+  unknown_domains: true
 
-See [CERTIFICATE_SETUP.md](CERTIFICATE_SETUP.md) for detailed instructions.
-
-Quick example in `global.yaml`:
-```yaml
 tls:
   certificates:
     - domains:
@@ -89,11 +71,10 @@ tls:
       key_file: /etc/proxy/certs/example.com/privkey.pem
 ```
 
-### Static Configuration (YAML)
-
-Create `/etc/proxy/sites-available/myapp.yaml`:
+### 2. Create Site Configuration
 
 ```yaml
+# sites-available/myapp.yaml
 enabled: true
 
 service:
@@ -103,404 +84,212 @@ service:
 routes:
   - domains:
       - myapp.example.com
-      - www.myapp.example.com
     path: /
     backend: http://myapp:8080
-
-headers:
-  X-Frame-Options: SAMEORIGIN
 
 options:
   health_check_path: /health
   timeout: 30s
-```
-
-### Dynamic Registration (Protocol)
-
-From your service container:
-
-```bash
-#!/bin/bash
-exec 3<>/dev/tcp/proxy/81
-
-# Register service
-echo "REGISTER|myapp|myapp|8080|8081" >&3
-read -u 3 response
-SESSION_ID=$(echo "$response" | cut -d'|' -f2)
-
-# Add route
-echo "ROUTE|$SESSION_ID|myapp.example.com,www.myapp.example.com|/|http://myapp:8080" >&3
-read -u 3 response
-
-# Add security header
-echo "HEADER|$SESSION_ID|X-Frame-Options|SAMEORIGIN" >&3
-read -u 3 response
-
-# Keep connection open
-while true; do sleep 60; done
-```
-
-## Configuration
-
-### Global Config (`/etc/proxy/global.yaml`)
-
-```yaml
-defaults:
-  headers:
-    Strict-Transport-Security: max-age=31536000; includeSubDomains
-    X-Frame-Options: DENY
-    X-Content-Type-Options: nosniff
-    X-XSS-Protection: 1; mode=block
-    Referrer-Policy: strict-origin-when-cross-origin
   
-  options:
-    health_check_interval: 30s
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
     timeout: 30s
-    max_body_size: 100M
-    compression: true
-    http2: true
-    http3: true
-
-blackhole:
-  unknown_domains: true
-  metrics_only: true
-
-tls:
-  auto_cert: true
-  cert_email: admin@example.com
-  cache_dir: /etc/proxy/certs
-```
-
-### Site Config Fields
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `enabled` | bool | Enable/disable site | Yes |
-| `service.name` | string | Service identifier | Yes |
-| `service.maintenance_port` | int | Port for maintenance handshake | No |
-| `routes` | array | Routing rules | Yes |
-| `routes[].domains` | array | List of domains | Yes |
-| `routes[].path` | string | URL path prefix | Yes |
-| `routes[].backend` | string | Backend URL | Yes |
-| `routes[].websocket` | bool | Enable WebSocket support | No |
-| `routes[].headers` | map | Route-specific headers | No |
-| `headers` | map | Global service headers | No |
-| `options` | object | Service options | No |
-
-### Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `health_check_path` | string | `/` | Health check endpoint |
-| `health_check_interval` | duration | `30s` | Check interval |
-| `health_check_timeout` | duration | `5s` | Check timeout |
-| `timeout` | duration | `30s` | Backend timeout |
-| `max_body_size` | size | `100M` | Max request body |
-| `compression` | bool | `true` | Enable gzip compression |
-| `websocket` | bool | `false` | Enable WebSocket |
-| `http2` | bool | `true` | Enable HTTP/2 |
-| `http3` | bool | `true` | Enable HTTP/3 |
-
-## Service Registry Protocol
-
-### Connection Commands
-
-**REGISTER** - New service registration
-```
-Client → Server: REGISTER|service_name|hostname|service_port|maintenance_port\n
-Server → Client: ACK|session_id\n
-```
-
-**RECONNECT** - Reconnect with existing session
-```
-Client → Server: RECONNECT|session_id\n
-Server → Client: OK\n (if valid) or REREGISTER\n (if expired)
-```
-
-### Configuration Commands
-
-**ROUTE** - Add routing rule
-```
-Client → Server: ROUTE|session_id|domain1,domain2|path|backend_url\n
-Server → Client: ROUTE_OK\n
-
-Example:
-ROUTE|sess123|example.com,www.example.com|/|http://web:80
-```
-
-**HEADER** - Add response header
-```
-Client → Server: HEADER|session_id|header_name|header_value\n
-Server → Client: HEADER_OK\n
-
-Example:
-HEADER|sess123|X-Frame-Options|SAMEORIGIN
-```
-
-**OPTIONS** - Set service option
-```
-Client → Server: OPTIONS|session_id|key|value\n
-Server → Client: OPTIONS_OK\n
-
-Examples:
-OPTIONS|sess123|timeout|60s
-OPTIONS|sess123|websocket|true
-OPTIONS|sess123|max_body_size|10M
-```
-
-**VALIDATE** - Verify configuration
-```
-Client → Server: VALIDATE|session_id|client_hash\n
-Server → Client: VALID|parity_bit\n or MISMATCH|server_hash\n
-```
-
-### Shutdown Commands
-
-**SHUTDOWN** - Graceful client shutdown
-```
-Client → Server: SHUTDOWN|session_id\n
-Server → Client: SHUTDOWN_OK\n
-```
-Routes removed immediately. Session deleted.
-
-**Server Shutdown** - Server notification
-```
-Server → Client: SHUTDOWN\n
-```
-Proxy is shutting down. Services should handle cleanup.
-
-**Unexpected Disconnect** - Connection drop without SHUTDOWN
-- Routes retained for 5 minutes (configurable)
-- Session remains valid for RECONNECT
-- Automatic cleanup after grace period
-
-### Maintenance Mode
-
-**Enter Maintenance**
-```
-Client → Server: MAINT_ENTER|hostname:port|maintenance_port\n
-Server → Client: ACK\n
-[Proxy disables routes]
-Server → Maintenance Port: MAINT_APPROVED\n
-Client → Server: ACK\n
-```
-
-**Exit Maintenance**
-```
-Client → Server: MAINT_EXIT|hostname:port\n
-Server → Client: ACK\n
-[Proxy re-enables routes]
-Server → Maintenance Port: SWITCHBACK_APPROVED\n
-```
-
-## Examples
-
-### Simple Web App
-
-```yaml
-enabled: true
-
-service:
-  name: webapp
-
-routes:
-  - domains:
-      - example.com
-      - www.example.com
-    path: /
-    backend: http://web:80
-
-options:
-  timeout: 30s
-```
-
-### API with Multiple Versions
-
-```yaml
-enabled: true
-
-service:
-  name: api
-
-routes:
-  - domains:
-      - api.example.com
-    path: /v1
-    backend: http://api-v1:8080
   
-  - domains:
-      - api.example.com
-    path: /v2
-    backend: http://api-v2:9000
-    websocket: true
-
-headers:
-  Access-Control-Allow-Origin: "*"
-
-options:
-  timeout: 60s
+  rate_limit:
+    enabled: true
+    requests_per_min: 60
+    per_ip: true
 ```
 
-### Multi-Domain with Per-Domain Headers
-
-```yaml
-enabled: true
-
-service:
-  name: platform
-
-routes:
-  - domains:
-      - example.com
-    path: /
-    backend: http://web:80
-    headers:
-      X-Frame-Options: SAMEORIGIN
-  
-  - domains:
-      - admin.example.com
-    path: /
-    backend: http://admin:3000
-    headers:
-      X-Frame-Options: DENY
-      Content-Security-Policy: default-src 'self'
-
-headers:
-  Strict-Transport-Security: max-age=31536000
-```
-
-## Health Checks
-
-### HTTP Endpoints
-
-- `GET /health` - Comprehensive health check
-- `GET /ready` - Readiness probe
-- `GET /metrics` - Prometheus metrics
+### 3. Run with Docker
 
 ```bash
-curl http://localhost:8080/health
-# Response: "healthy"
-
-curl http://localhost:8080/metrics
-# Response: Prometheus format
-# blackhole_requests_total 42
+docker run -d \
+  --name go-proxy \
+  -p 80:80 \
+  -p 443:443 \
+  -p 8080:8080 \
+  -v /path/to/certs:/etc/proxy/certs:ro \
+  -v /path/to/sites:/etc/proxy/sites-available:ro \
+  -v /path/to/global.yaml:/etc/proxy/global.yaml:ro \
+  -v proxy-data:/data \
+  ghcr.io/chilla55/go-proxy:latest
 ```
 
-## Environment Variables
+## 📖 Configuration
+
+### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SITES_PATH` | `/etc/proxy/sites-available` | Site configs directory |
-| `GLOBAL_CONFIG` | `/etc/proxy/global.yaml` | Global config file |
+| `SITES_PATH` | `/etc/proxy/sites-available` | Site configuration directory |
+| `GLOBAL_CONFIG` | `/etc/proxy/global.yaml` | Global config file path |
+| `DB_PATH` | `/data/proxy.db` | SQLite database location |
+| `BACKUP_DIR` | `/mnt/storagebox/backups/proxy` | Backup destination |
 | `HTTP_ADDR` | `:80` | HTTP listen address |
 | `HTTPS_ADDR` | `:443` | HTTPS listen address |
+| `HEALTH_PORT` | `8080` | Health/metrics server port |
 | `REGISTRY_PORT` | `81` | Service registry port |
-| `HEALTH_PORT` | `8080` | Health check port |
-| `UPSTREAM_CHECK_TIMEOUT` | `2s` | Upstream timeout |
-| `DEBUG` | `0` | Enable debug logging |
+| `DEBUG` | `0` | Enable debug logging (1=on) |
+| `TZ` | `UTC` | Timezone for logs |
 
-## Security
+### Site Configuration Options
 
-### Blackhole Behavior
+Complete configuration reference: [CONFIGURATION.md](CONFIGURATION.md)
 
-Unknown domains (not in any route) are blackholed:
-1. Connection hijacked immediately
-2. No HTTP response sent
-3. Counter incremented (metrics only)
-4. Connection closed
+**Route Options:**
+- `domains` - List of domain names
+- `path` - URL path prefix
+- `backend` - Upstream server URL
+- `websocket` - Enable WebSocket support
+- `headers` - Custom response headers
 
-This prevents:
-- Information disclosure to scanners
-- Bandwidth waste on invalid traffic
-- Domain fronting attacks
+**Advanced Features:**
+- `timeouts` - Connect, read, write, idle timeouts
+- `circuit_breaker` - Failure detection and recovery
+- `rate_limit` - Request throttling per IP/route
+- `waf` - Web Application Firewall rules
+- `pii` - GDPR-compliant data masking
+- `geoip` - Geographic access control
+- `compression` - Brotli/Gzip configuration
+- `retry` - Automatic retry with backoff
+- `connection_pool` - HTTP connection tuning
 
-### Default Security Headers
+## 🔧 Service Registry
 
-Applied to all requests unless overridden:
-- `Strict-Transport-Security: max-age=31536000; includeSubDomains`
-- `X-Frame-Options: DENY`
-- `X-Content-Type-Options: nosniff`
-- `X-XSS-Protection: 1; mode=block`
-- `Referrer-Policy: strict-origin-when-cross-origin`
+Backends can dynamically register/deregister routes via HTTP on port `81`:
 
-### Automatic HTTPS
-
-- Let's Encrypt integration via autocert
-- Automatic certificate issuance and renewal
-- HTTP to HTTPS redirect (301)
-- TLS 1.2+ only
-
-## Performance
-
-### Benchmarks (200 avg / 500 peak users)
-
-- **Latency**: <5ms added overhead
-- **Throughput**: 10,000+ req/s per core
-- **Memory**: ~50MB base + ~10KB per active connection
-- **HTTP/3**: 30% faster than HTTP/2 on high-latency networks
-
-### Tuning
-
-For higher loads:
-```yaml
-options:
-  timeout: 60s
-  max_body_size: 10M
-  compression: false  # Disable if backends handle it
+### Register Route
+```bash
+curl -X POST http://proxy:81/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "host": "api.example.com",
+    "path": "/v2",
+    "backend": "http://api-v2:9000",
+    "options": {
+      "timeout": "60s",
+      "websocket": true
+    }
+  }'
 ```
 
-## Building
-
+### Deregister Route
 ```bash
-# Build binary
-cd proxy-manager
-go build -o proxy-manager .
-
-# Build Docker image
-docker build -t proxy-manager:latest .
-
-# Run locally
-./proxy-manager \
-  --sites-path=/etc/proxy/sites-available \
-  --global-config=/etc/proxy/global.yaml \
-  --debug
+curl -X POST http://proxy:81/deregister \
+  -H "Content-Type: application/json" \
+  -d '{
+    "host": "api.example.com",
+    "path": "/v2"
+  }'
 ```
 
-## Migration
+## 📊 Monitoring
 
-If migrating from another proxy, convert existing virtual hosts to site YAMLs and mount them at `/etc/proxy/sites-available`. Then deploy the go-proxy stack and verify via `curl http://localhost:8080/health`.
-
-## Troubleshooting
-
-### Check loaded routes
+### Health Check
 ```bash
-# View proxy logs
-docker logs proxy-manager
-
-# Check health
 curl http://localhost:8080/health
 ```
 
-### Test configuration
+### Prometheus Metrics
 ```bash
-# Validate YAML syntax
-yamllint /etc/proxy/sites-available/myapp.yaml
-
-# Check if site is loaded
-docker logs proxy-manager | grep "Loaded site config"
+curl http://localhost:8080/metrics
 ```
 
-### Debug mode
+**Available Metrics:**
+- `proxy_requests_total` - Total request count
+- `proxy_request_duration_seconds` - Request latency histogram
+- `proxy_backend_errors_total` - Backend error count
+- `proxy_circuit_breaker_state` - Circuit breaker status
+- `proxy_active_connections` - Current active connections
+- `proxy_certificate_expiry_days` - Certificate expiration time
+
+### Logs
+All logs are structured JSON written to stdout and SQLite database:
+
 ```bash
-docker run -e DEBUG=1 proxy-manager:latest
+docker logs -f go-proxy
 ```
 
-## License
+Access log table: `access_logs` (30-day retention)  
+Security events: `security_events` (90-day retention)  
+Audit trail: `audit_log` (365-day retention)
 
-MIT
+## 🔐 Security Best Practices
 
-## See Also
+1. **Enable WAF** - Protect against common web attacks
+2. **Rate Limiting** - Prevent abuse and DDoS
+3. **GDPR Compliance** - Mask PII in logs (IPs, headers)
+4. **Certificate Monitoring** - Set up webhook alerts for expiry
+5. **GeoIP Filtering** - Block unexpected geographic regions
+6. **Security Headers** - Use strong defaults from global config
+7. **Audit Logging** - Enable for compliance requirements
 
-- [Example Configs](./example-simple.yaml)
-- [Global Config Template](./global.yaml)
-- [Service Registry Protocol](docs/protocol.md)
+## 📦 Automated Backups
+
+Built-in SQLite backup system with cron scheduling:
+
+- **Full Backup** - Every Sunday at 01:00 UTC
+- **Differential** - Every Wednesday at 02:00 UTC
+- **Incremental** - Every hour on the hour
+- **Retention Cleanup** - Daily at 03:00 UTC
+
+Backups stored in `BACKUP_DIR` with automatic rotation.
+
+## 🐳 Docker Swarm Deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for complete Docker Swarm setup including:
+- Stack deployment with compose file
+- Volume mount configuration
+- Health check integration
+- Rolling updates
+- Troubleshooting
+
+## 🛠️ Development
+
+### Build from Source
+```bash
+cd proxy-manager
+go build -o proxy-manager .
+./proxy-manager --help
+```
+
+### Run Tests
+```bash
+cd proxy-manager
+go test -v ./...
+```
+
+### Generate Coverage
+```bash
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+```
+
+## 📋 Examples
+
+Check the `sites-available/` directory for example configurations:
+- `example-simple.yaml` - Basic single-domain site
+- `example-multi-domain.yaml` - Multi-domain with wildcard certs
+- `example-api-gateway.yaml` - API gateway with WebSocket
+
+## 🤝 Contributing
+
+This is a private project for production use. For issues or feature requests, contact the maintainer.
+
+## 📄 License
+
+Proprietary - All rights reserved.
+
+## 🔗 Related Projects
+
+- **nginx** - Traditional nginx container (legacy, being phased out)
+- **certbot** - Let's Encrypt certificate automation
+- **mariadb** - Database service with automated backups
+- **postgresql** - PostgreSQL with backup strategy
+- **redis** - Redis cache service
+
+---
+
+**Built with Go 1.22** | **Production-ready since 2025** | **Zero-downtime deployments**
