@@ -282,7 +282,7 @@ func loadConfig(path string) (*Config, error) {
         ListenAddr:      getEnv("PROXY_LISTEN_ADDR", ":80"),
         MetricsAddr:     getEnv("PROXY_METRICS_ADDR", "127.0.0.1:8080"),
         DatabasePath:    getEnv("PROXY_DB_PATH", "/data/proxy.db"),
-        SitesDir:        getEnv("PROXY_SITES_DIR", "/etc/nginx/sites-enabled"),
+        SitesDir:        getEnv("PROXY_SITES_DIR", "/etc/proxy/sites-available"),
         CertsDir:        getEnv("PROXY_CERTS_DIR", "/mnt/storagebox/certs"),
         ShutdownTimeout: getDurationEnv("PROXY_SHUTDOWN_TIMEOUT", 30*time.Second),
     }
@@ -406,7 +406,7 @@ func performStartupChecks(cfg *Config) error {
 PROXY_LISTEN_ADDR=:80
 PROXY_METRICS_ADDR=127.0.0.1:8080
 PROXY_DB_PATH=/data/proxy.db
-PROXY_SITES_DIR=/etc/nginx/sites-enabled
+PROXY_SITES_DIR=/etc/proxy/sites-available
 PROXY_CERTS_DIR=/mnt/storagebox/certs
 PROXY_SHUTDOWN_TIMEOUT=30s
 LOG_LEVEL=info
@@ -956,62 +956,118 @@ w.Header().Set("X-Request-ID", requestID)
 log.Printf("[%s] Request: %s %s", requestID, r.Method, r.URL.Path)
 ```
 
-**User Experience:**
-```html
-<!-- Error page shows request ID -->
-<h1>502 Bad Gateway</h1>
-<p>Request ID: abc123-def456-789</p>
-<p>Please include this ID when reporting issues.</p>
+**docker-compose.swarm.yml:**
+```yaml
+version: '3.8'
+
+services:
+  proxy:
+    image: ghcr.io/chilla55/go-proxy:latest
+    networks:
+      - web-net
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.web.node == web
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 8G
+        reservations:
+          cpus: '1'
+          memory: 4G
+
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: 443
+        protocol: udp
+        mode: host
+      - target: 81
+        published: 81
+        protocol: tcp
+        mode: host
+      - target: 8080
+        published: 8080
+        protocol: tcp
+        mode: host
+
+    environment:
+      DEBUG: "0"
+      SITES_PATH: "/etc/proxy/sites-available"
+      GLOBAL_CONFIG: "/etc/proxy/global.yaml"
+      DB_PATH: "/data/proxy.db"
+      BACKUP_DIR: "/mnt/storagebox/backups/proxy"
+      TZ: "UTC"
+
+    configs:
+      - source: proxy_global_config
+        target: /etc/proxy/global.yaml
+        mode: 0444
+
+    volumes:
+      # Mount Let's Encrypt certificates with rslave propagation
+      - type: bind
+        source: /mnt/storagebox/certs
+        target: /etc/proxy/certs
+        read_only: true
+        bind:
+          propagation: rslave
+
+      # Mount site configurations with rslave propagation
+      - type: bind
+        source: /mnt/storagebox/sites
+        target: /etc/proxy/sites-available
+        read_only: true
+        bind:
+          propagation: rslave
+      # Persist SQLite DB
+      - type: volume
+        source: proxy-data
+        target: /data
+
+      # Backups directory (bind from Storage Box)
+      - type: bind
+        source: /mnt/storagebox/backups/proxy
+        target: /mnt/storagebox/backups/proxy
+        bind:
+          propagation: rslave
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+configs:
+  proxy_global_config:
+    file: ./global.yaml
+
+networks:
+  web-net:
+    external: true
+
+volumes:
+  proxy-data:
 ```
-
----
-
-### Task #3: AI-Ready Context Export
-
-**Endpoint:** `GET /api/ai-context?format=markdown`
-
-**Output Format:**
-```markdown
-# Proxy Status Report - 2025-12-18 14:32:15 UTC
-
-## System Overview
-- Uptime: 3d 14h 23m
-- Active Connections: 42
-- Error Rate (24h): 0.02%
-
-## Routes Configuration
-### gpanel.chilla55.de (HTTPS)
-- Backend: pterodactyl_panel:8080
-- Status: ✅ Healthy
-- Certificate: Valid until 2025-03-15 (87 days)
-- Traffic (24h): 45,231 requests
-
-## Recent Errors (Last 100)
-1. [14:31:42] 502 Bad Gateway - timeout after 30s
-
-## Suggested Analysis Questions:
-- Why is api.example.com showing 50% health check failures?
-- Should I be concerned about the 502 errors?
-```
-
-**Use Case:**
-```bash
-curl http://localhost:8080/api/ai-context | pbcopy
-# Paste into ChatGPT with "What's wrong?"
-```
-
----
-
-## 7. Phase 4: Performance & Optimization (Weeks 6-7)
-
-**Duration**: 7 days  
-**Priority**: P2 - MEDIUM  
-**Goal**: Optimize for gaming community load patterns
-
-### Task #26: WebSocket Connection Tracking
-
-**Problem**: Pterodactyl console uses WebSockets heavily; need visibility.
-
 **Metrics:**
 - Active WebSocket connections per route
 - Connection duration tracking
@@ -1219,9 +1275,9 @@ open http://localhost:8080/dashboard
 ```yaml
 host: gpanel.chilla55.de
 error_pages:
-  404: /etc/nginx/error-pages/404.html
-  502: /etc/nginx/error-pages/maintenance.html
-  503: /etc/nginx/error-pages/maintenance.html
+  404: /etc/proxy/error-pages/404.html
+  502: /etc/proxy/error-pages/maintenance.html
+  503: /etc/proxy/error-pages/maintenance.html
 ```
 
 **Template Variables:**
@@ -1494,8 +1550,8 @@ RUN addgroup -g 1000 proxy && \
     adduser -D -u 1000 -G proxy proxy
 
 # Create directories
-RUN mkdir -p /data /etc/nginx/sites-enabled /etc/nginx/error-pages /var/log && \
-    chown -R proxy:proxy /data /var/log
+RUN mkdir -p /data /etc/proxy/sites-available /etc/proxy/error-pages /var/log && \
+  chown -R proxy:proxy /data /var/log
 
 COPY --from=builder /build/proxy-manager /usr/local/bin/
 COPY --chmod=755 backup-*.sh cleanup-retention.sh /usr/local/bin/
@@ -1569,9 +1625,9 @@ version: '3.8'
 
 services:
   proxy:
-    image: ghcr.io/chilla55/proxy-manager:latest
+    image: ghcr.io/chilla55/go-proxy:latest
     networks:
-      - web
+      - web-net
     ports:
       - target: 80
         published: 80
@@ -1579,34 +1635,33 @@ services:
       - target: 443
         published: 443
         mode: host
-      # Metrics port NOT published (localhost only)
+      # Metrics port published on 8080 for health/debug
     volumes:
       - type: bind
         source: /mnt/storagebox/certs
-        target: /mnt/storagebox/certs
+        target: /etc/proxy/certs
+        read_only: true
         bind:
           propagation: rslave
       - type: bind
-        source: /etc/nginx/sites-enabled
-        target: /etc/nginx/sites-enabled
+        source: /mnt/storagebox/sites
+        target: /etc/proxy/sites-available
         read_only: true
+        bind:
+          propagation: rslave
       - proxy-data:/data
     environment:
-      - TZ=Europe/Berlin
-      - LOG_LEVEL=info
-      - LOG_FORMAT=json
-      - PROXY_LISTEN_ADDR=:80
-      - PROXY_METRICS_ADDR=127.0.0.1:8080
-      - PROXY_DB_PATH=/data/proxy.db
-      - PROXY_SITES_DIR=/etc/nginx/sites-enabled
-      - PROXY_CERTS_DIR=/mnt/storagebox/certs
-      - PROXY_SHUTDOWN_TIMEOUT=30s
+      - TZ=UTC
+      - SITES_PATH=/etc/proxy/sites-available
+      - GLOBAL_CONFIG=/etc/proxy/global.yaml
+      - DB_PATH=/data/proxy.db
+      - BACKUP_DIR=/mnt/storagebox/backups/proxy
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
-          - node.labels.web == true
+          - node.labels.web.node == web
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -2256,7 +2311,7 @@ func handleStartup(w http.ResponseWriter, r *http.Request) {
 ### Full Example: Pterodactyl Panel
 
 ```yaml
-# /etc/nginx/sites-enabled/gpanel.chilla55.de.yml
+# /etc/proxy/sites-available/gpanel.chilla55.de.yaml
 host: gpanel.chilla55.de
 backend: http://pterodactyl_panel:8080
 
@@ -2336,8 +2391,8 @@ circuit_breaker:
   timeout: 30s
 
 error_pages:
-  502: /etc/nginx/error-pages/maintenance.html
-  503: /etc/nginx/error-pages/maintenance.html
+  502: /etc/proxy/error-pages/maintenance.html
+  503: /etc/proxy/error-pages/maintenance.html
 ```
 
 ---

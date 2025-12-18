@@ -51,7 +51,7 @@ vet: ## Run go vet
 	cd $(WORKDIR) && go vet ./...
 
 lint: ## Run golangci-lint
-	cd nginx-manager && golangci-lint run
+	cd $(WORKDIR) && golangci-lint run
 
 docker-build: ## Build Docker image
 	@echo "Building Docker image $(DOCKER_IMAGE):$(VERSION)..."
@@ -78,14 +78,14 @@ docker-push: ## Push Docker image to registry
 clean: ## Clean build artifacts
 	@echo "Cleaning..."
 	rm -f $(BINARY_NAME)
-	rm -f nginx-manager/$(BINARY_NAME)
+	rm -f $(WORKDIR)/$(BINARY_NAME)
 	@echo "Clean complete"
 
 deps: ## Download dependencies
-	cd nginx-manager && go mod download
+	cd $(WORKDIR) && go mod download
 
 tidy: ## Tidy go.mod
-	cd nginx-manager && go mod tidy
+	cd $(WORKDIR) && go mod tidy
 
 gen-test-cert: ## Generate self-signed test certificate (usage: make gen-test-cert DOMAIN=test.local)
 	@./generate-test-cert.sh $(or $(DOMAIN),test.local)

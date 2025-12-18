@@ -1,6 +1,6 @@
 # Pure Go Reverse Proxy with HTTP/3
 
-A high-performance reverse proxy written entirely in Go, replacing nginx with native HTTP/2, HTTP/3 (QUIC), automatic HTTPS, and dynamic service registration.
+A high-performance reverse proxy written entirely in Go with native HTTP/2, HTTP/3 (QUIC), automatic HTTPS, and dynamic service registration.
 
 ## Features
 
@@ -466,34 +466,9 @@ docker build -t proxy-manager:latest .
   --debug
 ```
 
-## Migration from nginx
+## Migration
 
-1. Convert nginx configs to YAML:
-```nginx
-# Old nginx config
-server {
-    listen 443 ssl;
-    server_name example.com;
-    location / {
-        proxy_pass http://web:80;
-    }
-}
-```
-
-```yaml
-# New YAML config
-enabled: true
-service:
-  name: web
-routes:
-  - domains: [example.com]
-    path: /
-    backend: http://web:80
-```
-
-2. Update docker-compose.yml
-3. Deploy new proxy-manager image
-4. Verify routes: `curl http://localhost:8080/metrics`
+If migrating from another proxy, convert existing virtual hosts to site YAMLs and mount them at `/etc/proxy/sites-available`. Then deploy the go-proxy stack and verify via `curl http://localhost:8080/health`.
 
 ## Troubleshooting
 

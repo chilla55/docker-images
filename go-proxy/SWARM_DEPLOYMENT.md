@@ -48,23 +48,23 @@ mount | grep storagebox
 
 ```bash
 # Build image
-docker build -t ghcr.io/chilla55/nginx:latest .
+docker build -t ghcr.io/chilla55/go-proxy:latest .
 
 # Push to registry
-docker push ghcr.io/chilla55/nginx:latest
+docker push ghcr.io/chilla55/go-proxy:latest
 ```
 
 ## Deploy
 
 ```bash
 # Deploy stack
-docker stack deploy -c docker-compose.swarm.yml nginx
+docker stack deploy -c docker-compose.swarm.yml proxy
 
 # Check services
-docker service ls | grep nginx
+docker service ls | grep proxy
 
 # Check logs
-docker service logs -f nginx_nginx
+docker service logs -f proxy_proxy
 
 # You should see:
 # [proxy-manager] Loaded certificate for domains: [*.chilla55.de chilla55.de]
@@ -84,7 +84,7 @@ curl http://srv1:8080/metrics
 
 # Test HTTPS with your domain
 curl -I https://gpanel.chilla55.de
-# Expected: HTTP/2 200
+"Expected: HTTP/2 200"
 ```
 
 ## Certificate Paths in Container

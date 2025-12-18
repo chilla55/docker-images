@@ -15,7 +15,7 @@ Use this checklist to verify the certificate refactoring is working correctly.
 ### 1. Generate Test Certificates
 
 ```bash
-cd /media/chilla55/New\ Volume/__________Docker/docker-images/nginx
+cd /media/chilla55/New\ Volume/__________Docker/docker-images/go-proxy
 
 # Generate self-signed cert
 make gen-test-cert DOMAIN=test.local
