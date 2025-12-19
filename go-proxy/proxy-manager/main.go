@@ -235,7 +235,7 @@ func main() {
 	}
 }
 
-func startHealthServer(ctx context.Context, port int, proxyServer *proxy.Server, metricsCollector *metrics.Collector, accessLogger *accesslog.Logger, certMonitor *certmonitor.Monitor, healthChecker *health.Checker, analyticsAggregator *analytics.Aggregator, trafficAnalyzer *traffic.Analyzer, dbConn *database.Database, dashboardEnabled bool) {
+func startHealthServer(ctx context.Context, port int, proxyServer *proxy.Server, metricsCollector *metrics.Collector, accessLogger *accesslog.Logger, certMonitor *certmonitor.Monitor, healthChecker *health.Checker, analyticsAggregator *analytics.Aggregator, trafficAnalyzer *traffic.Analyzer, dbConn *database.DB, dashboardEnabled bool) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
