@@ -3,7 +3,7 @@
 FROM golang:1.21-alpine AS builder
 
 WORKDIR /build
-COPY main.go .
+COPY main.go go.mod ./
 RUN go build -o entrypoint .
 
 FROM node:20-alpine
