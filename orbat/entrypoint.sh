@@ -28,6 +28,10 @@ echo "[Orbat] Auto-update check interval: ${UPDATE_CHECK_INTERVAL}s"
 # Cleanup function
 cleanup() {
     echo "[Orbat] Shutting down, closing persistent connection..."
+    if [ -n "$REGISTRY_KEEPALIVE_PID" ]; then
+        kill $REGISTRY_KEEPALIVE_PID 2>/dev/null || true
+        wait $REGISTRY_KEEPALIVE_PID 2>/dev/null || true
+    fi
     if [ -n "$SESSION_ID" ]; then
         send_registry_command "SHUTDOWN|$SESSION_ID" >/dev/null 2>&1
     fi
@@ -91,10 +95,16 @@ send_registry_command() {
     echo -ne "${cmd}\n" >&3
 
     local response=""
-    if read -t 5 -r response <&3; then
-        echo "$response"
-        return 0
-    fi
+    local retries=0
+    while [ $retries -lt 3 ]; do
+        if read -t 5 -r response <&3 2>/dev/null; then
+            if [ -n "$response" ]; then
+                echo "$response"
+                return 0
+            fi
+        fi
+        retries=$((retries + 1))
+    done
 
     echo ""
     return 1
@@ -149,26 +159,40 @@ register_with_proxy() {
     return 0
 }
 
-# Ensure registry connection is up; if lost, reconnect using saved session
-ensure_registry_connection() {
-    if [ -n "$REGISTRY_FD_OPEN" ]; then
-        return 0
-    fi
-    if open_registry_connection; then
-        # attempt to reuse saved session
-        if [ -z "$SESSION_ID" ] && [ -f "$SESSION_FILE" ]; then
-            SESSION_ID="$(cat "$SESSION_FILE" 2>/dev/null || echo "")"
+# Background process to keep registry connection alive by reading from socket
+maintain_registry_connection() {
+    echo "[Orbat] Registry keepalive monitor started"
+    while true; do
+        if [ -z "$REGISTRY_FD_OPEN" ] || [ -z "$SESSION_ID" ]; then
+            sleep 5
+            continue
         fi
-        if [ -n "$SESSION_ID" ]; then
-            local resp="$(send_registry_command "RECONNECT|$SESSION_ID")"
-            if [ "$resp" != "OK" ]; then
-                echo "[Orbat] Registry reconnect failed (${resp:-no response}); will re-register on next call"
-                SESSION_ID=""
+        
+        # Just keep reading from the socket to detect disconnection
+        # The socket should stay open as long as we keep it open
+        if ! read -t 60 -r line <&3 2>/dev/null; then
+            if [ $? -eq 124 ]; then
+                # Timeout reading - connection is still alive
+                :
             else
-                echo "[Orbat] Registry reconnected"
+                # Error or EOF - connection closed
+                echo "[Orbat] Registry connection lost, attempting to reconnect..."
+                REGISTRY_FD_OPEN=""
+                if open_registry_connection; then
+                    if [ -n "$SESSION_ID" ]; then
+                        local resp="$(send_registry_command "RECONNECT|$SESSION_ID")"
+                        if [ "$resp" = "OK" ]; then
+                            echo "[Orbat] Reconnected to registry"
+                        else
+                            echo "[Orbat] Reconnect failed, will re-register"
+                            SESSION_ID=""
+                        fi
+                    fi
+                fi
             fi
         fi
-    fi
+        sleep 5
+    done
 }
 
 enter_proxy_maintenance() {
@@ -440,6 +464,11 @@ update_status "startup" "Starting up" 5 "Registering with proxy and initializing
 if ! register_with_proxy; then
     echo "[Orbat] Warning: proxy registration failed"
 fi
+
+# Start registry connection keepalive
+maintain_registry_connection &
+REGISTRY_KEEPALIVE_PID=$!
+echo "[Orbat] Registry keepalive monitor started (PID: $REGISTRY_KEEPALIVE_PID)"
 
 # Enter maintenance mode to show progress page
 enter_proxy_maintenance
