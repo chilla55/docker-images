@@ -1,40 +1,41 @@
 #!/bin/bash
 # ============================================================================
-# Pterodactyl Panel Healthcheck Script
+# Pterodactyl Panel Healthcheck Script (4-Service Architecture)
 # ============================================================================
-# Simplified: Checks supervisord and HTTP endpoint
-# Supervisord handles individual process crashes
+# Checks different services based on running processes
 # ============================================================================
 
 set -e
 
-# ──────────────────────────────────────────────────────────────────────────
-# Check 1: Supervisord is running
-# ──────────────────────────────────────────────────────────────────────────
-if ! pgrep -x supervisord > /dev/null 2>&1; then
-    echo "[HEALTHCHECK ERROR] Supervisord not running" >&2
+# Detect which service is running
+if pgrep -f "php-fpm" > /dev/null 2>&1; then
+    # PHP-FPM: Check if listening on port 9000
+    if nc -z -w2 127.0.0.1 9000 2>/dev/null; then
+        echo "[HEALTHCHECK] PHP-FPM healthy (port 9000)"
+        exit 0
+    else
+        echo "[HEALTHCHECK ERROR] PHP-FPM not listening on port 9000" >&2
+        exit 1
+    fi
+elif pgrep -f "caddy" > /dev/null 2>&1; then
+    # Caddy: Check if HTTP endpoint responds
+    if curl -sf -o /dev/null --max-time 3 "http://localhost:80/" 2>/dev/null; then
+        echo "[HEALTHCHECK] Caddy healthy (port 80)"
+        exit 0
+    else
+        echo "[HEALTHCHECK ERROR] Caddy HTTP endpoint not responding" >&2
+        exit 1
+    fi
+elif pgrep -f "queue:work" > /dev/null 2>&1; then
+    # Queue worker: Check if process is running
+    echo "[HEALTHCHECK] Queue worker healthy"
+    exit 0
+elif pgrep -f "schedule:run" > /dev/null 2>&1 || pgrep -f "cron" > /dev/null 2>&1; then
+    # Cron: Check if process is running
+    echo "[HEALTHCHECK] Cron scheduler healthy"
+    exit 0
+else
+    echo "[HEALTHCHECK ERROR] No recognized service running" >&2
     exit 1
 fi
-
-# ──────────────────────────────────────────────────────────────────────────
-# Check 2: PHP-FPM socket exists and is accessible
-# ──────────────────────────────────────────────────────────────────────────
-if [ ! -S /run/php-fpm/pterodactyl.sock ]; then
-    echo "[HEALTHCHECK ERROR] PHP-FPM socket not found" >&2
-    exit 1
-fi
-
-# ──────────────────────────────────────────────────────────────────────────
-# Check 3: HTTP endpoint responds
-# ──────────────────────────────────────────────────────────────────────────
-if ! curl -sf -o /dev/null --max-time 3 "http://localhost:80/" 2>/dev/null; then
-    echo "[HEALTHCHECK ERROR] HTTP endpoint not responding" >&2
-    exit 1
-fi
-
-# ──────────────────────────────────────────────────────────────────────────
-# All Checks Passed
-# ──────────────────────────────────────────────────────────────────────────
-echo "[HEALTHCHECK] All checks passed - container healthy"
-exit 0
 

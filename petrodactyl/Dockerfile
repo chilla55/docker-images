@@ -111,6 +111,7 @@ RUN apk add --no-cache \
     curl \
     ca-certificates \
     tzdata \
+    netcat-openbsd \
     php83 \
     php83-fpm \
     php83-opcache \
