@@ -28,12 +28,15 @@ var (
 	serviceName       = getEnv("SERVICE_NAME", "orbat")
 	updateCheckIntvl  = getEnv("UPDATE_CHECK_INTERVAL", "300")
 
-	registryConn  net.Conn
-	registryMutex sync.Mutex
-	sessionID     string
-	maintenancePID int
-	updateChkPID  int
-	npmStartPID   int
+	registryConn      net.Conn
+	registryMutex     sync.Mutex
+	sessionID         string
+	registryCmdChan   chan string
+	registryRespChan  chan string
+	registryConnected bool
+	maintenancePID    int
+	updateChkPID      int
+	npmStartPID       int
 
 	done = make(chan os.Signal, 1)
 )
@@ -43,6 +46,48 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+func readSecret(secretName string) string {
+	data, err := os.ReadFile("/run/secrets/" + secretName)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func setupDatabaseURL() error {
+	// If DATABASE_URL is already set, skip
+	if os.Getenv("DATABASE_URL") != "" {
+		return nil
+	}
+
+	// Read individual components
+	dbHost := getEnv("DATABASE_HOST", "postgresql")
+	dbPort := getEnv("DATABASE_PORT", "5432")
+	dbName := getEnv("DATABASE_NAME", "orbat")
+	dbUser := getEnv("DATABASE_USER", "orbat")
+	dbSchema := getEnv("DATABASE_SCHEMA", "public")
+	dbPassword := readSecret("database_password")
+
+	if dbPassword == "" {
+		return fmt.Errorf("database_password secret not found")
+	}
+
+	// Construct DATABASE_URL
+	databaseURL := fmt.Sprintf(
+		"postgresql://%s:%s@%s:%s/%s?schema=%s",
+		dbUser,
+		dbPassword,
+		dbHost,
+		dbPort,
+		dbName,
+		dbSchema,
+	)
+
+	os.Setenv("DATABASE_URL", databaseURL)
+	log("DATABASE_URL configured from secrets and environment")
+	return nil
 }
 
 func log(format string, args ...interface{}) {
@@ -83,40 +128,77 @@ func connectRegistry() error {
 	}
 
 	registryConn = conn
-	log("Connected to registry at %s:%s", registryHost, registryPort)
+	registryConnected = true
+	log("Connected to registry at %s:%s (persistent)", registryHost, registryPort)
+
+	// Start background reader/writer
+	go handleRegistryConnection()
+
 	return nil
 }
 
-func sendRegistryCommand(cmd string) (string, error) {
-	registryMutex.Lock()
-	defer registryMutex.Unlock()
+func handleRegistryConnection() {
+	reader := bufio.NewReader(registryConn)
 
-	if registryConn == nil {
+	for {
+		select {
+		case cmd := <-registryCmdChan:
+			if cmd == "CLOSE" {
+				return
+			}
+			// Send command
+			registryConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			_, err := io.WriteString(registryConn, cmd+"\n")
+			if err != nil {
+				log("Failed to send command: %v", err)
+				registryConnected = false
+				registryRespChan <- "ERROR:" + err.Error()
+				continue
+			}
+
+			// Read response
+			registryConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+			response, err := reader.ReadString('\n')
+			if err != nil {
+				log("Failed to read response: %v", err)
+				registryConnected = false
+				registryRespChan <- "ERROR:" + err.Error()
+				continue
+			}
+
+			registryRespChan <- strings.TrimSpace(response)
+
+		case <-time.After(30 * time.Second):
+			// Keep connection alive with periodic check
+			if registryConnected {
+				// Silently keep connection open
+			}
+		}
+	}
+}
+
+func sendRegistryCommand(cmd string) (string, error) {
+	if !registryConnected {
 		return "", fmt.Errorf("registry not connected")
 	}
 
-	// Set write deadline
-	registryConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	_, err := io.WriteString(registryConn, cmd+"\n")
-	if err != nil {
-		log("Failed to send command: %v", err)
-		registryConn.Close()
-		registryConn = nil
-		return "", err
+	// Send command through channel
+	select {
+	case registryCmdChan <- cmd:
+	case <-time.After(5 * time.Second):
+		return "", fmt.Errorf("command send timeout")
 	}
 
-	// Set read deadline
-	registryConn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(registryConn)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		log("Failed to read response: %v", err)
-		registryConn.Close()
-		registryConn = nil
-		return "", err
+	// Wait for response
+	select {
+	case resp := <-registryRespChan:
+		if strings.HasPrefix(resp, "ERROR:") {
+			return "", fmt.Errorf(strings.TrimPrefix(resp, "ERROR:"))
+		}
+		return resp, nil
+	case <-time.After(15 * time.Second):
+		return "", fmt.Errorf("response timeout")
 	}
-
-	return strings.TrimSpace(response), nil
 }
 
 func registerWithProxy() error {
@@ -344,8 +426,17 @@ func main() {
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	defer cleanup()
 
+	// Initialize registry channels
+	registryCmdChan = make(chan string, 1)
+	registryRespChan = make(chan string, 1)
+
 	log("Starting entrypoint...")
 	log("Service: %s, Port: %s, Maintenance: %s", serviceName, port, maintenancePort)
+
+	// Setup DATABASE_URL from secrets before any database operations
+	if err := setupDatabaseURL(); err != nil {
+		log("WARNING: Failed to setup DATABASE_URL: %v", err)
+	}
 
 	// Ensure app directory exists
 	os.MkdirAll(appDir, 0755)
