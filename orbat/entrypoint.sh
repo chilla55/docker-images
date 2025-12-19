@@ -39,7 +39,7 @@ cleanup() {
         kill $REGISTRY_SOCAT_PID 2>/dev/null || true
         wait $REGISTRY_SOCAT_PID 2>/dev/null || true
     fi
-    rm -f "$REGISTRY_FIFO_IN" "$REGISTRY_FIFO_OUT"
+    rm -f "$REGISTRY_IN" "$REGISTRY_OUT"
 }
 
 trap cleanup EXIT INT TERM
@@ -72,53 +72,45 @@ update_status() {
 EOF
 }
 
-# Use named pipes for more reliable TCP connection handling
-REGISTRY_FIFO_IN="/tmp/orbat-registry-in"
-REGISTRY_FIFO_OUT="/tmp/orbat-registry-out"
+# Persistent TCP connection via socat
 REGISTRY_SOCAT_PID=""
+REGISTRY_IN="/tmp/orbat-reg-in"
+REGISTRY_OUT="/tmp/orbat-reg-out"
 
 open_registry_connection() {
     if [ -n "$REGISTRY_SOCAT_PID" ]; then
-        # Connection already open
         return 0
     fi
 
-    # Clean up old fifos
-    rm -f "$REGISTRY_FIFO_IN" "$REGISTRY_FIFO_OUT"
-    mkfifo "$REGISTRY_FIFO_IN" "$REGISTRY_FIFO_OUT" 2>/dev/null || return 1
+    rm -f "$REGISTRY_IN" "$REGISTRY_OUT"
+    mkfifo "$REGISTRY_IN" "$REGISTRY_OUT" 2>/dev/null || return 1
 
-    # Use socat to maintain persistent TCP connection
-    socat - TCP:$REGISTRY_HOST:$REGISTRY_PORT < "$REGISTRY_FIFO_IN" > "$REGISTRY_FIFO_OUT" &
+    # Start socat in background to keep persistent TCP connection
+    socat STDIN,raw,echo=0 TCP:$REGISTRY_HOST:$REGISTRY_PORT < "$REGISTRY_IN" > "$REGISTRY_OUT" 2>/dev/null &
     REGISTRY_SOCAT_PID=$!
-    
-    # Wait for connection to establish
     sleep 1
     
-    echo "[Orbat] Connected to registry at ${REGISTRY_HOST}:${REGISTRY_PORT} (socat PID: $REGISTRY_SOCAT_PID)"
+    echo "[Orbat] Connected to registry at ${REGISTRY_HOST}:${REGISTRY_PORT} (persistent connection)"
     return 0
 }
 
 send_registry_command() {
     local cmd="$1"
-    if [ -z "$REGISTRY_SOCAT_PID" ]; then
+    if [ -z "$REGISTRY_SOCAT_PID" ] || ! kill -0 $REGISTRY_SOCAT_PID 2>/dev/null; then
         return 1
     fi
 
-    # Send command through FIFO
-    echo "$cmd" > "$REGISTRY_FIFO_IN" &
-    local writer_pid=$!
-
+    # Send command
+    echo "$cmd" > "$REGISTRY_IN"
+    
     # Read response with timeout
     local response=""
-    if timeout 5 cat "$REGISTRY_FIFO_OUT" | read -r response; then
-        if [ -n "$response" ]; then
-            echo "$response"
-            wait $writer_pid 2>/dev/null || true
-            return 0
-        fi
-    fi
+    timeout 5 read -r response < "$REGISTRY_OUT" 2>/dev/null
     
-    wait $writer_pid 2>/dev/null || true
+    if [ -n "$response" ]; then
+        echo "$response"
+        return 0
+    fi
     echo ""
     return 1
 }
@@ -183,7 +175,7 @@ maintain_registry_connection() {
         
         # Check if socat process is still running
         if ! kill -0 $REGISTRY_SOCAT_PID 2>/dev/null; then
-            echo "[Orbat] Registry socat process died, attempting to reconnect..."
+            echo "[Orbat] Registry connection lost, attempting to reconnect..."
             REGISTRY_SOCAT_PID=""
             if open_registry_connection; then
                 if [ -n "$SESSION_ID" ]; then
