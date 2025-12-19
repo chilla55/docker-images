@@ -191,8 +191,12 @@ func (d *Dashboard) gatherDashboardData(ctx context.Context) (*DashboardData, er
 
 // getSystemStats calculates current system statistics
 func (d *Dashboard) getSystemStats() *SystemStats {
+	elapsed := time.Since(d.startTime)
+	if elapsed < time.Millisecond {
+		elapsed = time.Millisecond // ensure non-zero for tests/UI
+	}
 	return &SystemStats{
-		UptimeMs:         time.Since(d.startTime).Milliseconds(),
+		UptimeMs:         elapsed.Milliseconds(),
 		ActiveConnection: 0,   // TODO: get from metricsProvider
 		RequestsPerSec:   0.0, // TODO: calculate from metrics
 		ErrorRate:        0.0, // TODO: calculate from metrics
