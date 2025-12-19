@@ -108,7 +108,7 @@ services:
   # PHP-FPM Service (FastCGI server on port 9000)
   # ────────────────────────────────────────────────────────────────────────
   php-fpm:
-    image: ghcr.io/chilla55/pterodactyl-panel:nightly
+    image: ghcr.io/chilla55/pterodactyl-panel:latest
     hostname: pterodactyl-php-fpm
     
     command: ["/usr/sbin/php-fpm83", "-F", "-R"]
@@ -199,7 +199,7 @@ services:
   # Caddy HTTP Server (port 80, proxies to php-fpm:9000)
   # ────────────────────────────────────────────────────────────────────────
   caddy:
-    image: ghcr.io/chilla55/pterodactyl-panel:nightly
+    image: ghcr.io/chilla55/pterodactyl-panel:latest
     hostname: pterodactyl-caddy
     
     command: ["/usr/sbin/caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
@@ -251,7 +251,7 @@ services:
   # Queue Worker Service
   # ────────────────────────────────────────────────────────────────────────
   queue:
-    image: ghcr.io/chilla55/pterodactyl-panel:nightly
+    image: ghcr.io/chilla55/pterodactyl-panel:latest
     hostname: pterodactyl-queue
     
     command: ["php", "artisan", "queue:work", "--queue=high,standard,low", "--sleep=3", "--tries=3"]
@@ -299,7 +299,7 @@ services:
   # Cron/Scheduler Service
   # ────────────────────────────────────────────────────────────────────────
   cron:
-    image: ghcr.io/chilla55/pterodactyl-panel:nightly
+    image: ghcr.io/chilla55/pterodactyl-panel:latest
     hostname: pterodactyl-cron
     
     command: ["/bin/sh", "-c", "while true; do php artisan schedule:run >> /dev/null 2>&1; sleep 60; done"]
