@@ -137,7 +137,8 @@ RUN apk add --no-cache \
     caddy \
     mariadb-client && \
     ln -sf /usr/bin/php83 /usr/bin/php && \
-    ln -sf /usr/sbin/php-fpm83 /usr/sbin/php-fpm
+    ln -sf /usr/sbin/php-fpm83 /usr/sbin/php-fpm && \
+    rm -f /etc/php83/php-fpm.d/www.conf
 
 # Create nginx user and directories (use different GID since 101 is taken)
 RUN addgroup -g 1001 -S nginx && \
