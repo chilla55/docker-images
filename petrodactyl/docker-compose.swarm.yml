@@ -18,6 +18,10 @@ networks:
   
   redis-net:
     external: true
+  
+  pterodactyl-net:
+    driver: overlay
+    attachable: true
 
 # ──────────────────────────────────────────────────────────────────────────
 # Secrets
@@ -114,6 +118,7 @@ services:
     command: ["php-fpm"]
     
     networks:
+      - pterodactyl-net
       - mariadb-net
       - redis-net
     
@@ -205,6 +210,7 @@ services:
     command: ["caddy"]
     
     networks:
+      - pterodactyl-net
       - web-net
     
     volumes:
