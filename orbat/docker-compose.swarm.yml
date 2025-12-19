@@ -64,6 +64,13 @@ services:
       
       # Next.js configuration
       NEXT_TELEMETRY_DISABLED: "1"
+      
+      # go-proxy TCP registry (port 81)
+      REGISTRY_HOST: "proxy"
+      REGISTRY_PORT: "81"
+      DOMAINS: "orbat.chilla55.de"
+      ROUTE_PATH: "/"
+      BACKEND_HOST: "orbat"
     
     secrets:
       - nextauth_secret

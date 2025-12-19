@@ -6,12 +6,18 @@ APP_DIR="/app/repo"
 MAINTENANCE_PAGE="/maintenance.html"
 MAINTENANCE_ACTIVE="/tmp/maintenance_active"
 STATUS_FILE="/tmp/status.json"
-MAINTENANCE_APPROVED="/tmp/maintenance_approved"
-SWITCHBACK_APPROVED="/tmp/switchback_approved"
 UPDATE_CHECK_INTERVAL="${UPDATE_CHECK_INTERVAL:-300}"  # Check every 5 minutes by default
-MAINTENANCE_PORT="${MAINTENANCE_PORT:-3001}"  # Maintenance on separate port
-NGINX_HOST="${NGINX_HOST:-nginx_nginx}"  # Nginx service name for notifications
+MAINTENANCE_PORT="${MAINTENANCE_PORT:-$((PORT+1))}"  # Maintenance on web port + 1 by default
 SERVICE_NAME="${SERVICE_NAME:-orbat}"  # Service name for registration
+REGISTRY_HOST="${REGISTRY_HOST:-proxy}"  # go-proxy registry host
+REGISTRY_PORT="${REGISTRY_PORT:-81}"    # go-proxy registry port (TCP)
+DOMAINS="${DOMAINS:-orbat.chilla55.de}"  # Comma-separated domain list for routing
+ROUTE_PATH="${ROUTE_PATH:-/}"            # Route path
+BACKEND_HOST="${BACKEND_HOST:-orbat}"    # Hostname used in backend URL
+BACKEND_URL="http://${BACKEND_HOST}:${PORT}"  # Backend URL for proxy routing
+SESSION_ID=""
+SESSION_FILE="/run/orbat-registry-session-id"
+UPDATE_IN_PROGRESS=0
 
 # Environment variable for extended info display (default: false)
 SHOW_EXTENDED_INFO="${SHOW_EXTENDED_INFO:-false}"
@@ -23,8 +29,11 @@ echo "[Orbat] Auto-update check interval: ${UPDATE_CHECK_INTERVAL}s"
 # Cleanup function
 cleanup() {
     echo "[Orbat] Shutting down, closing persistent connection..."
-    if [ ! -z "$REGISTRATION_PID" ]; then
-        kill $REGISTRATION_PID 2>/dev/null || true
+    if [ -n "$SESSION_ID" ]; then
+        send_registry_command "SHUTDOWN|$SESSION_ID" >/dev/null 2>&1 || true
+    fi
+    if [ -n "$REGISTRY_FD_OPEN" ]; then
+        exec 3>&- || true
     fi
 }
 
@@ -58,87 +67,139 @@ update_status() {
 EOF
 }
 
-# Register with nginx and maintain persistent connection
-register_with_nginx() {
-    echo "[Orbat] Registering with nginx and establishing persistent connection..."
-    
-    local nginx_port=$((PORT + 1))
-    # Format: REGISTER|service_name|hostname|service_port|maintenance_port
-    local message="REGISTER|$SERVICE_NAME|$(hostname)|$PORT|$MAINTENANCE_PORT"
-    
-    # Keep connection open in background - when this dies, nginx knows service is down
-    ( 
-        echo "$message" | nc "$NGINX_HOST" "$nginx_port" 2>/dev/null
-        # Connection stays open until nginx or this process dies
-    ) &
-    
-    REGISTRATION_PID=$!
-    echo "[Orbat] Registered with nginx (persistent connection PID: $REGISTRATION_PID)"
-    
-    # Give it a moment to establish
-    sleep 2
+# Registry helpers for go-proxy TCP service registry
+open_registry_connection() {
+    if [ -n "$REGISTRY_FD_OPEN" ]; then
+        return 0
+    fi
+
+    if exec 3<>/dev/tcp/$REGISTRY_HOST/$REGISTRY_PORT; then
+        REGISTRY_FD_OPEN=1
+        echo "[Orbat] Connected to registry at ${REGISTRY_HOST}:${REGISTRY_PORT}"
+        return 0
+    fi
+
+    echo "[Orbat] Failed to connect to registry at ${REGISTRY_HOST}:${REGISTRY_PORT}"
+    return 1
 }
 
-# Request maintenance mode from nginx via TCP (handshake step 1)
-request_maintenance_mode() {
-    echo "[Orbat] Requesting maintenance mode from nginx via TCP..."
-    rm -f "$MAINTENANCE_APPROVED"
-    
-    local nginx_port=$((PORT + 1))
-    # Send: MAINT_ENTER|hostname:port|maintenance_port
-    local message="MAINT_ENTER|$(hostname):$PORT|$MAINTENANCE_PORT"
-    
-    if echo "$message" | timeout 5 nc "$NGINX_HOST" "$nginx_port" 2>/dev/null | grep -q "ACK"; then
-        echo "[Orbat] Maintenance mode request sent to nginx"
-        
-        # Wait for nginx approval (it will connect to our port and send MAINT_APPROVED)
-        local wait_count=0
-        while [ $wait_count -lt 30 ]; do
-            if [ -f "$MAINTENANCE_APPROVED" ]; then
-                echo "[Orbat] Maintenance mode approved by nginx"
-                return 0
+send_registry_command() {
+    local cmd="$1"
+    if [ -z "$REGISTRY_FD_OPEN" ]; then
+        return 1
+    fi
+
+    echo -ne "${cmd}\n" >&3
+
+    local response=""
+    if read -t 5 -r response <&3; then
+        echo "$response"
+        return 0
+    fi
+
+    echo ""
+    return 1
+}
+
+register_with_proxy() {
+    echo "[Orbat] Registering service with go-proxy registry..."
+    if ! open_registry_connection; then
+        echo "[Orbat] Registry connection failed; skipping registration"
+        return 1
+    fi
+
+    # If we have a previous session ID, try to reconnect first
+    if [ -z "$SESSION_ID" ] && [ -f "$SESSION_FILE" ]; then
+        SESSION_ID="$(cat "$SESSION_FILE" 2>/dev/null || echo "")"
+    fi
+
+    local response=""
+    if [ -n "$SESSION_ID" ]; then
+        response="$(send_registry_command "RECONNECT|$SESSION_ID")"
+        if [ "$response" = "OK" ]; then
+            echo "[Orbat] Reconnected to registry with session: $SESSION_ID"
+        else
+            echo "[Orbat] Reconnect failed (${response:-no response}); re-registering"
+            SESSION_ID=""
+        fi
+    fi
+
+    if [ -z "$SESSION_ID" ]; then
+        local register_cmd="REGISTER|$SERVICE_NAME|$BACKEND_HOST|$PORT|$MAINTENANCE_PORT"
+        response="$(send_registry_command "$register_cmd")"
+        if [[ "$response" =~ ^ACK\|(.*)$ ]]; then
+            SESSION_ID="${BASH_REMATCH[1]}"
+            echo "[Orbat] Registered with session: $SESSION_ID"
+            echo -n "$SESSION_ID" > "$SESSION_FILE" 2>/dev/null || true
+        else
+            echo "[Orbat] Registry registration failed: $response"
+            return 1
+        fi
+    fi
+
+    local domains_clean=${DOMAINS// /}
+    local route_cmd="ROUTE|$SESSION_ID|$domains_clean|$ROUTE_PATH|$BACKEND_URL"
+    response="$(send_registry_command "$route_cmd")"
+    echo "[Orbat] Route registration: ${response:-no response}" 
+
+    # Apply a couple of sensible defaults
+    send_registry_command "OPTIONS|$SESSION_ID|timeout|60s" >/dev/null 2>&1 || true
+    send_registry_command "OPTIONS|$SESSION_ID|compression|true" >/dev/null 2>&1 || true
+    send_registry_command "OPTIONS|$SESSION_ID|http2|true" >/dev/null 2>&1 || true
+
+    return 0
+}
+
+# Ensure registry connection is up; if lost, reconnect using saved session
+ensure_registry_connection() {
+    if [ -n "$REGISTRY_FD_OPEN" ]; then
+        return 0
+    fi
+    if open_registry_connection; then
+        # attempt to reuse saved session
+        if [ -z "$SESSION_ID" ] && [ -f "$SESSION_FILE" ]; then
+            SESSION_ID="$(cat "$SESSION_FILE" 2>/dev/null || echo "")"
+        fi
+        if [ -n "$SESSION_ID" ]; then
+            local resp="$(send_registry_command "RECONNECT|$SESSION_ID")"
+            if [ "$resp" != "OK" ]; then
+                echo "[Orbat] Registry reconnect failed (${resp:-no response}); will re-register on next call"
+                SESSION_ID=""
+            else
+                echo "[Orbat] Registry reconnected"
             fi
-            sleep 1
-            wait_count=$((wait_count + 1))
-        done
-        
-        echo "[Orbat] Warning: No approval received from nginx, proceeding anyway"
-        return 1
-    else
-        echo "[Orbat] Could not contact nginx, proceeding with local maintenance"
-        return 1
+        fi
     fi
 }
 
-# Notify nginx that main service is ready via TCP (handshake step 1)
-notify_service_ready() {
-    echo "[Orbat] Notifying nginx that main service is ready via TCP..."
-    rm -f "$SWITCHBACK_APPROVED"
-    
-    local nginx_port=$((PORT + 1))
-    # Send: MAINT_EXIT|hostname:port
-    local message="MAINT_EXIT|$(hostname):$PORT"
-    
-    if echo "$message" | timeout 5 nc "$NGINX_HOST" "$nginx_port" 2>/dev/null | grep -q "ACK"; then
-        echo "[Orbat] Ready notification sent to nginx"
-        
-        # Wait for nginx to confirm switchback
-        local wait_count=0
-        while [ $wait_count -lt 30 ]; do
-            if [ -f "$SWITCHBACK_APPROVED" ]; then
-                echo "[Orbat] Switchback approved by nginx"
-                return 0
-            fi
-            sleep 1
-            wait_count=$((wait_count + 1))
-        done
-        
-        echo "[Orbat] Warning: No switchback confirmation from nginx"
-        return 1
-    else
-        echo "[Orbat] Could not contact nginx for switchback"
-        return 1
+enter_proxy_maintenance() {
+    if [ -z "$SESSION_ID" ]; then
+        return 0
     fi
+
+    local response="$(send_registry_command "MAINT_ENTER|$SESSION_ID")"
+    echo "[Orbat] Proxy maintenance enter: ${response:-no response}"
+}
+
+exit_proxy_maintenance() {
+    if [ -z "$SESSION_ID" ]; then
+        return 0
+    fi
+
+    local attempt=0
+    local response=""
+    while [ $attempt -lt 3 ]; do
+        response="$(send_registry_command "MAINT_EXIT|$SESSION_ID")"
+        if [ "$response" = "MAINT_OK" ]; then
+            echo "[Orbat] Proxy maintenance exit acknowledged"
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        echo "[Orbat] Proxy maintenance exit retry $attempt (response: ${response:-no response})"
+        sleep 1
+    done
+
+    echo "[Orbat] Warning: no MAINT_OK after exit attempts (last: ${response:-none})"
 }
 
 # Function to show maintenance page on separate port with handshake API
@@ -147,35 +208,11 @@ show_maintenance() {
     touch "$MAINTENANCE_ACTIVE"
     update_status "initializing" "Starting maintenance mode" 0 "Preparing to update application"
     
-    # Start TCP listener for handshake + HTTP server for maintenance page
+    # Start HTTP server for maintenance page and status API
     ( cd / && exec node -e "
         const http = require('http');
-        const net = require('net');
         const fs = require('fs');
         
-        // TCP listener for handshake protocol
-        const tcpServer = net.createServer((socket) => {
-            socket.on('data', (data) => {
-                const message = data.toString().trim();
-                console.log('[Maintenance] TCP message:', message);
-                
-                if (message === 'MAINT_APPROVED') {
-                    console.log('[Maintenance] Nginx approved maintenance mode');
-                    fs.writeFileSync('$MAINTENANCE_APPROVED', Date.now().toString());
-                    socket.write('ACK\n');
-                } else if (message === 'SWITCHBACK_APPROVED') {
-                    console.log('[Maintenance] Nginx approved switchback to main service');
-                    fs.writeFileSync('$SWITCHBACK_APPROVED', Date.now().toString());
-                    socket.write('ACK\n');
-                    setTimeout(() => process.exit(0), 1000);
-                }
-                socket.end();
-            });
-        });
-        tcpServer.listen($MAINTENANCE_PORT);
-        console.log('TCP handshake listener on port $MAINTENANCE_PORT');
-        
-        // HTTP server for maintenance page and status API
         const httpServer = http.createServer((req, res) => {
             // Status API endpoint
             if (req.url === '/api/status') {
@@ -198,8 +235,8 @@ show_maintenance() {
                 res.end('Service starting...');
             }
         });
-        httpServer.listen($MAINTENANCE_PORT + 1000);  // HTTP on different port to avoid conflict
-        console.log('HTTP maintenance server on port ' + ($MAINTENANCE_PORT + 1000));
+        httpServer.listen($MAINTENANCE_PORT);
+        console.log('HTTP maintenance server on port ' + $MAINTENANCE_PORT);
     " ) &
     MAINTENANCE_PID=$!
     sleep 2
@@ -210,12 +247,8 @@ show_maintenance() {
 stop_maintenance() {
     echo "[Orbat] Stopping maintenance and switching back to main service..."
     rm -f "$MAINTENANCE_ACTIVE"
-    
-    # Notify nginx that we're ready and wait for approval
-    notify_service_ready
-    
-    # Maintenance server will exit on switchback approval
-    if [ ! -z "$MAINTENANCE_PID" ]; then
+    if [ -n "$MAINTENANCE_PID" ]; then
+        kill $MAINTENANCE_PID 2>/dev/null || true
         wait $MAINTENANCE_PID 2>/dev/null || true
         echo "[Orbat] Maintenance server stopped"
     fi
@@ -226,11 +259,10 @@ perform_update() {
     echo "[Orbat] Performing update..."
     cd "$APP_DIR"
     
-    # Request maintenance mode from nginx first
-    request_maintenance_mode
-    
-    # Start maintenance server
+    UPDATE_IN_PROGRESS=1
+    # Start maintenance server then inform proxy to route to it
     show_maintenance
+    enter_proxy_maintenance
     
     update_status "pulling" "Pulling latest changes" 10 "Downloading updated code from repository"
     git pull origin main
@@ -255,17 +287,20 @@ perform_update() {
     update_status "building" "Building Next.js application" 75 "Compiling TypeScript and optimizing assets"
     npm run build
     
-    # Stop maintenance
     update_status "finalizing" "Finalizing update" 95 "Restarting Next.js server"
-    stop_maintenance
-    
+
     echo "[Orbat] Update completed - restarting application..."
-    
-    # Kill the current Next.js process to restart it
-    if [ ! -z "$NEXTJS_PID" ]; then
+
+    # Stop current Next.js process; app loop will restart after update flag clears
+    if [ -n "$NEXTJS_PID" ]; then
         kill $NEXTJS_PID 2>/dev/null || true
         wait $NEXTJS_PID 2>/dev/null || true
     fi
+
+    # Tell proxy to switch back to main, then stop maintenance server
+    exit_proxy_maintenance
+    stop_maintenance
+    UPDATE_IN_PROGRESS=0
 }
 
 # Background update checker
@@ -312,6 +347,7 @@ else
     if [ "$LOCAL" != "$REMOTE" ]; then
         echo "[Orbat] Updates detected - pulling changes..."
         show_maintenance
+        enter_proxy_maintenance
         update_status "pulling" "Pulling latest changes" 10 "Downloading updated code from repository"
         git pull origin main
     else
@@ -344,19 +380,31 @@ npm run build
 update_status "finalizing" "Finalizing startup" 95 "Preparing to start Next.js server"
 stop_maintenance
 
+run_app_loop() {
+    echo "[Orbat] Starting Next.js supervisor loop..."
+    while true; do
+        # Defer starting app while updates are in progress
+        while [ "$UPDATE_IN_PROGRESS" -eq 1 ]; do sleep 1; done
+        echo "[Orbat] Launching Next.js..."
+        update_status "running" "Application running" 100 "Service is now available"
+        npm start &
+        NEXTJS_PID=$!
+        wait $NEXTJS_PID
+        echo "[Orbat] Next.js exited (code: $?)"
+        # Loop will relaunch unless container is being stopped (handled by trap)
+        sleep 1
+    done
+}
+
 # Start update checker in background
 start_update_checker
 
-# Start the application
-echo "[Orbat] Starting Next.js application..."
-update_status "running" "Application running" 100 "Service is now available"
+# Register with go-proxy (persistent TCP registry)
+register_with_proxy
 
-# Register with nginx (persistent connection)
-register_with_nginx
+# Ensure proxy routes to main service if no update in progress
+exit_proxy_maintenance
+stop_maintenance
 
-# Start npm in background so we can track its PID
-npm start &
-NEXTJS_PID=$!
-
-# Wait for Next.js process
-wait $NEXTJS_PID
+# Start supervisor loop (keeps container alive even during updates)
+run_app_loop
