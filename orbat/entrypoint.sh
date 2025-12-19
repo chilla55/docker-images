@@ -35,9 +35,11 @@ cleanup() {
     if [ -n "$SESSION_ID" ]; then
         send_registry_command "SHUTDOWN|$SESSION_ID" >/dev/null 2>&1
     fi
-    if [ -n "$REGISTRY_FD_OPEN" ]; then
-        exec 3>&-
+    if [ -n "$REGISTRY_SOCAT_PID" ]; then
+        kill $REGISTRY_SOCAT_PID 2>/dev/null || true
+        wait $REGISTRY_SOCAT_PID 2>/dev/null || true
     fi
+    rm -f "$REGISTRY_FIFO_IN" "$REGISTRY_FIFO_OUT"
 }
 
 trap cleanup EXIT INT TERM
@@ -70,42 +72,53 @@ update_status() {
 EOF
 }
 
-# Registry helpers for go-proxy TCP service registry
+# Use named pipes for more reliable TCP connection handling
+REGISTRY_FIFO_IN="/tmp/orbat-registry-in"
+REGISTRY_FIFO_OUT="/tmp/orbat-registry-out"
+REGISTRY_SOCAT_PID=""
+
 open_registry_connection() {
-    if [ -n "$REGISTRY_FD_OPEN" ]; then
+    if [ -n "$REGISTRY_SOCAT_PID" ]; then
+        # Connection already open
         return 0
     fi
 
-    if exec 3<>/dev/tcp/$REGISTRY_HOST/$REGISTRY_PORT; then
-        REGISTRY_FD_OPEN=1
-        echo "[Orbat] Connected to registry at ${REGISTRY_HOST}:${REGISTRY_PORT}"
-        return 0
-    fi
+    # Clean up old fifos
+    rm -f "$REGISTRY_FIFO_IN" "$REGISTRY_FIFO_OUT"
+    mkfifo "$REGISTRY_FIFO_IN" "$REGISTRY_FIFO_OUT" 2>/dev/null || return 1
 
-    echo "[Orbat] Failed to connect to registry at ${REGISTRY_HOST}:${REGISTRY_PORT}"
-    return 1
+    # Use socat to maintain persistent TCP connection
+    socat - TCP:$REGISTRY_HOST:$REGISTRY_PORT < "$REGISTRY_FIFO_IN" > "$REGISTRY_FIFO_OUT" &
+    REGISTRY_SOCAT_PID=$!
+    
+    # Wait for connection to establish
+    sleep 1
+    
+    echo "[Orbat] Connected to registry at ${REGISTRY_HOST}:${REGISTRY_PORT} (socat PID: $REGISTRY_SOCAT_PID)"
+    return 0
 }
 
 send_registry_command() {
     local cmd="$1"
-    if [ -z "$REGISTRY_FD_OPEN" ]; then
+    if [ -z "$REGISTRY_SOCAT_PID" ]; then
         return 1
     fi
 
-    echo -ne "${cmd}\n" >&3
+    # Send command through FIFO
+    echo "$cmd" > "$REGISTRY_FIFO_IN" &
+    local writer_pid=$!
 
+    # Read response with timeout
     local response=""
-    local retries=0
-    while [ $retries -lt 3 ]; do
-        if read -t 5 -r response <&3 2>/dev/null; then
-            if [ -n "$response" ]; then
-                echo "$response"
-                return 0
-            fi
+    if timeout 5 cat "$REGISTRY_FIFO_OUT" | read -r response; then
+        if [ -n "$response" ]; then
+            echo "$response"
+            wait $writer_pid 2>/dev/null || true
+            return 0
         fi
-        retries=$((retries + 1))
-    done
-
+    fi
+    
+    wait $writer_pid 2>/dev/null || true
     echo ""
     return 1
 }
@@ -159,39 +172,32 @@ register_with_proxy() {
     return 0
 }
 
-# Background process to keep registry connection alive by reading from socket
+# Background process to keep registry connection alive
 maintain_registry_connection() {
     echo "[Orbat] Registry keepalive monitor started"
     while true; do
-        if [ -z "$REGISTRY_FD_OPEN" ] || [ -z "$SESSION_ID" ]; then
+        if [ -z "$REGISTRY_SOCAT_PID" ] || [ -z "$SESSION_ID" ]; then
             sleep 5
             continue
         fi
         
-        # Just keep reading from the socket to detect disconnection
-        # The socket should stay open as long as we keep it open
-        if ! read -t 60 -r line <&3 2>/dev/null; then
-            if [ $? -eq 124 ]; then
-                # Timeout reading - connection is still alive
-                :
-            else
-                # Error or EOF - connection closed
-                echo "[Orbat] Registry connection lost, attempting to reconnect..."
-                REGISTRY_FD_OPEN=""
-                if open_registry_connection; then
-                    if [ -n "$SESSION_ID" ]; then
-                        local resp="$(send_registry_command "RECONNECT|$SESSION_ID")"
-                        if [ "$resp" = "OK" ]; then
-                            echo "[Orbat] Reconnected to registry"
-                        else
-                            echo "[Orbat] Reconnect failed, will re-register"
-                            SESSION_ID=""
-                        fi
+        # Check if socat process is still running
+        if ! kill -0 $REGISTRY_SOCAT_PID 2>/dev/null; then
+            echo "[Orbat] Registry socat process died, attempting to reconnect..."
+            REGISTRY_SOCAT_PID=""
+            if open_registry_connection; then
+                if [ -n "$SESSION_ID" ]; then
+                    local resp="$(send_registry_command "RECONNECT|$SESSION_ID")"
+                    if [ "$resp" = "OK" ]; then
+                        echo "[Orbat] Reconnected to registry"
+                    else
+                        echo "[Orbat] Reconnect failed, will re-register"
+                        SESSION_ID=""
                     fi
                 fi
             fi
         fi
-        sleep 5
+        sleep 10
     done
 }
 

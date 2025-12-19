@@ -3,7 +3,7 @@
 FROM node:20-alpine AS base
 
 # Install dependencies only when needed
-RUN apk add --no-cache git curl bash
+RUN apk add --no-cache git curl bash socat
 
 WORKDIR /app
 
