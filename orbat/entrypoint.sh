@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 REPO_URL="https://github.com/6th-Maroon-Division/Homepage.git"
 APP_DIR="/app/repo"
@@ -30,10 +29,10 @@ echo "[Orbat] Auto-update check interval: ${UPDATE_CHECK_INTERVAL}s"
 cleanup() {
     echo "[Orbat] Shutting down, closing persistent connection..."
     if [ -n "$SESSION_ID" ]; then
-        send_registry_command "SHUTDOWN|$SESSION_ID" >/dev/null 2>&1 || true
+        send_registry_command "SHUTDOWN|$SESSION_ID" >/dev/null 2>&1
     fi
     if [ -n "$REGISTRY_FD_OPEN" ]; then
-        exec 3>&- || true
+        exec 3>&-
     fi
 }
 
@@ -143,9 +142,9 @@ register_with_proxy() {
     echo "[Orbat] Route registration: ${response:-no response}" 
 
     # Apply a couple of sensible defaults
-    send_registry_command "OPTIONS|$SESSION_ID|timeout|60s" >/dev/null 2>&1 || true
-    send_registry_command "OPTIONS|$SESSION_ID|compression|true" >/dev/null 2>&1 || true
-    send_registry_command "OPTIONS|$SESSION_ID|http2|true" >/dev/null 2>&1 || true
+    send_registry_command "OPTIONS|$SESSION_ID|timeout|60s" >/dev/null 2>&1
+    send_registry_command "OPTIONS|$SESSION_ID|compression|true" >/dev/null 2>&1
+    send_registry_command "OPTIONS|$SESSION_ID|http2|true" >/dev/null 2>&1
 
     return 0
 }
@@ -200,6 +199,7 @@ exit_proxy_maintenance() {
     done
 
     echo "[Orbat] Warning: no MAINT_OK after exit attempts (last: ${response:-none})"
+    return 0
 }
 
 # Function to show maintenance page on separate port with handshake API
@@ -332,52 +332,87 @@ if [ ! -d "$APP_DIR/.git" ]; then
     echo "[Orbat] First run - cloning repository..."
     update_status "cloning" "Cloning repository from GitHub" 5 "Getting latest code from 6th-Maroon-Division/Homepage"
     
-    git clone "$REPO_URL" "$APP_DIR"
-    cd "$APP_DIR"
+    if ! git clone "$REPO_URL" "$APP_DIR"; then
+        echo "[Orbat] ERROR: Failed to clone repository"
+        exit_proxy_maintenance
+        stop_maintenance
+        sleep 30
+        exit 1
+    fi
+    cd "$APP_DIR" || { echo "[Orbat] ERROR: Failed to cd into $APP_DIR"; exit_proxy_maintenance; stop_maintenance; exit 1; }
 else
     echo "[Orbat] Checking for updates..."
-    cd "$APP_DIR"
+    cd "$APP_DIR" || { echo "[Orbat] ERROR: Failed to cd into $APP_DIR"; exit_proxy_maintenance; stop_maintenance; exit 1; }
     
     # Check if there are updates
-    update_status "checking" "Checking for updates" 2 "Fetching latest commits from GitHub"
-    git fetch origin main
-    LOCAL=$(git rev-parse HEAD)
-    REMOTE=$(git rev-parse origin/main)
-    
-    if [ "$LOCAL" != "$REMOTE" ]; then
-        echo "[Orbat] Updates detected - pulling changes..."
-        show_maintenance
-        enter_proxy_maintenance
-        update_status "pulling" "Pulling latest changes" 10 "Downloading updated code from repository"
-        git pull origin main
+    update_status "checking" "Checking for updates" 10 "Fetching latest commits from GitHub"
+    if ! git fetch origin main 2>/dev/null; then
+        echo "[Orbat] WARNING: git fetch failed, continuing with local version"
     else
-        echo "[Orbat] No updates found"
-        update_status "starting" "No updates needed" 95 "Starting application with current version"
+        LOCAL=$(git rev-parse HEAD 2>/dev/null)
+        REMOTE=$(git rev-parse origin/main 2>/dev/null)
+        
+        if [ ! -z "$LOCAL" ] && [ ! -z "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
+            echo "[Orbat] Updates detected - pulling changes..."
+            update_status "pulling" "Pulling latest changes" 15 "Downloading updated code from repository"
+            if ! git pull origin main 2>&1 | tee -a /tmp/orbat.log; then
+                echo "[Orbat] WARNING: git pull failed, continuing with current version"
+            fi
+        else
+            echo "[Orbat] No updates found"
+            update_status "ready" "Ready to start" 20 "Preparing to build and run application"
+        fi
     fi
 fi
 
 # Install dependencies
 echo "[Orbat] Installing dependencies..."
-update_status "dependencies" "Installing dependencies" 25 "Running npm ci to install packages"
-npm ci --production=false
+update_status "dependencies" "Installing dependencies" 30 "Running npm ci to install packages"
+if ! npm ci --production=false 2>&1 | tee -a /tmp/orbat.log; then
+    echo "[Orbat] ERROR: npm ci failed"
+    exit_proxy_maintenance
+    stop_maintenance
+    sleep 30
+    exit 1
+fi
 
 # Generate Prisma client
 echo "[Orbat] Generating Prisma client..."
 update_status "prisma-generate" "Generating Prisma client" 45 "Creating database client from schema"
-npx prisma generate
+if ! npx prisma generate 2>&1 | tee -a /tmp/orbat.log; then
+    echo "[Orbat] ERROR: Prisma generate failed"
+    exit_proxy_maintenance
+    stop_maintenance
+    sleep 30
+    exit 1
+fi
 
 # Run database migrations
 echo "[Orbat] Running database migrations..."
 update_status "migrations" "Running database migrations" 60 "Applying schema changes to database"
-npx prisma migrate deploy
+if ! npx prisma migrate deploy 2>&1 | tee -a /tmp/orbat.log; then
+    echo "[Orbat] ERROR: Prisma migrate deploy failed"
+    exit_proxy_maintenance
+    stop_maintenance
+    sleep 30
+    exit 1
+fi
 
 # Build Next.js app
 echo "[Orbat] Building Next.js application..."
 update_status "building" "Building Next.js application" 75 "Compiling TypeScript and optimizing assets"
-npm run build
+if ! npm run build 2>&1 | tee -a /tmp/orbat.log; then
+    echo "[Orbat] ERROR: npm run build failed"
+    exit_proxy_maintenance
+    stop_maintenance
+    sleep 30
+    exit 1
+fi
 
-# Stop maintenance if it was running
-update_status "finalizing" "Finalizing startup" 95 "Preparing to start Next.js server"
+# Exit maintenance mode and stop progress page
+echo "[Orbat] Startup complete, switching to main service..."
+update_status "startup-complete" "Startup complete" 95 "Switching to main application service"
+exit_proxy_maintenance
 stop_maintenance
 
 run_app_loop() {
@@ -387,7 +422,7 @@ run_app_loop() {
         while [ "$UPDATE_IN_PROGRESS" -eq 1 ]; do sleep 1; done
         echo "[Orbat] Launching Next.js..."
         update_status "running" "Application running" 100 "Service is now available"
-        npm start || true
+        npm start
         echo "[Orbat] Next.js exited (code: $?), restarting in 5s..."
         sleep 5
     done
@@ -396,12 +431,15 @@ run_app_loop() {
 # Start update checker in background
 start_update_checker
 
+# Show maintenance page and register early
+echo "[Orbat] Entering startup maintenance mode..."
+show_maintenance
+update_status "startup" "Starting up" 5 "Registering with proxy and initializing services"
+
 # Register with go-proxy (persistent TCP registry)
-register_with_proxy
+if ! register_with_proxy; then
+    echo "[Orbat] Warning: proxy registration failed"
+fi
 
-# Ensure proxy routes to main service if no update in progress
-exit_proxy_maintenance
-stop_maintenance
-
-# Start supervisor loop (keeps container alive even during updates)
-run_app_loop
+# Enter maintenance mode to show progress page
+enter_proxy_maintenance
