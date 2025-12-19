@@ -242,6 +242,10 @@ func startHealthServer(ctx context.Context, port int, proxyServer *proxy.Server,
 		w.Write([]byte("healthy"))
 	})
 
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dashboard", http.StatusTemporaryRedirect)
+	})
+
 	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ready"))
