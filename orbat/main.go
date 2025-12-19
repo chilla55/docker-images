@@ -148,20 +148,24 @@ func handleRegistryConnection() {
 			}
 			// Send command
 			registryConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			_, err := io.WriteString(registryConn, cmd+"\n")
+			_, err := io.WriteString(registryConn, cmd+"\r\n")
 			if err != nil {
 				log("Failed to send command: %v", err)
 				registryConnected = false
+				registryConn.Close()
+				registryConn = nil
 				registryRespChan <- "ERROR:" + err.Error()
 				continue
 			}
 
 			// Read response
-			registryConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+			registryConn.SetReadDeadline(time.Now().Add(20 * time.Second))
 			response, err := reader.ReadString('\n')
 			if err != nil {
 				log("Failed to read response: %v", err)
 				registryConnected = false
+				registryConn.Close()
+				registryConn = nil
 				registryRespChan <- "ERROR:" + err.Error()
 				continue
 			}
@@ -179,7 +183,10 @@ func handleRegistryConnection() {
 
 func sendRegistryCommand(cmd string) (string, error) {
 	if !registryConnected {
-		return "", fmt.Errorf("registry not connected")
+		// try to reconnect once
+		if err := connectRegistry(); err != nil {
+			return "", fmt.Errorf("registry not connected")
+		}
 	}
 
 	// Send command through channel
