@@ -387,12 +387,9 @@ run_app_loop() {
         while [ "$UPDATE_IN_PROGRESS" -eq 1 ]; do sleep 1; done
         echo "[Orbat] Launching Next.js..."
         update_status "running" "Application running" 100 "Service is now available"
-        npm start &
-        NEXTJS_PID=$!
-        wait $NEXTJS_PID
-        echo "[Orbat] Next.js exited (code: $?)"
-        # Loop will relaunch unless container is being stopped (handled by trap)
-        sleep 1
+        npm start || true
+        echo "[Orbat] Next.js exited (code: $?), restarting in 5s..."
+        sleep 5
     done
 }
 
