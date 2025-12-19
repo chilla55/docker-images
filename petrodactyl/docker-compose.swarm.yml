@@ -172,10 +172,10 @@ services:
       
       # Restart policy
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 10s
-        max_attempts: 3
-        window: 120s
+        max_attempts: 5
+        window: 300s
       
       # Labels for Traefik/nginx integration (adjust as needed)
       labels:
