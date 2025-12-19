@@ -22,6 +22,7 @@ import (
 	"github.com/chilla55/proxy-manager/analytics"
 	"github.com/chilla55/proxy-manager/certmonitor"
 	"github.com/chilla55/proxy-manager/config"
+	"github.com/chilla55/proxy-manager/dashboard"
 	"github.com/chilla55/proxy-manager/database"
 	"github.com/chilla55/proxy-manager/health"
 	"github.com/chilla55/proxy-manager/metrics"
@@ -34,16 +35,17 @@ import (
 )
 
 var (
-	sitesPath       = flag.String("sites-path", getEnv("SITES_PATH", "/etc/proxy/sites-available"), "Path to site YAML configs")
-	globalConfig    = flag.String("global-config", getEnv("GLOBAL_CONFIG", "/etc/proxy/global.yaml"), "Path to global config")
-	httpAddr        = flag.String("http-addr", getEnv("HTTP_ADDR", ":80"), "HTTP listen address")
-	httpsAddr       = flag.String("https-addr", getEnv("HTTPS_ADDR", ":443"), "HTTPS listen address")
-	registryPort    = flag.Int("registry-port", getIntEnv("REGISTRY_PORT", 81), "Service registry port")
-	healthPort      = flag.Int("health-port", getIntEnv("HEALTH_PORT", 8080), "Health check HTTP port")
-	upstreamTimeout = flag.Duration("upstream-timeout", getDurationEnv("UPSTREAM_CHECK_TIMEOUT", 2*time.Second), "Upstream check timeout")
-	shutdownTimeout = flag.Duration("shutdown-timeout", getDurationEnv("SHUTDOWN_TIMEOUT", 30*time.Second), "Graceful shutdown timeout")
-	debug           = flag.Bool("debug", getEnv("DEBUG", "0") == "1", "Enable debug logging")
-	dbPath          = flag.String("db-path", getEnv("DB_PATH", "/data/proxy.db"), "Path to SQLite database")
+	sitesPath        = flag.String("sites-path", getEnv("SITES_PATH", "/etc/proxy/sites-available"), "Path to site YAML configs")
+	globalConfig     = flag.String("global-config", getEnv("GLOBAL_CONFIG", "/etc/proxy/global.yaml"), "Path to global config")
+	httpAddr         = flag.String("http-addr", getEnv("HTTP_ADDR", ":80"), "HTTP listen address")
+	httpsAddr        = flag.String("https-addr", getEnv("HTTPS_ADDR", ":443"), "HTTPS listen address")
+	registryPort     = flag.Int("registry-port", getIntEnv("REGISTRY_PORT", 81), "Service registry port")
+	healthPort       = flag.Int("health-port", getIntEnv("HEALTH_PORT", 8080), "Health check HTTP port")
+	upstreamTimeout  = flag.Duration("upstream-timeout", getDurationEnv("UPSTREAM_CHECK_TIMEOUT", 2*time.Second), "Upstream check timeout")
+	shutdownTimeout  = flag.Duration("shutdown-timeout", getDurationEnv("SHUTDOWN_TIMEOUT", 30*time.Second), "Graceful shutdown timeout")
+	debug            = flag.Bool("debug", getEnv("DEBUG", "0") == "1", "Enable debug logging")
+	dashboardEnabled = flag.Bool("dashboard-enabled", getEnv("DASHBOARD_ENABLED", "1") == "1", "Enable admin dashboard endpoints")
+	dbPath           = flag.String("db-path", getEnv("DB_PATH", "/data/proxy.db"), "Path to SQLite database")
 )
 
 func main() {
@@ -171,8 +173,8 @@ func main() {
 	// Initialize certificate watcher
 	certWatcher := watcher.NewCertWatcher(*globalConfig, proxyServer, *debug)
 
-	// Start health check server
-	go startHealthServer(*healthPort, proxyServer, metricsCollector, accessLogger, certMonitor, healthChecker, analyticsAggregator, trafficAnalyzer)
+	// Start health check server (includes dashboard when enabled)
+	go startHealthServer(ctx, *healthPort, proxyServer, metricsCollector, accessLogger, certMonitor, healthChecker, analyticsAggregator, trafficAnalyzer, db, *dashboardEnabled)
 
 	// Start site watcher
 	go siteWatcher.Start(ctx)
@@ -233,102 +235,93 @@ func main() {
 	}
 }
 
-func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *metrics.Collector, accessLogger *accesslog.Logger, certMonitor *certmonitor.Monitor, healthChecker *health.Checker, analyticsAggregator *analytics.Aggregator, trafficAnalyzer *traffic.Analyzer) {
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		// Check if proxy is responding
-		// Simple check - server is running if we got here
+func startHealthServer(ctx context.Context, port int, proxyServer *proxy.Server, metricsCollector *metrics.Collector, accessLogger *accesslog.Logger, certMonitor *certmonitor.Monitor, healthChecker *health.Checker, analyticsAggregator *analytics.Aggregator, trafficAnalyzer *traffic.Analyzer, dbConn *database.Database, dashboardEnabled bool) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("healthy"))
 	})
 
-	http.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
-		// Simple readiness check
+	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ready"))
 	})
 
-	// Phase 2: Prometheus-compatible metrics endpoint (Task #2)
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		w.Write([]byte(metricsCollector.PrometheusMetrics()))
 	})
 
-	// Phase 2: Access log API endpoints (Task #6)
-	http.HandleFunc("/api/logs/recent", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/logs/recent", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		entries := accessLogger.GetRecentRequests(100)
-		fmt.Fprintf(w, "%v", entries) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", entries)
 	})
 
-	http.HandleFunc("/api/logs/errors", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/logs/errors", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		entries := accessLogger.GetRecentErrors(50)
-		fmt.Fprintf(w, "%v", entries) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", entries)
 	})
 
-	http.HandleFunc("/api/logs/stats", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/logs/stats", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		stats := accessLogger.GetStats()
-		fmt.Fprintf(w, "%v", stats) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", stats)
 	})
 
-	// Phase 2: Certificate expiry monitoring API (Task #7)
-	http.HandleFunc("/api/certs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/certs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		certs := certMonitor.GetAllCertificates()
-		fmt.Fprintf(w, "%v", certs) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", certs)
 	})
 
-	http.HandleFunc("/api/certs/expiring", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/certs/expiring", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		level := r.URL.Query().Get("level")
 		if level == "" {
 			level = certmonitor.LevelWarning
 		}
 		certs := certMonitor.GetExpiringCertificates(level)
-		fmt.Fprintf(w, "%v", certs) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", certs)
 	})
 
-	http.HandleFunc("/api/certs/stats", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/certs/stats", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		stats := certMonitor.GetStats()
-		fmt.Fprintf(w, "%v", stats) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", stats)
 	})
 
-	// Phase 2: Health check status API (Task #5)
-	http.HandleFunc("/api/health/services", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/health/services", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		statuses := healthChecker.GetAllStatuses()
-		fmt.Fprintf(w, "%v", statuses) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", statuses)
 	})
 
-	http.HandleFunc("/api/health/unhealthy", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/health/unhealthy", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		unhealthy := healthChecker.GetUnhealthyServices()
-		fmt.Fprintf(w, "%v", unhealthy) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", unhealthy)
 	})
 
-	// Phase 2 Task #3: Advanced metrics aggregation API
-	http.HandleFunc("/api/analytics/metrics", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/analytics/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		aggregated := analyticsAggregator.GetAggregatedMetrics()
-		fmt.Fprintf(w, "%v", aggregated) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", aggregated)
 	})
 
-	// Phase 2 Task #4: Traffic analysis API
-	http.HandleFunc("/api/traffic/analysis", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/traffic/analysis", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		topN := 10
 		if n := r.URL.Query().Get("top"); n != "" {
 			if parsed, err := fmt.Sscanf(n, "%d", &topN); err == nil && parsed == 1 {
-				// Use parsed value
 			}
 		}
 		analysis := trafficAnalyzer.Analyze(topN)
-		fmt.Fprintf(w, "%v", analysis) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", analysis)
 	})
 
-	http.HandleFunc("/api/traffic/ip", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/traffic/ip", func(w http.ResponseWriter, r *http.Request) {
 		ip := r.URL.Query().Get("ip")
 		if ip == "" {
 			http.Error(w, "Missing ip parameter", http.StatusBadRequest)
@@ -339,26 +332,23 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 		fmt.Fprintf(w, `{"ip":"%s","reputation_score":%.2f}`, ip, reputation)
 	})
 
-	http.HandleFunc("/api/traffic/anomalies", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/traffic/anomalies", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		analysis := trafficAnalyzer.Analyze(10)
-		fmt.Fprintf(w, "%v", analysis.AnomalousPatterns) // TODO: proper JSON marshaling
+		fmt.Fprintf(w, "%v", analysis.AnomalousPatterns)
 	})
 
-	// Legacy blackhole metrics
-	http.HandleFunc("/api/blackhole", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/blackhole", func(w http.ResponseWriter, r *http.Request) {
 		blackholeCount := proxyServer.GetBlackholeCount()
 		fmt.Fprintf(w, "# HELP blackhole_requests_total Total number of blackholed requests\n")
 		fmt.Fprintf(w, "# TYPE blackhole_requests_total counter\n")
 		fmt.Fprintf(w, "blackhole_requests_total %d\n", blackholeCount)
 	})
 
-	// Phase 3 Task #17: Traffic Analytics APIs
-	// Top routes by traffic volume
-	http.HandleFunc("/api/analytics/top-routes", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/analytics/top-routes", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		period := r.URL.Query().Get("period")
-		window := parsePeriod(period) // default 24h
+		window := parsePeriod(period)
 		limit := 10
 		if l := r.URL.Query().Get("limit"); l != "" {
 			_, _ = fmt.Sscanf(l, "%d", &limit)
@@ -374,7 +364,6 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 			counts[e.Domain]++
 		}
 
-		// Convert to slice and sort desc
 		type item struct {
 			Route string `json:"route"`
 			Count int    `json:"count"`
@@ -400,15 +389,13 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 		})
 	})
 
-	// Heatmap of peak traffic hours (counts per hour-of-day)
-	http.HandleFunc("/api/analytics/heatmap", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/analytics/heatmap", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		period := r.URL.Query().Get("period")
 		window := parsePeriod(period)
 		entries := accessLogger.GetRecentRequests(1000)
 		cutoff := time.Now().Add(-window).Unix()
 
-		// 24-hour buckets
 		buckets := make([]int, 24)
 		for _, e := range entries {
 			if e.Timestamp < cutoff {
@@ -424,8 +411,7 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 		})
 	})
 
-	// Per-route bandwidth tracking
-	http.HandleFunc("/api/analytics/bandwidth", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/analytics/bandwidth", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		route := r.URL.Query().Get("route")
 		period := r.URL.Query().Get("period")
@@ -452,8 +438,7 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 		})
 	})
 
-	// Phase 3 Task #3: AI-Ready Context Export (Markdown)
-	http.HandleFunc("/api/ai-context", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/ai-context", func(w http.ResponseWriter, r *http.Request) {
 		format := r.URL.Query().Get("format")
 		if format == "" {
 			format = "markdown"
@@ -466,22 +451,16 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 
-		// Gather data
 		stats := metricsCollector.GetStats()
 		certStats := certMonitor.GetStats()
 		recentErrors := accessLogger.GetRecentErrors(10)
 
 		var buf bytes.Buffer
-		// Header
 		fmt.Fprintf(&buf, "# Proxy Status Report - %s\n\n", time.Now().UTC().Format("2006-01-02 15:04:05 MST"))
-
-		// System Overview
 		fmt.Fprintf(&buf, "## System Overview\n")
 		fmt.Fprintf(&buf, "- Uptime: %.0fs\n", stats.Uptime)
 		fmt.Fprintf(&buf, "- Active Connections: %d\n", stats.ActiveConnections)
 		fmt.Fprintf(&buf, "- Error Rate (%%): %.2f\n\n", stats.ErrorRate)
-
-		// Certificate Status
 		fmt.Fprintf(&buf, "## Certificate Status\n")
 		fmt.Fprintf(&buf, "- Total: %d | Healthy: %d | Warning: %d | Urgent: %d | Critical: %d | Expired: %d\n\n",
 			certStats.TotalCertificates,
@@ -491,8 +470,6 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 			certStats.CriticalCount,
 			certStats.ExpiredCount,
 		)
-
-		// Recent Errors
 		fmt.Fprintf(&buf, "## Recent Errors (Last %d)\n", len(recentErrors))
 		for i, e := range recentErrors {
 			fmt.Fprintf(&buf, "%d. [%s] %d %s - %s %s\n",
@@ -504,19 +481,36 @@ func startHealthServer(port int, proxyServer *proxy.Server, metricsCollector *me
 				e.Path,
 			)
 		}
-
-		// Suggested Analysis Questions
 		fmt.Fprintf(&buf, "\n## Suggested Analysis Questions:\n")
 		fmt.Fprintf(&buf, "- Are there patterns in error spikes?\n")
 		fmt.Fprintf(&buf, "- Which routes have highest latency?\n")
 		fmt.Fprintf(&buf, "- Any certificates nearing expiry that need action?\n")
-
 		w.Write(buf.Bytes())
 	})
 
+	dash := dashboard.New(metricsCollector, certMonitor, proxyServer, dbConn, dashboardEnabled)
+	if err := dash.Start(ctx, mux); err != nil {
+		log.Error().Err(err).Msg("Failed to start dashboard")
+	}
+
 	addr := fmt.Sprintf(":%d", port)
+	server := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	go func() {
+		<-ctx.Done()
+		log.Info().Str("addr", addr).Msg("Shutting down health server")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil && err != http.ErrServerClosed {
+			log.Error().Err(err).Msg("Health server shutdown failed")
+		}
+	}()
+
 	log.Info().Str("addr", addr).Msg("Health check server starting")
-	if err := http.ListenAndServe(addr, nil); err != nil {
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Error().Err(err).Msg("Health server error")
 	}
 }
