@@ -28,7 +28,7 @@
 
     file_server
 
-    php_fastcgi unix//run/php-fpm/pterodactyl.sock {
+    php_fastcgi pterodactyl-php-fpm:9000 {
         root /var/www/pterodactyl/public
         index index.php
 

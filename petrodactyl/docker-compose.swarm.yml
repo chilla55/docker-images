@@ -36,52 +36,96 @@ secrets:
     name: vaultwarden_smtp_password
 
 # ──────────────────────────────────────────────────────────────────────────
+# Configs
+# ──────────────────────────────────────────────────────────────────────────
+configs:
+  caddy_config:
+    file: ./Caddyfile
+  
+  php_fpm_pool:
+    file: ./php-fpm-pool.conf
+  
+  php_ini_custom:
+    file: ./php-custom.ini
+
+# ──────────────────────────────────────────────────────────────────────────
+# Volumes
+# ──────────────────────────────────────────────────────────────────────────
+volumes:
+  pterodactyl_app:
+    driver: local
+
+# ──────────────────────────────────────────────────────────────────────────
+# Shared Environment Configuration (YAML anchor)
+# ──────────────────────────────────────────────────────────────────────────
+x-pterodactyl-env: &pterodactyl-env
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_URL: https://gpanel.chilla55.de
+  APP_TIMEZONE: Europe/Berlin
+  APP_LOCALE: en
+  APP_KEY_FILE: /run/secrets/panel_app_key
+  
+  CACHE_DRIVER: redis
+  SESSION_DRIVER: redis
+  QUEUE_CONNECTION: redis
+  
+  DB_CONNECTION: mysql
+  DB_HOST: mariadb
+  DB_PORT: "3306"
+  DB_DATABASE: panel
+  DB_USERNAME: pterodactyl
+  DB_PASSWORD_FILE: /run/secrets/panel_db_password
+  
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ""
+  
+  MAIL_MAILER: smtp
+  MAIL_HOST: smtp.example.com
+  MAIL_PORT: "25"
+  MAIL_USERNAME: ""
+  MAIL_PASSWORD_FILE: /run/secrets/panel_mail_password
+  MAIL_ENCRYPTION: tls
+  MAIL_FROM_ADDRESS: no-reply@chilla55.de
+  MAIL_FROM_NAME: "Pterodactyl Panel"
+  
+  HASHIDS_SALT: aMxyVI3NeaVOCVajWfyz
+  HASHIDS_LENGTH: "8"
+  APP_SERVICE_AUTHOR: a.g0201@gmx.de
+  PTERODACTYL_TELEMETRY_ENABLED: "false"
+  SESSION_SECURE_COOKIE: "true"
+  TRUSTED_PROXIES: "*"
+  
+  RUN_MIGRATIONS_ON_START: "true"
+  RUN_SEED_ON_START: "false"
+
+# ──────────────────────────────────────────────────────────────────────────
 # Services
 # ──────────────────────────────────────────────────────────────────────────
 services:
   # ────────────────────────────────────────────────────────────────────────
-  # Pterodactyl Panel (All-in-One Container)
+  # PHP-FPM Service (FastCGI server on port 9000)
   # ────────────────────────────────────────────────────────────────────────
-  panel:
-    image: ghcr.io/chilla55/pterodactyl-panel:latest
+  php-fpm:
+    image: ghcr.io/chilla55/pterodactyl-panel:nightly
+    hostname: pterodactyl-php-fpm
     
-    # Build configuration (for local development)
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-    #   args:
-    #     PANEL_VERSION: "$(cat VERSION)"
-    
-    hostname: pterodactyl-panel
+    command: ["/usr/sbin/php-fpm83", "-F", "-R"]
     
     networks:
-      - web-net
       - mariadb-net
       - redis-net
     
     environment:
-      # ──────────────────────────────────────────────────────────────────
-      # Application Settings
-      # ──────────────────────────────────────────────────────────────────
-      APP_ENV: production
-      APP_DEBUG: "false"
-      APP_URL: https://gpanel.chilla55.de
-      APP_TIMEZONE: Europe/Berlin
+      <<: *pterodactyl-env
       APP_LOCALE: en
-      
-      # Secret file paths
       APP_KEY_FILE: /run/secrets/panel_app_key
       
-      # ──────────────────────────────────────────────────────────────────
-      # Cache & Session
-      # ──────────────────────────────────────────────────────────────────
       CACHE_DRIVER: redis
       SESSION_DRIVER: redis
       QUEUE_CONNECTION: redis
       
-      # ──────────────────────────────────────────────────────────────────
-      # Database Settings
-      # ──────────────────────────────────────────────────────────────────
       DB_CONNECTION: mysql
       DB_HOST: mariadb
       DB_PORT: "3306"
@@ -89,16 +133,10 @@ services:
       DB_USERNAME: pterodactyl
       DB_PASSWORD_FILE: /run/secrets/panel_db_password
       
-      # ──────────────────────────────────────────────────────────────────
-      # Redis Settings
-      # ──────────────────────────────────────────────────────────────────
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ""
       
-      # ──────────────────────────────────────────────────────────────────
-      # Mail Settings
-      # ──────────────────────────────────────────────────────────────────
       MAIL_MAILER: smtp
       MAIL_HOST: smtp.example.com
       MAIL_PORT: "25"
@@ -108,91 +146,199 @@ services:
       MAIL_FROM_ADDRESS: no-reply@chilla55.de
       MAIL_FROM_NAME: "Pterodactyl Panel"
       
-      # ──────────────────────────────────────────────────────────────────
-      # Hashids (for obfuscating IDs)
-      # ──────────────────────────────────────────────────────────────────
       HASHIDS_SALT: aMxyVI3NeaVOCVajWfyz
       HASHIDS_LENGTH: "8"
-      
-      # ──────────────────────────────────────────────────────────────────
-      # Additional Settings
-      # ──────────────────────────────────────────────────────────────────
       APP_SERVICE_AUTHOR: a.g0201@gmx.de
       PTERODACTYL_TELEMETRY_ENABLED: "false"
       SESSION_SECURE_COOKIE: "true"
-      
-      # ──────────────────────────────────────────────────────────────────
-      # Trusted Proxies (nginx reverse proxy)
-      # ──────────────────────────────────────────────────────────────────
       TRUSTED_PROXIES: "*"
       
-      # ──────────────────────────────────────────────────────────────────
-      # Runtime Behavior
-      # ──────────────────────────────────────────────────────────────────
-      RUN_MIGRATIONS_ON_START: "true"   # Always run migrations on startup
-      RUN_SEED_ON_START: "false"        # Set to "true" only for first deployment
+      RUN_MIGRATIONS_ON_START: "true"
+      RUN_SEED_ON_START: "false"
     
     secrets:
       - panel_app_key
       - panel_db_password
       - panel_mail_password
     
+    configs:
+      - source: php_fpm_pool
+        target: /etc/php83/php-fpm.d/pterodactyl.conf
+        mode: 0444
+      - source: php_ini_custom
+        target: /etc/php83/conf.d/99-custom.ini
+        mode: 0444
+    
+    volumes:
+      - pterodactyl_app:/var/www/pterodactyl
+    
     deploy:
       mode: replicated
       replicas: 1
-      
-      # Placement constraints (optional - adjust for your needs)
       placement:
         constraints:
           - node.labels.web.node == web
-      
-      # Resource limits
       resources:
         limits:
-          cpus: '2.0'
-          memory: 2G
+          cpus: '1.5'
+          memory: 1G
         reservations:
-          cpus: '0.5'
-          memory: 512M
-      
-      # Update configuration
-      update_config:
-        parallelism: 1
-        delay: 10s
-        failure_action: rollback
-        monitor: 30s
-        order: start-first
-      
-      rollback_config:
-        parallelism: 1
-        delay: 5s
-        failure_action: pause
-        monitor: 10s
-        order: stop-first
-      
-      # Restart policy
+          cpus: '0.25'
+          memory: 256M
       restart_policy:
         condition: any
-        delay: 10s
+        delay: 5s
         max_attempts: 5
         window: 300s
-      
-      # Labels for Traefik/nginx integration (adjust as needed)
       labels:
-        - "com.pterodactyl.service=panel"
+        - "com.pterodactyl.service=php-fpm"
     
-    healthcheck:
-      test: ["CMD", "/healthcheck.sh"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 60s
+    stop_grace_period: 10s
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Caddy HTTP Server (port 80, proxies to php-fpm:9000)
+  # ────────────────────────────────────────────────────────────────────────
+  caddy:
+    image: ghcr.io/chilla55/pterodactyl-panel:nightly
+    hostname: pterodactyl-caddy
+    
+    command: ["/usr/sbin/caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    
+    networks:
+      - web-net
+    
+    volumes:
+      - pterodactyl_app:/var/www/pterodactyl
+    
+    configs:
+      - source: caddy_config
+        target: /etc/caddy/Caddyfile
+        mode: 0444
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.web.node == web
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 300s
+      labels:
+        - "com.pterodactyl.service=caddy"
+    
+    stop_grace_period: 10s
+    
+    environment:
+      # go-proxy registry
+      REGISTRY_HOST: proxy
+      REGISTRY_PORT: "81"
+      DOMAINS: gpanel.chilla55.de
+      ROUTE_PATH: /
+      BACKEND_HOST: pterodactyl-caddy
+      PORT: "80"
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Queue Worker Service
+  # ────────────────────────────────────────────────────────────────────────
+  queue:
+    image: ghcr.io/chilla55/pterodactyl-panel:nightly
+    hostname: pterodactyl-queue
+    
+    command: ["php", "artisan", "queue:work", "--queue=high,standard,low", "--sleep=3", "--tries=3"]
+    working_dir: /var/www/pterodactyl
+    
+    networks:
+      - mariadb-net
+      - redis-net
+    
+    environment:
+      <<: *pterodactyl-env
+    
+    secrets:
+      - panel_app_key
+      - panel_db_password
+      - panel_mail_password
+    
+    volumes:
+      - pterodactyl_app:/var/www/pterodactyl
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.web.node == web
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 300s
+      labels:
+        - "com.pterodactyl.service=queue"
     
     stop_grace_period: 30s
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Cron/Scheduler Service
+  # ────────────────────────────────────────────────────────────────────────
+  cron:
+    image: ghcr.io/chilla55/pterodactyl-panel:nightly
+    hostname: pterodactyl-cron
     
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-        labels: "service,version"
+    command: ["/bin/sh", "-c", "while true; do php artisan schedule:run >> /dev/null 2>&1; sleep 60; done"]
+    working_dir: /var/www/pterodactyl
+    
+    networks:
+      - mariadb-net
+      - redis-net
+    
+    environment:
+      <<: *pterodactyl-env
+    
+    secrets:
+      - panel_app_key
+      - panel_db_password
+      - panel_mail_password
+    
+    volumes:
+      - pterodactyl_app:/var/www/pterodactyl
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.web.node == web
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 300s
+      labels:
+        - "com.pterodactyl.service=cron"
+    
+    stop_grace_period: 10s
