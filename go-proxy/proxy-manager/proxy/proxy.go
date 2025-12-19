@@ -1219,9 +1219,19 @@ func (s *Server) applyHeaders(w http.ResponseWriter, route *Route) {
 func (s *Server) blackhole(w http.ResponseWriter, r *http.Request) {
 	atomic.AddInt64(&s.blackholeMetric, 1)
 
-	// Just close the connection without response
-	if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
-		conn.Close()
+	// Try to drop the connection for HTTP/1.x; fall back to a short response for HTTP/2 where Hijack is unsupported.
+	if hj, ok := w.(http.Hijacker); ok {
+		if conn, _, err := hj.Hijack(); err == nil {
+			conn.Close()
+			return
+		}
+	}
+
+	// HTTP/2 (or any non-hijackable writer): return a minimal response and close.
+	w.Header().Set("Connection", "close")
+	w.WriteHeader(http.StatusMisdirectedRequest)
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
 	}
 }
 
