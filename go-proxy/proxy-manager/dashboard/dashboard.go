@@ -13,13 +13,13 @@ import (
 
 // SystemStats holds current system metrics
 type SystemStats struct {
-	Uptime           time.Duration `json:"uptime"`
-	ActiveConnection int64         `json:"active_connections"`
-	RequestsPerSec   float64       `json:"requests_per_sec"`
-	ErrorRate        float64       `json:"error_rate"`
-	TotalRequests    int64         `json:"total_requests"`
-	TotalErrors      int64         `json:"total_errors"`
-	Timestamp        time.Time     `json:"timestamp"`
+	UptimeMs         int64     `json:"uptime_ms"`
+	ActiveConnection int64     `json:"active_connections"`
+	RequestsPerSec   float64   `json:"requests_per_sec"`
+	ErrorRate        float64   `json:"error_rate"`
+	TotalRequests    int64     `json:"total_requests"`
+	TotalErrors      int64     `json:"total_errors"`
+	Timestamp        time.Time `json:"timestamp"`
 }
 
 // RouteStatus holds per-route monitoring data
@@ -192,7 +192,7 @@ func (d *Dashboard) gatherDashboardData(ctx context.Context) (*DashboardData, er
 // getSystemStats calculates current system statistics
 func (d *Dashboard) getSystemStats() *SystemStats {
 	return &SystemStats{
-		Uptime:           time.Since(d.startTime),
+		UptimeMs:         time.Since(d.startTime).Milliseconds(),
 		ActiveConnection: 0,   // TODO: get from metricsProvider
 		RequestsPerSec:   0.0, // TODO: calculate from metrics
 		ErrorRate:        0.0, // TODO: calculate from metrics
@@ -232,7 +232,7 @@ func (d *Dashboard) generateAIContext() string {
 
 	ctx += "## System Statistics\n"
 	if data.SystemStats != nil {
-		ctx += fmt.Sprintf("- Uptime: %v\n", data.SystemStats.Uptime)
+		ctx += fmt.Sprintf("- Uptime: %v\n", time.Duration(data.SystemStats.UptimeMs)*time.Millisecond)
 		ctx += fmt.Sprintf("- Active Connections: %d\n", data.SystemStats.ActiveConnection)
 		ctx += fmt.Sprintf("- Requests/sec: %.2f\n", data.SystemStats.RequestsPerSec)
 		ctx += fmt.Sprintf("- Error Rate: %.2f%%\n", data.SystemStats.ErrorRate*100)

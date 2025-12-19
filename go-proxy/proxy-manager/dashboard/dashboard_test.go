@@ -27,7 +27,7 @@ func TestSystemStats(t *testing.T) {
 		t.Error("Stats should not be nil")
 	}
 
-	if stats.Uptime == 0 {
+	if stats.UptimeMs == 0 {
 		t.Error("Uptime should be set")
 	}
 
@@ -60,7 +60,7 @@ func TestAIContextGeneration(t *testing.T) {
 func TestDashboardDataStructures(t *testing.T) {
 	data := &DashboardData{
 		SystemStats: &SystemStats{
-			Uptime:           time.Hour,
+			UptimeMs:         int64(time.Hour / time.Millisecond),
 			ActiveConnection: 42,
 			RequestsPerSec:   15.3,
 			ErrorRate:        0.0002,
@@ -74,8 +74,8 @@ func TestDashboardDataStructures(t *testing.T) {
 		GeneratedAt:  time.Now(),
 	}
 
-	if data.SystemStats.Uptime != time.Hour {
-		t.Error("SystemStats not properly set")
+	if data.SystemStats.UptimeMs <= 0 {
+		t.Error("SystemStats uptime not properly set")
 	}
 }
 

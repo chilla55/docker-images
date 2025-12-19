@@ -98,7 +98,7 @@ func (d *Dashboard) getHTML() string {
     function updateUI(data) {
       if (!data.system_stats) return;
       const s = data.system_stats;
-      document.getElementById('uptime').textContent = formatDuration(s.uptime);
+      document.getElementById('uptime').textContent = formatDuration(s.uptime_ms);
       document.getElementById('connections').textContent = s.active_connections;
       document.getElementById('requestsPerSec').textContent = s.requests_per_sec.toFixed(1);
       document.getElementById('errorRate').textContent = (s.error_rate * 100).toFixed(2) + '%';
@@ -134,7 +134,16 @@ func (d *Dashboard) getHTML() string {
       try {
         const response = await fetch('/api/dashboard/context');
         const text = await response.text();
-        await navigator.clipboard.writeText(text);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
         alert('Copied to clipboard');
       } catch (err) {
         console.error('Failed:', err);
