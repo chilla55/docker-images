@@ -1,42 +1,35 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"io"
-	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 )
 
 var (
-	repoURL           = "https://github.com/6th-Maroon-Division/Homepage.git"
-	appDir            = "/app/repo"
-	registryHost      = getEnv("REGISTRY_HOST", "proxy")
-	registryPort      = getEnv("REGISTRY_PORT", "81")
-	domainsStr        = getEnv("DOMAINS", "orbat.chilla55.de")
-	routePath         = getEnv("ROUTE_PATH", "/")
-	backendHost       = getEnv("BACKEND_HOST", "orbat")
-	port              = getEnv("PORT", "3000")
-	maintenancePort   = getEnv("MAINTENANCE_PORT", "3001")
-	serviceName       = getEnv("SERVICE_NAME", "orbat")
-	updateCheckIntvl  = getEnv("UPDATE_CHECK_INTERVAL", "300")
+	repoURL            = "https://github.com/6th-Maroon-Division/Homepage.git"
+	appDir             = "/app/repo"
+	registryHost       = getEnv("REGISTRY_HOST", "proxy")
+	registryPort       = getEnv("REGISTRY_PORT", "81")
+	domainsStr         = getEnv("DOMAINS", "orbat.chilla55.de")
+	routePath          = getEnv("ROUTE_PATH", "/")
+	backendHost        = getEnv("BACKEND_HOST", "orbat")
+	port               = getEnv("PORT", "3000")
+	maintenancePort    = getEnv("MAINTENANCE_PORT", "3001")
+	serviceName        = getEnv("SERVICE_NAME", "orbat")
+	updateCheckIntvl   = getEnv("UPDATE_CHECK_INTERVAL", "300")
+	maintenancePageURL = getEnv("MAINTENANCE_PAGE_URL", "") // Custom maintenance page URL
 
-	registryConn      net.Conn
-	registryMutex     sync.Mutex
-	sessionID         string
-	registryCmdChan   chan string
-	registryRespChan  chan string
-	registryConnected bool
-	maintenancePID    int
-	updateChkPID      int
-	npmStartPID       int
+	registryClientV2 *RegistryClientV2
+	routeID          string
+	maintenancePID   int
+	updateChkPID     int
+	npmStartPID      int
 
 	done = make(chan os.Signal, 1)
 )
@@ -96,11 +89,10 @@ func log(format string, args ...interface{}) {
 
 func cleanup() {
 	log("Shutting down, closing persistent connection...")
-	if registryConn != nil {
-		if sessionID != "" {
-			sendRegistryCommand("SHUTDOWN|" + sessionID)
-		}
-		registryConn.Close()
+	if registryClientV2 != nil {
+		log("Shutting down registry connection...")
+		registryClientV2.Shutdown()
+		registryClientV2 = nil
 	}
 	if maintenancePID > 0 {
 		syscall.Kill(maintenancePID, syscall.SIGTERM)
@@ -113,177 +105,122 @@ func cleanup() {
 	}
 }
 
-func connectRegistry() error {
-	registryMutex.Lock()
-	defer registryMutex.Unlock()
-
-	if registryConn != nil {
-		return nil
-	}
-
-	conn, err := net.DialTimeout("tcp", registryHost+":"+registryPort, 10*time.Second)
-	if err != nil {
-		log("Failed to connect to registry: %v", err)
-		return err
-	}
-
-	registryConn = conn
-	registryConnected = true
-	log("Connected to registry at %s:%s (persistent)", registryHost, registryPort)
-
-	// Start background reader/writer
-	go handleRegistryConnection()
-
-	return nil
-}
-
-func handleRegistryConnection() {
-	reader := bufio.NewReader(registryConn)
+// keepAliveLoop sends periodic pings to keep the V2 connection alive
+func keepAliveLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case cmd := <-registryCmdChan:
-			if cmd == "CLOSE" {
-				return
+		case <-ticker.C:
+			if registryClientV2 != nil {
+				err := registryClientV2.Ping()
+				if err != nil {
+					log("Keepalive ping failed: %v", err)
+					// Try to reconnect
+					go func() {
+						time.Sleep(5 * time.Second)
+						if err := registerWithProxy(); err != nil {
+							log("Reconnection failed: %v", err)
+						}
+					}()
+				}
 			}
-			// Send command
-			registryConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			_, err := io.WriteString(registryConn, cmd+"\r\n")
-			if err != nil {
-				log("Failed to send command: %v", err)
-				registryConnected = false
-				registryConn.Close()
-				registryConn = nil
-				registryRespChan <- "ERROR:" + err.Error()
-				continue
-			}
-
-			// Read response
-			registryConn.SetReadDeadline(time.Now().Add(20 * time.Second))
-			response, err := reader.ReadString('\n')
-			if err != nil {
-				log("Failed to read response: %v", err)
-				registryConnected = false
-				registryConn.Close()
-				registryConn = nil
-				registryRespChan <- "ERROR:" + err.Error()
-				continue
-			}
-
-			registryRespChan <- strings.TrimSpace(response)
-
-		case <-time.After(30 * time.Second):
-			// Keep connection alive with periodic check
-			if registryConnected {
-				// Silently keep connection open
-			}
+		case <-done:
+			return
 		}
-	}
-}
-
-func sendRegistryCommand(cmd string) (string, error) {
-	if !registryConnected {
-		// try to reconnect once
-		if err := connectRegistry(); err != nil {
-			return "", fmt.Errorf("registry not connected")
-		}
-	}
-
-	// Send command through channel
-	select {
-	case registryCmdChan <- cmd:
-	case <-time.After(5 * time.Second):
-		return "", fmt.Errorf("command send timeout")
-	}
-
-	// Wait for response
-	select {
-	case resp := <-registryRespChan:
-		if strings.HasPrefix(resp, "ERROR:") {
-			return "", fmt.Errorf(strings.TrimPrefix(resp, "ERROR:"))
-		}
-		return resp, nil
-	case <-time.After(15 * time.Second):
-		return "", fmt.Errorf("response timeout")
 	}
 }
 
 func registerWithProxy() error {
-	log("Registering service with go-proxy registry...")
+	log("Registering service with go-proxy registry (V2 protocol)...")
 
-	if err := connectRegistry(); err != nil {
-		return err
+	registryAddr := fmt.Sprintf("%s:%s", registryHost, registryPort)
+
+	// Create metadata
+	metadata := map[string]interface{}{
+		"version":     "1.0.0",
+		"git_repo":    repoURL,
+		"auto_update": true,
 	}
 
-	// Try to reconnect with existing session
-	if sessionID != "" {
-		resp, err := sendRegistryCommand("RECONNECT|" + sessionID)
-		if err == nil && resp == "OK" {
-			log("Reconnected to registry with session: %s", sessionID)
-			return nil
-		}
-		log("Reconnect failed, re-registering")
-		sessionID = ""
+	// Connect and register with V2 protocol
+	instanceName := backendHost
+	var err error
+	registryClientV2, err = NewRegistryClientV2(registryAddr, serviceName, instanceName, 3001, metadata)
+	if err != nil {
+		return fmt.Errorf("failed to register with V2: %w", err)
 	}
 
-	// Register new service
+	// Add route
 	backendURL := fmt.Sprintf("http://%s:%s", backendHost, port)
-	registerCmd := fmt.Sprintf("REGISTER|%s|%s|%s|%s", serviceName, backendHost, port, maintenancePort)
-	response, err := sendRegistryCommand(registerCmd)
+	domains := strings.Split(strings.ReplaceAll(domainsStr, " ", ""), ",")
+
+	routeID, err = registryClientV2.AddRoute(domains, routePath, backendURL, 10)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to add route: %w", err)
 	}
+	log("Route added with ID: %s", routeID)
 
-	// Parse response: ACK|<session-id>
-	if !strings.HasPrefix(response, "ACK|") {
-		return fmt.Errorf("registration failed: %s", response)
-	}
-	sessionID = strings.TrimPrefix(response, "ACK|")
-	log("Registered with session: %s", sessionID)
-
-	// Register route
-	domains := strings.ReplaceAll(domainsStr, " ", "")
-	routeCmd := fmt.Sprintf("ROUTE|%s|%s|%s|%s", sessionID, domains, routePath, backendURL)
-	resp, err := sendRegistryCommand(routeCmd)
+	// Configure health check
+	err = registryClientV2.SetHealthCheck(routeID, "/", "30s", "5s")
 	if err != nil {
-		return err
+		log("Warning: failed to set health check: %v", err)
 	}
-	log("Route registration: %s", resp)
 
-	// Set options
-	sendRegistryCommand("OPTIONS|" + sessionID + "|timeout|60s")
-	sendRegistryCommand("OPTIONS|" + sessionID + "|compression|true")
-	sendRegistryCommand("OPTIONS|" + sessionID + "|http2|true")
+	// Configure options
+	err = registryClientV2.SetOptions("compression", "true")
+	if err != nil {
+		log("Warning: failed to set compression: %v", err)
+	}
+
+	// Apply all configuration
+	err = registryClientV2.ApplyConfig()
+	if err != nil {
+		return fmt.Errorf("failed to apply config: %w", err)
+	}
+
+	log("Service successfully registered with V2 protocol")
+
+	// Start keepalive pinger
+	go keepAliveLoop()
 
 	return nil
 }
 
 func enterProxyMaintenance() error {
-	if sessionID == "" {
-		return nil
+	if registryClientV2 == nil {
+		return fmt.Errorf("registry client not connected")
 	}
-	resp, err := sendRegistryCommand("MAINT_ENTER|" + sessionID)
+
+	err := registryClientV2.MaintenanceEnterWithURL("ALL", maintenancePageURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to enter maintenance: %w", err)
 	}
-	log("Proxy maintenance enter: %s", resp)
+
+	log("Proxy maintenance mode entered")
+	if maintenancePageURL != "" {
+		log("Using custom maintenance page: %s", maintenancePageURL)
+	}
 	return nil
 }
 
 func exitProxyMaintenance() error {
-	if sessionID == "" {
-		return nil
+	if registryClientV2 == nil {
+		return fmt.Errorf("registry client not connected")
 	}
+
 	for i := 0; i < 3; i++ {
-		resp, err := sendRegistryCommand("MAINT_EXIT|" + sessionID)
-		if err == nil && resp == "MAINT_OK" {
-			log("Proxy maintenance exit acknowledged")
+		err := registryClientV2.MaintenanceExit("ALL")
+		if err == nil {
+			log("Proxy maintenance mode exited")
 			return nil
 		}
-		log("Proxy maintenance exit retry %d", i+1)
+		log("Proxy maintenance exit retry %d: %v", i+1, err)
 		time.Sleep(1 * time.Second)
 	}
-	return nil
+
+	return fmt.Errorf("failed to exit maintenance after 3 retries")
 }
 
 func runCommand(name string, args ...string) error {
@@ -420,7 +357,7 @@ func startNPMServer() {
 			cmd.Stderr = os.Stderr
 			cmd.Dir = appDir
 			npmStartPID = cmd.Process.Pid
-			
+
 			if err := cmd.Run(); err != nil {
 				log("Next.js exited (code: %v), restarting in 5s...", err)
 			}
@@ -432,10 +369,6 @@ func startNPMServer() {
 func main() {
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	defer cleanup()
-
-	// Initialize registry channels
-	registryCmdChan = make(chan string, 1)
-	registryRespChan = make(chan string, 1)
 
 	log("Starting entrypoint...")
 	log("Service: %s, Port: %s, Maintenance: %s", serviceName, port, maintenancePort)
@@ -462,7 +395,7 @@ func main() {
 			time.Sleep(30 * time.Second)
 			os.Exit(1)
 		}
-		log("Successfully registered with proxy (session: %s)", sessionID)
+		log("Successfully registered with proxy")
 		break
 	}
 
@@ -518,12 +451,7 @@ func main() {
 		case <-done:
 			return
 		case <-time.After(10 * time.Second):
-			// Periodically check if registry connection is still alive
-			if registryConn != nil {
-				registryMutex.Lock()
-				// Test connection with a simple operation
-				registryMutex.Unlock()
-			}
+			// Keep-alive interval - handled by keepAliveLoop
 		}
 	}
 }
