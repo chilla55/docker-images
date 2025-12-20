@@ -244,12 +244,16 @@ func (d *Dashboard) getSystemStats() *SystemStats {
 
 // getRouteStatuses returns status for all configured routes
 func (d *Dashboard) getRouteStatuses() []RouteStatus {
-	srv, ok := d.proxyServer.(interface{ RouteSummaries() []proxy.RouteSummary })
-	if !ok {
+	// Cast to actual proxy.Server type for best results
+	var summaries []proxy.RouteSummary
+
+	if ps, ok := d.proxyServer.(*proxy.Server); ok {
+		summaries = ps.RouteSummaries()
+	} else if srv, ok := d.proxyServer.(interface{ RouteSummaries() []proxy.RouteSummary }); ok {
+		summaries = srv.RouteSummaries()
+	} else {
 		return []RouteStatus{}
 	}
-
-	summaries := srv.RouteSummaries()
 	routes := make([]RouteStatus, 0, len(summaries))
 
 	for _, s := range summaries {
@@ -318,12 +322,16 @@ type MaintenanceStats struct {
 
 // getMaintenanceStats gathers maintenance/drain statistics from proxy server
 func (d *Dashboard) getMaintenanceStats() *MaintenanceStats {
-	srv, ok := d.proxyServer.(interface{ RouteSummaries() []proxy.RouteSummary })
-	if !ok {
+	// Cast to actual proxy.Server type for best results
+	var summaries []proxy.RouteSummary
+
+	if ps, ok := d.proxyServer.(*proxy.Server); ok {
+		summaries = ps.RouteSummaries()
+	} else if srv, ok := d.proxyServer.(interface{ RouteSummaries() []proxy.RouteSummary }); ok {
+		summaries = srv.RouteSummaries()
+	} else {
 		return &MaintenanceStats{}
 	}
-
-	summaries := srv.RouteSummaries()
 	stats := &MaintenanceStats{}
 
 	for _, s := range summaries {
@@ -365,11 +373,22 @@ type DebugInfo struct {
 
 // getDebugInfo collects debug information from proxy server
 func (d *Dashboard) getDebugInfo() *DebugInfo {
+	// Cast to actual proxy.Server type for best results
+	if ps, ok := d.proxyServer.(*proxy.Server); ok {
+		return &DebugInfo{
+			Proxy:       ps.DebugSnapshot(),
+			Routes:      ps.RouteSummaries(),
+			GeneratedAt: time.Now(),
+		}
+	}
+
+	// Fallback: try interface assertion
 	srv, ok := d.proxyServer.(interface {
 		DebugSnapshot() proxy.ProxyDebugInfo
 		RouteSummaries() []proxy.RouteSummary
 	})
 	if !ok {
+		log.Warn().Msg("Unable to cast proxyServer to get debug info")
 		return &DebugInfo{GeneratedAt: time.Now()}
 	}
 
