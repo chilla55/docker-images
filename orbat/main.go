@@ -23,7 +23,7 @@ var (
 	maintenancePort    = getEnv("MAINTENANCE_PORT", "3001")
 	serviceName        = getEnv("SERVICE_NAME", "orbat")
 	updateCheckIntvl   = getEnv("UPDATE_CHECK_INTERVAL", "300")
-	maintenancePageURL = getEnv("MAINTENANCE_PAGE_URL", "") // Custom maintenance page URL
+	maintenancePageURL string // Will be set in main() if not provided via env
 
 	registryClientV2 *RegistryClientV2
 	routeID          string
@@ -378,6 +378,16 @@ func main() {
 
 	log("Starting entrypoint...")
 	log("Service: %s, Port: %s, Maintenance: %s", serviceName, port, maintenancePort)
+
+	// Setup maintenance page URL if not provided
+	if maintenancePageURL == "" {
+		maintenancePageURL = getEnv("MAINTENANCE_PAGE_URL", "")
+		if maintenancePageURL == "" {
+			// Use local maintenance server as fallback
+			maintenancePageURL = fmt.Sprintf("http://%s:%s/", backendHost, maintenancePort)
+			log("Using default maintenance page: %s", maintenancePageURL)
+		}
+	}
 
 	// Setup DATABASE_URL from secrets before any database operations
 	if err := setupDatabaseURL(); err != nil {
