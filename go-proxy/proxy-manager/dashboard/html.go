@@ -83,6 +83,50 @@ func (d *Dashboard) getHTML() string {
         <div class="section-title">Recent Errors</div>
         <div id="errorsList" class="empty-state">No errors</div>
       </div>
+      <div class="section">
+        <div class="section-title">Debug Info</div>
+        <button onclick="loadDebugData()" style="margin-bottom: 15px;">Load Debug Data</button>
+        <div id="debugData" style="background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; font-family: monospace; font-size: 12px; max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word; display: none;"></div>
+      </div>
+      <div class="section">
+        <div class="section-title">Available API Endpoints</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 15px;">
+          <div style="background: #f5f7fa; padding: 12px; border-radius: 8px; border-left: 3px solid #667eea;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Dashboard & UI</div>
+            <div style="font-size: 12px; line-height: 1.6;">
+              <div><span style="color: #28a745;">GET</span> <span style="color: #667eea;">/dashboard</span></div>
+              <div><span style="color: #28a745;">GET</span> <span style="color: #667eea;">/api/dashboard</span></div>
+            </div>
+          </div>
+          <div style="background: #f5f7fa; padding: 12px; border-radius: 8px; border-left: 3px solid #667eea;">
+            <div style="font-weight: 600; margin-bottom: 8px;">System Info</div>
+            <div style="font-size: 12px; line-height: 1.6;">
+              <div><span style="color: #28a745;">GET</span> <span style="color: #667eea;">/api/dashboard/stats</span></div>
+              <div><span style="color: #28a745;">GET</span> <span style="color: #667eea;">/api/dashboard/debug</span></div>
+            </div>
+          </div>
+          <div style="background: #f5f7fa; padding: 12px; border-radius: 8px; border-left: 3px solid #667eea;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Routes & Status</div>
+            <div style="font-size: 12px; line-height: 1.6;">
+              <div><span style="color: #28a745;">GET</span> <span style="color: #667eea;">/api/dashboard/routes</span></div>
+              <div><span style="color: #28a745;">GET</span> <span style="color: #667eea;">/api/dashboard/maintenance</span></div>
+            </div>
+          </div>
+          <div style="background: #f5f7fa; padding: 12px; border-radius: 8px; border-left: 3px solid #667eea;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Monitoring</div>
+            <div style="font-size: 12px; line-height: 1.6;">
+              <div><span style="color: #28a745;">GET</span> <span style="color: #667eea;">/api/dashboard/certificates</span></div>
+              <div><span style="color: #28a745;">GET</span> <span style="color: #667eea;">/api/dashboard/errors</span></div>
+            </div>
+          </div>
+          <div style="background: #f5f7fa; padding: 12px; border-radius: 8px; border-left: 3px solid #667eea;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Export</div>
+            <div style="font-size: 12px; line-height: 1.6;">
+              <div><span style="color: #28a745;">GET</span> <span style="color: #667eea;">/api/dashboard/context</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <script>
@@ -147,6 +191,19 @@ func (d *Dashboard) getHTML() string {
         alert('Copied to clipboard');
       } catch (err) {
         console.error('Failed:', err);
+      }
+    }
+    async function loadDebugData() {
+      try {
+        const response = await fetch('/api/dashboard/debug');
+        const data = await response.json();
+        const debugDiv = document.getElementById('debugData');
+        debugDiv.textContent = JSON.stringify(data, null, 2);
+        debugDiv.style.display = 'block';
+      } catch (err) {
+        console.error('Failed to load debug data:', err);
+        document.getElementById('debugData').textContent = 'Error loading debug data: ' + err.message;
+        document.getElementById('debugData').style.display = 'block';
       }
     }
     function formatDuration(ms) {
