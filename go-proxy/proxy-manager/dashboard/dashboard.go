@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/chilla55/proxy-manager/proxy"
 	"github.com/rs/zerolog/log"
 )
 
@@ -231,8 +233,48 @@ func (d *Dashboard) getSystemStats() *SystemStats {
 
 // getRouteStatuses returns status for all configured routes
 func (d *Dashboard) getRouteStatuses() []RouteStatus {
-	// TODO: fetch from proxyServer routes
-	return []RouteStatus{}
+	srv, ok := d.proxyServer.(interface{ RouteSummaries() []proxy.RouteSummary })
+	if !ok {
+		return []RouteStatus{}
+	}
+
+	summaries := srv.RouteSummaries()
+	routes := make([]RouteStatus, 0, len(summaries))
+
+	for _, s := range summaries {
+		for _, domain := range s.Domains {
+			status := "healthy"
+			if s.InMaintenance {
+				status = "maintenance"
+			} else if s.Draining {
+				status = "draining"
+			} else if !s.Healthy {
+				status = "down"
+			}
+
+			routes = append(routes, RouteStatus{
+				Domain:            domain,
+				Path:              s.Path,
+				Backend:           s.BackendURL,
+				Status:            status,
+				Requests24h:       0, // TODO: wire metrics
+				AvgResponseTime:   0,
+				ErrorRate:         0,
+				LastError:         "",
+				InMaintenance:     s.InMaintenance,
+				MaintenancePageURL: s.MaintenancePageURL,
+				MaintenanceHits:   s.MaintenanceHits,
+				Draining:          s.Draining,
+				DrainProgress:     s.DrainProgress,
+				DrainRemaining:    s.DrainRemaining,
+				DrainRejected:     s.DrainRejected,
+				CircuitState:      s.CircuitState,
+				CircuitFailures:   s.CircuitFailures,
+			})
+		}
+	}
+
+	return routes
 }
 
 // getCertificateStatuses returns certificate expiry information
@@ -265,11 +307,40 @@ type MaintenanceStats struct {
 
 // getMaintenanceStats gathers maintenance/drain statistics from proxy server
 func (d *Dashboard) getMaintenanceStats() *MaintenanceStats {
+	srv, ok := d.proxyServer.(interface{ RouteSummaries() []proxy.RouteSummary })
+	if !ok {
+		return &MaintenanceStats{}
+	}
+
+	summaries := srv.RouteSummaries()
 	stats := &MaintenanceStats{}
 
-	// TODO: Get from proxy server when interface is available
-	// For now, return empty stats
-	// This will be populated when we can query proxy.Server for routes
+	for _, s := range summaries {
+		if s.InMaintenance {
+			stats.TotalInMaintenance++
+		}
+		if s.Draining {
+			stats.TotalDraining++
+		}
+		stats.TotalHits += s.MaintenanceHits
+		stats.TotalRejected += s.DrainRejected
+
+		stats.Routes = append(stats.Routes, struct {
+			Domain             string  `json:"domain"`
+			Path               string  `json:"path"`
+			MaintenanceHits    int64   `json:"maintenance_hits,omitempty"`
+			MaintenancePageURL string  `json:"maintenance_page_url,omitempty"`
+			DrainRejected      int64   `json:"drain_rejected,omitempty"`
+			DrainProgress      float64 `json:"drain_progress,omitempty"`
+		}{
+			Domain:             strings.Join(s.Domains, ","),
+			Path:               s.Path,
+			MaintenanceHits:    s.MaintenanceHits,
+			MaintenancePageURL: s.MaintenancePageURL,
+			DrainRejected:      s.DrainRejected,
+			DrainProgress:      s.DrainProgress,
+		})
+	}
 
 	return stats
 }

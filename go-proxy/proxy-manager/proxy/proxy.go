@@ -121,6 +121,23 @@ type BackendStatus struct {
 	DrainRejected      int64
 }
 
+// RouteSummary provides a read-only snapshot of a route for dashboards
+type RouteSummary struct {
+	Domains            []string
+	Path               string
+	BackendURL         string
+	Healthy            bool
+	InMaintenance      bool
+	MaintenancePageURL string
+	MaintenanceHits    int64
+	Draining           bool
+	DrainProgress      float64
+	DrainRemaining     time.Duration
+	DrainRejected      int64
+	CircuitState       string
+	CircuitFailures    int
+}
+
 // CertMapping maps domain patterns to certificates
 type CertMapping struct {
 	Domains []string // ["*.example.com", "example.com"]
@@ -438,6 +455,56 @@ func (s *Server) RemoveRoute(domains []string, path string) {
 // GetBlackholeCount returns the number of blackholed requests
 func (s *Server) GetBlackholeCount() int64 {
 	return atomic.LoadInt64(&s.blackholeMetric)
+}
+
+// RouteSummaries returns a snapshot of all configured routes for dashboards/monitoring
+func (s *Server) RouteSummaries() []RouteSummary {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	summaries := make([]RouteSummary, 0, len(s.routes))
+	now := time.Now()
+
+	for _, route := range s.routes {
+		backend := route.Backend
+		backend.mu.RLock()
+
+		var progress float64
+		var remaining time.Duration
+		if backend.Draining && backend.DrainDuration > 0 {
+			elapsed := now.Sub(backend.DrainStart)
+			if elapsed < 0 {
+				elapsed = 0
+			}
+			progress = float64(elapsed) / float64(backend.DrainDuration)
+			if progress > 1 {
+				progress = 1
+			}
+			if elapsed < backend.DrainDuration {
+				remaining = backend.DrainDuration - elapsed
+			}
+		}
+
+		summaries = append(summaries, RouteSummary{
+			Domains:            append([]string(nil), route.Domains...),
+			Path:               route.Path,
+			BackendURL:         backend.URL.String(),
+			Healthy:            backend.Healthy,
+			InMaintenance:      backend.InMaintenance,
+			MaintenancePageURL: backend.MaintenancePageURL,
+			MaintenanceHits:    atomic.LoadInt64(&backend.MaintenanceHits),
+			Draining:           backend.Draining,
+			DrainProgress:      progress,
+			DrainRemaining:     remaining,
+			DrainRejected:      atomic.LoadInt64(&backend.DrainRejected),
+			CircuitState:       backend.cbState,
+			CircuitFailures:    backend.cbFailures,
+		})
+
+		backend.mu.RUnlock()
+	}
+
+	return summaries
 }
 
 // UpdateCertificates hot-reloads certificates without restarting the server
