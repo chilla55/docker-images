@@ -41,1357 +41,844 @@ All responses are also newline-terminated.
 
 ---
 
-## Commands Reference
+## Protocol v2
+
+This protocol provides comprehensive service registration, route management, and operational control with staged configuration, observability, and production-grade resilience features.
+
+### General Conventions
+- All commands include `session_id` after registration.
+- All commands receive an immediate acknowledgement response.
+- `route_id` identifies a specific route returned from `ROUTE_ADD`.
+- `target` is either a specific `route_id` or `ALL` for global settings.
+- Backend identifiers are full connection strings with scheme (e.g., `http://orbat:3000`, `https://api:9443`, `ws://chat:8080`).
+- The proxy responds with `OK`, `ACK`, specific `*_OK` codes, or `ERROR|message`.
+- **Configuration is staged**: All `ROUTE_*`, `HEADERS_SET`, `OPTIONS_SET`, `HEALTH_SET`, and `RATELIMIT_SET` commands stage changes without applying them immediately.
+- Use `CONFIG_VALIDATE` to check for errors, then `CONFIG_APPLY` to atomically apply all staged changes.
+- `CONFIG_APPLY` returns detailed error messages if validation fails.
+- Route priority: routes are matched by longest prefix first; use `priority` field to override (higher = matched first).
 
 ### REGISTER
+Obtain a `session_id` and establish a persistent connection.
 
-Establish a persistent connection and register a service.
-
-**Format:**
+Format:
 ```
-REGISTER|service_name|hostname|service_port|maintenance_port\n
-```
-
-**Parameters:**
-- `service_name` - Logical name for the service (e.g., "api-service")
-- `hostname` - Service hostname/container name (e.g., "api-v2")
-- `service_port` - Port where the service listens (e.g., 9000)
-- `maintenance_port` - Port for maintenance/health checks (e.g., 9001)
-
-**Response:**
-```
-ACK|session_id\n
+REGISTER|service_name|instance_name|maintenance_port|metadata
 ```
 
-The `session_id` is used for all subsequent commands and reconnection.
+Parameters:
+- `service_name`: logical service name (e.g., `orbat`).
+- `instance_name`: internal identifier (e.g., container name).
+- `maintenance_port`: port for maintenance/health page.
+- `metadata`: optional JSON object with version, build, tags (e.g., `{"version":"1.2.3","build":"abc123"}`).
 
-**Example:**
+Response:
 ```
-REGISTER|api-service|api-v2|9000|9001\n
-→ ACK|api-v2-9000-1734532800\n
-```
-
-**Notes:**
-- Connection remains open after registration
-- Session expires if connection is lost for >60 seconds
-- Use `RECONNECT` command to restore session after disconnection
-
----
-
-### ROUTE
-
-Add a route to the proxy (requires active session).
-
-**Format:**
-```
-ROUTE|session_id|domains|path|backend\n
+ACK|session_id
 ```
 
-**Parameters:**
-- `session_id` - Session ID from REGISTER response
-- `domains` - Comma-separated list of domains (e.g., "api.example.com,www.api.example.com")
-- `path` - URL path to match (e.g., "/v2" or "/api/users")
-- `backend` - Full backend URL (e.g., "http://api-v2:9000")
+Notes:
+- The server enables TCP keepalive (30s period) on this connection to detect crashes.
+- Metadata is used for observability and logging only.
 
-**Response:**
-```
-ROUTE_OK\n
-```
+### ROUTE_ADD
+Stage a backend route for addition; returns a `route_id` for future updates.
 
-**Example:**
+Format:
 ```
-ROUTE|api-v2-9000-1734532800|api.example.com,www.api.example.com|/v2|http://api-v2:9000\n
-→ ROUTE_OK\n
+ROUTE_ADD|session_id|domains|path|backend_url|priority
 ```
 
-**Multiple Routes:**
-You can register multiple routes for the same service:
+Parameters:
+- `domains`: comma-separated list (e.g., `orbat.chilla55.de,www.orbat.chilla55.de`).
+- `path`: URL path prefix (e.g., `/`, `/api`).
+- `backend_url`: full connection string with scheme (e.g., `http://orbat:3000`, `https://api:9443`, `ws://chat:8080`).
+- `priority`: integer priority (higher = matched first); use `0` for default (longest prefix match).
+
+Response:
 ```
-ROUTE|api-v2-9000-1734532800|api.example.com|/v2|http://api-v2:9000\n
-ROUTE|api-v2-9000-1734532800|api.example.com|/v2/admin|http://api-v2:9001\n
-```
-
----
-
-### HEADER
-
-Add a custom header to all routes for this service.
-
-**Format:**
-```
-HEADER|session_id|header_name|header_value\n
+ROUTE_OK|route_id
 ```
 
-**Parameters:**
-- `session_id` - Session ID from REGISTER
-- `header_name` - HTTP header name (e.g., "X-API-Version")
-- `header_value` - Header value (e.g., "2.0")
+Notes:
+- Route is staged; call `CONFIG_APPLY` to activate.
+- Default priority is 0; routes with same priority use longest prefix matching.
 
-**Response:**
-```
-HEADER_OK\n
-```
+### ROUTE_ADD_BULK
+Stage multiple backend routes in a single command.
 
-**Example:**
+Format:
 ```
-HEADER|api-v2-9000-1734532800|X-API-Version|2.0\n
-→ HEADER_OK\n
-HEADER|api-v2-9000-1734532800|X-Service-Name|api-service\n
-→ HEADER_OK\n
+ROUTE_ADD_BULK|session_id|json_array
 ```
 
-**Notes:**
-- Headers apply to ALL routes registered by this service
-- Headers are re-applied when routes are updated
-- Use for versioning, debugging, or custom application logic
+Parameters:
+- `json_array`: JSON array of route objects with fields: `domains` (array), `path`, `backend_url`, `priority`.
 
----
-
-### OPTIONS
-
-Set configuration options for the service.
-
-**Format:**
+Example:
 ```
-OPTIONS|session_id|key|value\n
+ROUTE_ADD_BULK|sess123|[{"domains":["api.example.com"],"path":"/v1","backend_url":"http://api:9000","priority":0},{"domains":["api.example.com"],"path":"/v2","backend_url":"http://api-v2:9001","priority":10}]
 ```
 
-**Parameters:**
-- `session_id` - Session ID from REGISTER
-- `key` - Option name
-- `value` - Option value (string, parsed based on key)
-
-**Response:**
+Response:
 ```
-OPTIONS_OK\n
+ROUTE_BULK_OK|json_array
 ```
 
-**Supported Options:**
-
-| Key | Type | Example | Description |
-|-----|------|---------|-------------|
-| `timeout` | duration | `60s` | Request timeout |
-| `health_check_interval` | duration | `30s` | Health check frequency |
-| `health_check_timeout` | duration | `10s` | Health check timeout |
-| `websocket` | boolean | `true` | Enable WebSocket support |
-| `compression` | boolean | `true` | Enable compression |
-| `http2` | boolean | `true` | Enable HTTP/2 |
-| `http3` | boolean | `true` | Enable HTTP/3 (QUIC) |
-
-**Examples:**
+Example response:
 ```
-OPTIONS|api-v2-9000-1734532800|timeout|60s\n
-→ OPTIONS_OK\n
-
-OPTIONS|api-v2-9000-1734532800|websocket|true\n
-→ OPTIONS_OK\n
-
-OPTIONS|api-v2-9000-1734532800|http2|true\n
-→ OPTIONS_OK\n
+ROUTE_BULK_OK|[{"route_id":"r1","status":"ok"},{"route_id":"r2","status":"ok"}]
 ```
 
----
+Notes:
+- All routes are staged; call `CONFIG_APPLY` to activate.
+- If any route fails validation, entire command fails and no routes are staged.
+- More efficient than multiple `ROUTE_ADD` commands for services with many routes.
 
-### VALIDATE
+### ROUTE_UPDATE
+Stage an update to an existing route without removing and re-adding.
 
-Validate the current configuration without applying it.
-
-**Format:**
+Format:
 ```
-VALIDATE|session_id\n
+ROUTE_UPDATE|session_id|route_id|field|value
 ```
 
-**Response:**
+Parameters:
+- `route_id`: target route to update.
+- `field`: one of `backend_url`, `priority`, `domains`, `path`.
+- `value`: new value (for `domains`, use comma-separated list).
+
+Response:
 ```
-OK\n
+ROUTE_OK
 ```
 or
 ```
-ERROR|error_message\n
+ERROR|reason
 ```
 
-**Example:**
+Notes:
+- Changes are staged; call `CONFIG_APPLY` to activate.
+- More efficient than `ROUTE_REMOVE` + `ROUTE_ADD` for single field updates.
+
+### ROUTE_REMOVE
+Stage a route for removal.
+
+Format:
 ```
-VALIDATE|api-v2-9000-1734532800\n
-→ OK\n
+ROUTE_REMOVE|session_id|route_id
 ```
 
-**Use Case:**
-Check configuration before committing changes in a multi-step registration process.
+Response:
+```
+ROUTE_OK
+```
 
----
+Notes:
+- Removal is staged; call `CONFIG_APPLY` to activate.
+- Attempting to remove a non-existent `route_id` returns `ERROR|route not found`.
+
+### ROUTE_LIST
+List all routes for this session (active and staged).
+
+Format:
+```
+ROUTE_LIST|session_id
+```
+
+Response:
+```
+ROUTE_LIST_OK|json_array
+```
+
+Example response:
+```
+ROUTE_LIST_OK|[{"route_id":"r1","domains":["orbat.chilla55.de"],"path":"/","backend":"http://orbat:3000","priority":0,"status":"active"},{"route_id":"r2","domains":["api.chilla55.de"],"path":"/v2","backend":"http://api:9000","priority":10,"status":"staged"}]
+```
+
+Notes:
+- `status` is either `active` (live), `staged` (pending apply), or `pending_removal`.
+
+### HEADERS_SET
+Stage header changes globally or for a specific route.
+
+Format:
+```
+HEADERS_SET|session_id|target|header_name|header_value
+```
+
+Parameters:
+- `target`: `ALL` for all routes or a specific `route_id`.
+- `header_name`: HTTP header name (e.g., `X-Service-Version`).
+- `header_value`: Header value.
+
+Response:
+```
+HEADERS_OK
+```
+or
+```
+ERROR|reason
+```
+
+Notes:
+- Changes are staged; call `CONFIG_APPLY` to activate.
+
+### HEADERS_REMOVE
+Stage removal of a header globally or for a specific route.
+
+Format:
+```
+HEADERS_REMOVE|session_id|target|header_name
+```
+
+Parameters:
+- `target`: `ALL` for all routes or a specific `route_id`.
+- `header_name`: HTTP header name to remove.
+
+Response:
+```
+HEADERS_OK
+```
+or
+```
+ERROR|reason
+```
+
+Notes:
+- Changes are staged; call `CONFIG_APPLY` to activate.
+
+### OPTIONS_SET
+Stage option changes globally or per-route.
+
+Format:
+```
+OPTIONS_SET|session_id|target|key|value
+```
+
+Parameters:
+- `target`: `ALL` for all routes or a specific `route_id`.
+- `key`: e.g., `timeout`, `health_check_interval`, `compression`, `websocket`, `http2`, `http3`.
+- `value`: string; server parses type per key.
+
+Response:
+```
+OPTIONS_OK
+```
+or
+```
+ERROR|reason
+```
+
+Notes:
+- Changes are staged; call `CONFIG_APPLY` to activate.
+
+### OPTIONS_REMOVE
+Stage removal of an option, resetting it to default.
+
+Format:
+```
+OPTIONS_REMOVE|session_id|target|key
+```
+
+Parameters:
+- `target`: `ALL` for all routes or a specific `route_id`.
+- `key`: option key to reset to default.
+
+Response:
+```
+OPTIONS_OK
+```
+or
+```
+ERROR|reason
+```
+
+Notes:
+- Changes are staged; call `CONFIG_APPLY` to activate.
+
+### HEALTH_SET
+Stage custom health check configuration for a route.
+
+Format:
+```
+HEALTH_SET|session_id|route_id|path|interval|timeout
+```
+
+Parameters:
+- `route_id`: target route.
+- `path`: health check path (e.g., `/health`, `/api/status`).
+- `interval`: check interval (e.g., `30s`, `1m`).
+- `timeout`: check timeout (e.g., `5s`, `10s`).
+
+Response:
+```
+HEALTH_OK
+```
+or
+```
+ERROR|reason
+```
+
+Notes:
+- Changes are staged; call `CONFIG_APPLY` to activate.
+- Default health check uses backend root path with 30s interval and 5s timeout.
+
+### RATELIMIT_SET
+Stage rate limiting for a route.
+
+Format:
+```
+RATELIMIT_SET|session_id|route_id|requests|window
+```
+
+Parameters:
+- `route_id`: target route (use `ALL` for global rate limit).
+- `requests`: maximum requests allowed.
+- `window`: time window (e.g., `1s`, `1m`, `1h`).
+
+Response:
+```
+RATELIMIT_OK
+```
+or
+```
+ERROR|reason
+```
+
+Notes:
+- Changes are staged; call `CONFIG_APPLY` to activate.
+- Rate limits are per source IP address.
+
+### CONFIG_VALIDATE
+Validate all staged configuration changes without applying.
+
+Format:
+```
+CONFIG_VALIDATE|session_id
+```
+
+Response:
+```
+OK
+```
+or
+```
+ERROR|detailed_error_message
+```
+
+Notes:
+- Validates routes, headers, options, health checks, and rate limits.
+- Returns specific errors (e.g., `ERROR|route r2: invalid backend URL format`).
+
+### CONFIG_APPLY
+Atomically apply all staged configuration changes.
+
+Format:
+```
+CONFIG_APPLY|session_id
+```
+
+Response:
+```
+OK
+```
+or
+```
+ERROR|detailed_error_message
+```
+
+Notes:
+- Automatically validates before applying; if validation fails, returns detailed error and nothing is applied.
+- On success, all staged changes become active and staging area is cleared.
+- This is an atomic operation: either all changes apply or none do.
+
+### CONFIG_ROLLBACK
+Discard all staged configuration changes without applying.
+
+Format:
+```
+CONFIG_ROLLBACK|session_id
+```
+
+Response:
+```
+OK
+```
+
+Notes:
+- Clears all staged routes, headers, options, health checks, and rate limits.
+- Active configuration remains unchanged.
+- Useful for error recovery or abandoning incomplete configurations.
+
+### CONFIG_DIFF
+Get a summary of staged changes compared to active configuration.
+
+Format:
+```
+CONFIG_DIFF|session_id
+```
+
+Response:
+```
+DIFF_OK|json_object
+```
+
+Example response:
+```
+DIFF_OK|{"routes":{"added":["r3"],"removed":["r1"],"modified":["r2"]},"headers":{"added":2,"removed":1},"options":{"modified":3}}
+```
+
+Notes:
+- Shows what will change when `CONFIG_APPLY` is called.
+- Useful for reviewing changes before applying.
+
+### CONFIG_APPLY_PARTIAL
+Apply only specific types of staged changes.
+
+Format:
+```
+CONFIG_APPLY_PARTIAL|session_id|scope
+```
+
+Parameters:
+- `scope`: comma-separated list of types: `routes`, `headers`, `options`, `health`, `ratelimit`.
+
+Example:
+```
+CONFIG_APPLY_PARTIAL|sess123|routes,headers
+```
+
+Response:
+```
+OK
+```
+or
+```
+ERROR|detailed_error_message
+```
+
+Notes:
+- Only applies changes of specified types; other staged changes remain.
+- Useful for applying route changes without affecting other configuration.
+
+### STATS_GET
+Query request statistics and metrics for routes.
+
+Format:
+```
+STATS_GET|session_id|route_id
+```
+
+Parameters:
+- `route_id`: specific route or `ALL` for all routes in this session.
+
+Response:
+```
+STATS_OK|json_object
+```
+
+Example response:
+```
+STATS_OK|{"route_id":"r1","requests":12453,"errors":23,"avg_latency_ms":45,"p95_latency_ms":120,"p99_latency_ms":250,"bytes_sent":5242880,"bytes_received":1048576,"status_codes":{"200":12400,"404":30,"500":23}}
+```
+
+Notes:
+- Statistics are real-time and include request counts, error rates, latency percentiles, bandwidth, and status code distribution.
+- Useful for observability and auto-scaling decisions.
+
+### PING
+Test connection liveness at application level.
+
+Format:
+```
+PING|session_id
+```
+
+Response:
+```
+PONG
+```
+
+Notes:
+- TCP keepalive handles OS-level detection; `PING` detects application-level hangs.
+- Optional; use if you need explicit heartbeat verification.
+
+### SESSION_INFO
+Get current session information and statistics.
+
+Format:
+```
+SESSION_INFO|session_id
+```
+
+Response:
+```
+SESSION_OK|json_object
+```
+
+Example response:
+```
+SESSION_OK|{"session_id":"orbat-3000-1734532800","service_name":"orbat","instance_name":"orbat.1.abc123","connected_at":"2024-12-20T10:30:00Z","uptime_seconds":3600,"routes_active":3,"routes_staged":1,"last_apply":"2024-12-20T11:15:00Z","metadata":{"version":"1.2.3"}}
+```
+
+Notes:
+- Useful for debugging and monitoring.
+- Shows active and staged route counts, last apply time, and session metadata.
+
+### DRAIN_START
+Gracefully reduce traffic to this service over a specified duration.
+
+Format:
+```
+DRAIN_START|session_id|duration
+```
+
+Parameters:
+- `duration`: drain period (e.g., `30s`, `2m`, `5m`).
+
+Response:
+```
+DRAIN_OK|completion_time
+```
+
+Example response:
+```
+DRAIN_OK|2024-12-20T11:35:00Z
+```
+
+Notes:
+- Traffic is gradually reduced using weighted load balancing.
+- After drain completes, service can enter maintenance or shutdown.
+- Use `DRAIN_STATUS` to monitor progress.
+- Better than immediate maintenance for zero-downtime deployments.
+
+### DRAIN_STATUS
+Check drain operation progress.
+
+Format:
+```
+DRAIN_STATUS|session_id
+```
+
+Response:
+```
+DRAIN_STATUS_OK|json_object
+```
+
+Example response:
+```
+DRAIN_STATUS_OK|{"active":true,"started_at":"2024-12-20T11:30:00Z","duration_seconds":120,"elapsed_seconds":45,"remaining_seconds":75,"traffic_percent":62}
+```
+
+Notes:
+- `traffic_percent` shows current traffic percentage (100 = full, 0 = drained).
+- Returns `ERROR|no drain in progress` if not draining.
+
+### DRAIN_CANCEL
+Cancel an active drain operation.
+
+Format:
+```
+DRAIN_CANCEL|session_id
+```
+
+Response:
+```
+DRAIN_OK
+```
+
+Notes:
+- Immediately restores service to full traffic.
+- Returns `ERROR|no drain in progress` if not draining.
 
 ### MAINT_ENTER
+Enter maintenance mode for all routes or specific routes; proxy serves the maintenance page from the supplied backend URL.
 
-Enter maintenance mode (routes return 503 from maintenance page).
-
-**Format:**
+Format:
 ```
-MAINT_ENTER|session_id\n
-```
-
-**Response:**
-```
-MAINT_OK\n
+MAINT_ENTER|session_id|target|backend_url
 ```
 
-**Example:**
+Parameters:
+- `target`: `ALL` for all routes, or comma-separated `route_id` list (e.g., `r1,r3,r5`).
+- `backend_url`: full connection string to maintenance server (e.g., `http://orbat:3001`).
+
+Response (immediate acknowledgement):
 ```
-MAINT_ENTER|api-v2-9000-1734532800\n
-→ MAINT_OK\n
+ACK
 ```
 
-**Behavior:**
-- All routes for this service return HTTP 503
-- Proxy serves maintenance page from `maintenance_port`
-- Other services continue operating normally
-- Use for zero-downtime deployments
+Event (when maintenance is active):
+```
+MAINT_OK|target
+```
 
----
+Example:
+```
+MAINT_ENTER|sess123|r2,r3|http://orbat:3001
+→ ACK
+→ MAINT_OK|r2,r3
+```
+
+Client should acknowledge the event:
+```
+ACK
+```
+
+Notes:
+- Route-specific maintenance allows partial updates without affecting other routes.
+- Useful for feature-specific deployments or multi-path services.
 
 ### MAINT_EXIT
+Exit maintenance mode for all routes or specific routes.
 
-Exit maintenance mode (restore normal routing).
-
-**Format:**
+Format:
 ```
-MAINT_EXIT|session_id\n
-```
-
-**Response:**
-```
-MAINT_OK\n
+MAINT_EXIT|session_id|target
 ```
 
-**Example:**
+Parameters:
+- `target`: `ALL` for all routes in maintenance, or comma-separated `route_id` list.
+
+Response (immediate acknowledgement):
 ```
-MAINT_EXIT|api-v2-9000-1734532800\n
-→ MAINT_OK\n
-```
-
----
-
-### SHUTDOWN
-
-Gracefully deregister and close connection.
-
-**Format:**
-```
-SHUTDOWN|session_id\n
+ACK
 ```
 
-**Response:**
+Event (when maintenance is fully exited):
 ```
-GOODBYE\n
-```
-
-**Example:**
-```
-SHUTDOWN|api-v2-9000-1734532800\n
-→ GOODBYE\n
+MAINT_OK|target
 ```
 
-**Behavior:**
-- All routes for this service are removed immediately
-- Session is invalidated
-- Connection is closed
-- Use when shutting down a service
+Example:
+```
+MAINT_EXIT|sess123|r2
+→ ACK
+→ MAINT_OK|r2
+```
 
----
+Notes:
+- Can exit maintenance for specific routes while others remain in maintenance.
+- Use `MAINT_STATUS` to check which routes are in maintenance.
+
+### MAINT_STATUS
+Check maintenance status for routes in this session.
+
+Format:
+```
+MAINT_STATUS|session_id
+```
+
+Response:
+```
+MAINT_STATUS_OK|json_object
+```
+
+Example response:
+```
+MAINT_STATUS_OK|{"in_maintenance":["r2","r3"],"maintenance_backend":"http://orbat:3001","entered_at":"2024-12-20T11:30:00Z"}
+```
+
+Notes:
+- Shows which routes are currently in maintenance mode.
+- Returns empty array if no routes are in maintenance.
+
+### SUBSCRIBE
+Subscribe to proxy events for this session.
+
+Format:
+```
+SUBSCRIBE|session_id|event_type
+```
+
+Parameters:
+- `event_type`: one of `cert_renewed`, `global_config_changed`, `backend_health_changed`, `all`.
+
+Response:
+```
+SUBSCRIBE_OK
+```
+
+Event examples:
+```
+EVENT|cert_renewed|{"domain":"chilla55.de","expiry":"2025-03-20T00:00:00Z"}
+EVENT|global_config_changed|{"reason":"admin_update"}
+EVENT|backend_health_changed|{"route_id":"r1","healthy":false,"reason":"connection_timeout"}
+```
+
+Notes:
+- Events are sent asynchronously on the same TCP connection.
+- Client should handle events in addition to command responses.
+
+### UNSUBSCRIBE
+Unsubscribe from proxy events.
+
+Format:
+```
+UNSUBSCRIBE|session_id|event_type
+```
+
+Parameters:
+- `event_type`: same as `SUBSCRIBE`, or `all` to unsubscribe from everything.
+
+Response:
+```
+UNSUBSCRIBE_OK
+```
+
+### BACKEND_TEST
+Test backend connectivity and health before staging a route.
+
+Format:
+```
+BACKEND_TEST|session_id|backend_url
+```
+
+Parameters:
+- `backend_url`: full connection string to test.
+
+Response:
+```
+BACKEND_OK|json_object
+```
+
+Example response:
+```
+BACKEND_OK|{"reachable":true,"response_time_ms":45,"status_code":200,"tls_valid":true}
+```
+
+or
+```
+BACKEND_FAIL|{"reachable":false,"error":"connection refused"}
+```
+
+Notes:
+- Performs a test request to the backend (GET to root path or health check path).
+- Useful for validating backends before adding routes.
+- Does not affect staged or active configuration.
+
+### CIRCUIT_BREAKER_SET
+Configure circuit breaker for a route to handle backend failures gracefully.
+
+Format:
+```
+CIRCUIT_BREAKER_SET|session_id|route_id|threshold|timeout|half_open_requests
+```
+
+Parameters:
+- `route_id`: target route or `ALL` for global.
+- `threshold`: number of consecutive failures before opening circuit.
+- `timeout`: duration to wait before attempting recovery (e.g., `30s`, `1m`).
+- `half_open_requests`: number of test requests to send during recovery.
+
+Response:
+```
+CIRCUIT_OK
+```
+
+Notes:
+- Circuit breaker prevents cascading failures by failing fast when backend is unhealthy.
+- States: `closed` (normal), `open` (failing fast), `half_open` (testing recovery).
+- Changes are staged; call `CONFIG_APPLY` to activate.
+
+### CIRCUIT_BREAKER_STATUS
+Get current circuit breaker state for a route.
+
+Format:
+```
+CIRCUIT_BREAKER_STATUS|session_id|route_id
+```
+
+Response:
+```
+CIRCUIT_STATUS_OK|json_object
+```
+
+Example response:
+```
+CIRCUIT_STATUS_OK|{"state":"open","failures":15,"last_failure":"2024-12-20T11:20:00Z","next_attempt":"2024-12-20T11:20:30Z"}
+```
+
+### CIRCUIT_BREAKER_RESET
+Manually reset a circuit breaker to closed state.
+
+Format:
+```
+CIRCUIT_BREAKER_RESET|session_id|route_id
+```
+
+Response:
+```
+CIRCUIT_OK
+```
+
+Notes:
+- Useful for forcing recovery after manual backend fixes.
+
+### CLIENT_SHUTDOWN
+Client declares a graceful shutdown; removes routes immediately.
+
+Format:
+```
+CLIENT_SHUTDOWN|session_id
+```
+
+Response:
+```
+SHUTDOWN_OK
+```
+
+### SERVER_SHUTDOWN (Server → Client)
+Server notifies all connected services of proxy shutdown.
+
+Event:
+```
+SHUTDOWN
+```
 
 ### RECONNECT
+Reconnect to an existing session after disconnection.
 
-Reconnect with existing session after connection loss.
-
-**Format:**
+Format:
 ```
-RECONNECT|session_id\n
+RECONNECT|session_id
 ```
 
-**Response:**
+Response:
 ```
-OK\n
+OK
 ```
 or
 ```
-REREGISTER\n
+REREGISTER
 ```
 
-**Examples:**
-
-**Success (session still valid):**
-```
-RECONNECT|api-v2-9000-1734532800\n
-→ OK\n
-```
-
-**Failure (session expired):**
-```
-RECONNECT|api-v2-9000-1734532800\n
-→ REREGISTER\n
-```
-
-**Use Case:**
-- Network interruption
-- Proxy restart
-- Service reconnecting after transient failure
-
-**Session Expiry:**
-Sessions expire after 60 seconds of disconnection. If you receive `REREGISTER`, start over with `REGISTER` command.
-
----
-
-## Connection Monitoring
-
-The proxy automatically monitors all TCP connections:
-
-- **Connection Loss Detection** - Detects when services crash or disconnect
-- **Automatic Cleanup** - Routes are removed if connection is lost for >60 seconds
-- **Heartbeat** - Connection idle time is tracked
-- **Reconnection Support** - Use `RECONNECT` to restore session
-
-**Best Practices:**
-- Keep TCP connection open for the lifetime of your service
-- Implement reconnection logic for network interruptions
-- Use `SHUTDOWN` for graceful termination
-- Monitor connection status in application logs
-
----
-
-## Client Examples
-
-### Python TCP Client
-
-Complete Python client with reconnection logic:
-
-```python
-import socket
-import time
-import logging
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-class ProxyRegistryClient:
-    def __init__(self, host='proxy', port=81):
-        self.host = host
-        self.port = port
-        self.socket = None
-        self.session_id = None
-    
-    def connect(self):
-        """Establish TCP connection."""
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect((self.host, self.port))
-        logger.info(f"Connected to {self.host}:{self.port}")
-    
-    def send_command(self, command):
-        """Send command and read response."""
-        self.socket.sendall((command + '\n').encode())
-        response = self.socket.recv(1024).decode().strip()
-        logger.debug(f"Command: {command} → Response: {response}")
-        return response
-    
-    def register(self, service_name, hostname, service_port, maint_port):
-        """Register service and get session ID."""
-        cmd = f"REGISTER|{service_name}|{hostname}|{service_port}|{maint_port}"
-        response = self.send_command(cmd)
-        
-        if response.startswith('ACK|'):
-            self.session_id = response.split('|')[1]
-            logger.info(f"✓ Registered with session: {self.session_id}")
-            return True
-        else:
-            logger.error(f"✗ Registration failed: {response}")
-            return False
-    
-    def add_route(self, domains, path, backend):
-        """Add a route to the proxy."""
-        if not self.session_id:
-            raise Exception("Not registered")
-        
-        domains_str = ','.join(domains)
-        cmd = f"ROUTE|{self.session_id}|{domains_str}|{path}|{backend}"
-        response = self.send_command(cmd)
-        
-        if response == 'ROUTE_OK':
-            logger.info(f"✓ Route added: {domains} {path} → {backend}")
-            return True
-        else:
-            logger.error(f"✗ Route failed: {response}")
-            return False
-    
-    def add_header(self, name, value):
-        """Add custom header."""
-        if not self.session_id:
-            raise Exception("Not registered")
-        
-        cmd = f"HEADER|{self.session_id}|{name}|{value}"
-        response = self.send_command(cmd)
-        
-        if response == 'HEADER_OK':
-            logger.info(f"✓ Header added: {name}: {value}")
-            return True
-        else:
-            logger.error(f"✗ Header failed: {response}")
-            return False
-    
-    def set_option(self, key, value):
-        """Set configuration option."""
-        if not self.session_id:
-            raise Exception("Not registered")
-        
-        cmd = f"OPTIONS|{self.session_id}|{key}|{value}"
-        response = self.send_command(cmd)
-        
-        if response == 'OPTIONS_OK':
-            logger.info(f"✓ Option set: {key}={value}")
-            return True
-        else:
-            logger.error(f"✗ Option failed: {response}")
-            return False
-    
-    def enter_maintenance(self):
-        """Enter maintenance mode."""
-        if not self.session_id:
-            raise Exception("Not registered")
-        
-        cmd = f"MAINT_ENTER|{self.session_id}"
-        response = self.send_command(cmd)
-        
-        if response == 'MAINT_OK':
-            logger.info("✓ Entered maintenance mode")
-            return True
-        else:
-            logger.error(f"✗ Maintenance failed: {response}")
-            return False
-    
-    def exit_maintenance(self):
-        """Exit maintenance mode."""
-        if not self.session_id:
-            raise Exception("Not registered")
-        
-        cmd = f"MAINT_EXIT|{self.session_id}"
-        response = self.send_command(cmd)
-        
-        if response == 'MAINT_OK':
-            logger.info("✓ Exited maintenance mode")
-            return True
-        else:
-            logger.error(f"✗ Exit maintenance failed: {response}")
-            return False
-    
-    def shutdown(self):
-        """Gracefully disconnect."""
-        if not self.session_id:
-            return
-        
-        cmd = f"SHUTDOWN|{self.session_id}"
-        response = self.send_command(cmd)
-        logger.info(f"Shutting down: {response}")
-        self.socket.close()
-    
-    def close(self):
-        """Close connection without cleanup."""
-        if self.socket:
-            self.socket.close()
-
-# Example usage
-if __name__ == "__main__":
-    client = ProxyRegistryClient(host='proxy', port=81)
-    
-    try:
-        # Connect and register
-        client.connect()
-        client.register('api-service', 'api-v2', 9000, 9001)
-        
-        # Add routes
-        client.add_route(['api.example.com'], '/v2', 'http://api-v2:9000')
-        client.add_route(['api.example.com'], '/v2/admin', 'http://api-v2:9001')
-        
-        # Set headers and options
-        client.add_header('X-API-Version', '2.0')
-        client.add_header('X-Service-Name', 'api-service')
-        client.set_option('timeout', '60s')
-        client.set_option('websocket', 'true')
-        client.set_option('http2', 'true')
-        
-        # Keep connection alive
-        logger.info("Service running... (Ctrl+C to stop)")
-        while True:
-            time.sleep(10)
-    
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
-        client.shutdown()
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        client.close()
-```
-
----
-
-### Node.js TCP Client
-
-Complete Node.js client:
-
-```javascript
-const net = require('net');
-
-class ProxyRegistryClient {
-  constructor(host = 'proxy', port = 81) {
-    this.host = host;
-    this.port = port;
-    this.socket = null;
-    this.sessionId = null;
-  }
-
-  connect() {
-    return new Promise((resolve, reject) => {
-      this.socket = net.createConnection({ host: this.host, port: this.port }, () => {
-        console.log(`Connected to ${this.host}:${this.port}`);
-        resolve();
-      });
-
-      this.socket.on('error', (err) => {
-        reject(err);
-      });
-    });
-  }
-
-  sendCommand(command) {
-    return new Promise((resolve, reject) => {
-      this.socket.write(command + '\n');
-
-      const onData = (data) => {
-        const response = data.toString().trim();
-        this.socket.removeListener('data', onData);
-        resolve(response);
-      };
-
-      this.socket.once('data', onData);
-
-      setTimeout(() => {
-        this.socket.removeListener('data', onData);
-        reject(new Error('Command timeout'));
-      }, 5000);
-    });
-  }
-
-  async register(serviceName, hostname, servicePort, maintPort) {
-    const cmd = `REGISTER|${serviceName}|${hostname}|${servicePort}|${maintPort}`;
-    const response = await this.sendCommand(cmd);
-
-    if (response.startsWith('ACK|')) {
-      this.sessionId = response.split('|')[1];
-      console.log(`✓ Registered with session: ${this.sessionId}`);
-      return true;
-    } else {
-      console.error(`✗ Registration failed: ${response}`);
-      return false;
-    }
-  }
-
-  async addRoute(domains, path, backend) {
-    if (!this.sessionId) throw new Error('Not registered');
-
-    const domainsStr = domains.join(',');
-    const cmd = `ROUTE|${this.sessionId}|${domainsStr}|${path}|${backend}`;
-    const response = await this.sendCommand(cmd);
-
-    if (response === 'ROUTE_OK') {
-      console.log(`✓ Route added: ${domains} ${path} → ${backend}`);
-      return true;
-    } else {
-      console.error(`✗ Route failed: ${response}`);
-      return false;
-    }
-  }
-
-  async addHeader(name, value) {
-    if (!this.sessionId) throw new Error('Not registered');
-
-    const cmd = `HEADER|${this.sessionId}|${name}|${value}`;
-    const response = await this.sendCommand(cmd);
-
-    if (response === 'HEADER_OK') {
-      console.log(`✓ Header added: ${name}: ${value}`);
-      return true;
-    } else {
-      console.error(`✗ Header failed: ${response}`);
-      return false;
-    }
-  }
-
-  async setOption(key, value) {
-    if (!this.sessionId) throw new Error('Not registered');
-
-    const cmd = `OPTIONS|${this.sessionId}|${key}|${value}`;
-    const response = await this.sendCommand(cmd);
-
-    if (response === 'OPTIONS_OK') {
-      console.log(`✓ Option set: ${key}=${value}`);
-      return true;
-    } else {
-      console.error(`✗ Option failed: ${response}`);
-      return false;
-    }
-  }
-
-  async enterMaintenance() {
-    if (!this.sessionId) throw new Error('Not registered');
-
-    const cmd = `MAINT_ENTER|${this.sessionId}`;
-    const response = await this.sendCommand(cmd);
-
-    if (response === 'MAINT_OK') {
-      console.log('✓ Entered maintenance mode');
-      return true;
-    } else {
-      console.error(`✗ Maintenance failed: ${response}`);
-      return false;
-    }
-  }
-
-  async exitMaintenance() {
-    if (!this.sessionId) throw new Error('Not registered');
-
-    const cmd = `MAINT_EXIT|${this.sessionId}`;
-    const response = await this.sendCommand(cmd);
-
-    if (response === 'MAINT_OK') {
-      console.log('✓ Exited maintenance mode');
-      return true;
-    } else {
-      console.error(`✗ Exit maintenance failed: ${response}`);
-      return false;
-    }
-  }
-
-  async shutdown() {
-    if (!this.sessionId) return;
-
-    const cmd = `SHUTDOWN|${this.sessionId}`;
-    const response = await this.sendCommand(cmd);
-    console.log(`Shutting down: ${response}`);
-    this.socket.end();
-  }
-}
-
-// Example usage
-(async () => {
-  const client = new ProxyRegistryClient('proxy', 81);
-
-  try {
-    await client.connect();
-    await client.register('api-service', 'api-v2', 9000, 9001);
-
-    await client.addRoute(['api.example.com'], '/v2', 'http://api-v2:9000');
-    await client.addRoute(['api.example.com'], '/v2/admin', 'http://api-v2:9001');
-    
-    await client.addHeader('X-API-Version', '2.0');
-    await client.setOption('timeout', '60s');
-    await client.setOption('websocket', 'true');
-
-    console.log('Service running... (Ctrl+C to stop)');
-
-    process.on('SIGINT', async () => {
-      console.log('\nShutting down...');
-      await client.shutdown();
-      process.exit(0);
-    });
-
-    process.on('SIGTERM', async () => {
-      console.log('Shutting down...');
-      await client.shutdown();
-      process.exit(0);
-    });
-  } catch (error) {
-    console.error('Error:', error.message);
-    process.exit(1);
-  }
-})();
-```
-
----
-
-### Go TCP Client
-
-Complete Go client:
-
-```go
-package main
-
-import (
-	"bufio"
-	"fmt"
-	"log"
-	"net"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
-)
-
-type RegistryClient struct {
-	conn      net.Conn
-	reader    *bufio.Reader
-	sessionID string
-}
-
-func NewRegistryClient(host string, port int) (*RegistryClient, error) {
-	addr := fmt.Sprintf("%s:%d", host, port)
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Printf("Connected to %s", addr)
-
-	return &RegistryClient{
-		conn:   conn,
-		reader: bufio.NewReader(conn),
-	}, nil
-}
-
-func (c *RegistryClient) sendCommand(command string) (string, error) {
-	_, err := fmt.Fprintf(c.conn, "%s\n", command)
-	if err != nil {
-		return "", err
-	}
-
-	response, err := c.reader.ReadString('\n')
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSpace(response), nil
-}
-
-func (c *RegistryClient) Register(serviceName, hostname string, servicePort, maintPort int) error {
-	cmd := fmt.Sprintf("REGISTER|%s|%s|%d|%d", serviceName, hostname, servicePort, maintPort)
-	response, err := c.sendCommand(cmd)
-	if err != nil {
-		return err
-	}
-
-	if strings.HasPrefix(response, "ACK|") {
-		c.sessionID = strings.Split(response, "|")[1]
-		log.Printf("✓ Registered with session: %s", c.sessionID)
-		return nil
-	}
-
-	return fmt.Errorf("registration failed: %s", response)
-}
-
-func (c *RegistryClient) AddRoute(domains []string, path, backend string) error {
-	if c.sessionID == "" {
-		return fmt.Errorf("not registered")
-	}
-
-	domainsStr := strings.Join(domains, ",")
-	cmd := fmt.Sprintf("ROUTE|%s|%s|%s|%s", c.sessionID, domainsStr, path, backend)
-	response, err := c.sendCommand(cmd)
-	if err != nil {
-		return err
-	}
-
-	if response == "ROUTE_OK" {
-		log.Printf("✓ Route added: %v %s → %s", domains, path, backend)
-		return nil
-	}
-
-	return fmt.Errorf("route failed: %s", response)
-}
-
-func (c *RegistryClient) AddHeader(name, value string) error {
-	if c.sessionID == "" {
-		return fmt.Errorf("not registered")
-	}
-
-	cmd := fmt.Sprintf("HEADER|%s|%s|%s", c.sessionID, name, value)
-	response, err := c.sendCommand(cmd)
-	if err != nil {
-		return err
-	}
-
-	if response == "HEADER_OK" {
-		log.Printf("✓ Header added: %s: %s", name, value)
-		return nil
-	}
-
-	return fmt.Errorf("header failed: %s", response)
-}
-
-func (c *RegistryClient) SetOption(key, value string) error {
-	if c.sessionID == "" {
-		return fmt.Errorf("not registered")
-	}
-
-	cmd := fmt.Sprintf("OPTIONS|%s|%s|%s", c.sessionID, key, value)
-	response, err := c.sendCommand(cmd)
-	if err != nil {
-		return err
-	}
-
-	if response == "OPTIONS_OK" {
-		log.Printf("✓ Option set: %s=%s", key, value)
-		return nil
-	}
-
-	return fmt.Errorf("option failed: %s", response)
-}
-
-func (c *RegistryClient) EnterMaintenance() error {
-	if c.sessionID == "" {
-		return fmt.Errorf("not registered")
-	}
-
-	cmd := fmt.Sprintf("MAINT_ENTER|%s", c.sessionID)
-	response, err := c.sendCommand(cmd)
-	if err != nil {
-		return err
-	}
-
-	if response == "MAINT_OK" {
-		log.Printf("✓ Entered maintenance mode")
-		return nil
-	}
-
-	return fmt.Errorf("maintenance failed: %s", response)
-}
-
-func (c *RegistryClient) ExitMaintenance() error {
-	if c.sessionID == "" {
-		return fmt.Errorf("not registered")
-	}
-
-	cmd := fmt.Sprintf("MAINT_EXIT|%s", c.sessionID)
-	response, err := c.sendCommand(cmd)
-	if err != nil {
-		return err
-	}
-
-	if response == "MAINT_OK" {
-		log.Printf("✓ Exited maintenance mode")
-		return nil
-	}
-
-	return fmt.Errorf("exit maintenance failed: %s", response)
-}
-
-func (c *RegistryClient) Shutdown() error {
-	if c.sessionID == "" {
-		return nil
-	}
-
-	cmd := fmt.Sprintf("SHUTDOWN|%s", c.sessionID)
-	response, err := c.sendCommand(cmd)
-	if err != nil {
-		return err
-	}
-
-	log.Printf("Shutting down: %s", response)
-	return c.conn.Close()
-}
-
-func main() {
-	client, err := NewRegistryClient("proxy", 81)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Register service
-	if err := client.Register("api-service", "api-v2", 9000, 9001); err != nil {
-		log.Fatal(err)
-	}
-
-	// Add routes
-	client.AddRoute([]string{"api.example.com"}, "/v2", "http://api-v2:9000")
-	client.AddRoute([]string{"api.example.com"}, "/v2/admin", "http://api-v2:9001")
-	
-	// Set headers and options
-	client.AddHeader("X-API-Version", "2.0")
-	client.SetOption("timeout", "60s")
-	client.SetOption("websocket", "true")
-
-	// Wait for shutdown signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	log.Println("Service running... (Ctrl+C to stop)")
-	<-sigChan
-
-	log.Println("Shutting down...")
-	client.Shutdown()
-}
-```
-
----
-
-### Bash/Shell Script Client
-
-Simple bash client using netcat:
-
-```bash
-#!/bin/bash
-
-# Configuration
-PROXY_HOST="${PROXY_HOST:-proxy}"
-PROXY_PORT="${PROXY_PORT:-81}"
-SERVICE_NAME="${SERVICE_NAME:-api-service}"
-HOSTNAME="${HOSTNAME:-api-v2}"
-SERVICE_PORT="${SERVICE_PORT:-9000}"
-MAINT_PORT="${MAINT_PORT:-9001}"
-
-# Temporary files for TCP communication
-FIFO_IN="/tmp/proxy-registry-in-$$"
-FIFO_OUT="/tmp/proxy-registry-out-$$"
-SESSION_FILE="/tmp/proxy-session-$$"
-
-# Cleanup on exit
-cleanup() {
-    rm -f "$FIFO_IN" "$FIFO_OUT" "$SESSION_FILE"
-    if [ -n "$NC_PID" ]; then
-        kill "$NC_PID" 2>/dev/null
-    fi
-    exit
-}
-
-trap cleanup INT TERM EXIT
-
-# Create named pipes
-mkfifo "$FIFO_IN" "$FIFO_OUT"
-
-# Start netcat in background
-nc "$PROXY_HOST" "$PROXY_PORT" < "$FIFO_IN" > "$FIFO_OUT" &
-NC_PID=$!
-
-# Function to send command and read response
-send_command() {
-    local cmd="$1"
-    echo "$cmd" > "$FIFO_IN"
-    read -r response < "$FIFO_OUT"
-    echo "$response"
-}
-
-# Register service
-echo "Connecting to $PROXY_HOST:$PROXY_PORT..."
-response=$(send_command "REGISTER|$SERVICE_NAME|$HOSTNAME|$SERVICE_PORT|$MAINT_PORT")
-
-if [[ "$response" =~ ^ACK\|(.+)$ ]]; then
-    SESSION_ID="${BASH_REMATCH[1]}"
-    echo "$SESSION_ID" > "$SESSION_FILE"
-    echo "✓ Registered with session: $SESSION_ID"
-else
-    echo "✗ Registration failed: $response"
-    exit 1
-fi
-
-# Add routes
-echo "Adding routes..."
-response=$(send_command "ROUTE|$SESSION_ID|api.example.com|/v2|http://$HOSTNAME:$SERVICE_PORT")
-if [ "$response" = "ROUTE_OK" ]; then
-    echo "✓ Route added: api.example.com/v2 → http://$HOSTNAME:$SERVICE_PORT"
-else
-    echo "✗ Route failed: $response"
-fi
-
-# Add headers
-response=$(send_command "HEADER|$SESSION_ID|X-API-Version|2.0")
-if [ "$response" = "HEADER_OK" ]; then
-    echo "✓ Header added: X-API-Version: 2.0"
-else
-    echo "✗ Header failed: $response"
-fi
-
-# Set options
-response=$(send_command "OPTIONS|$SESSION_ID|timeout|60s")
-if [ "$response" = "OPTIONS_OK" ]; then
-    echo "✓ Option set: timeout=60s"
-else
-    echo "✗ Option failed: $response"
-fi
-
-response=$(send_command "OPTIONS|$SESSION_ID|websocket|true")
-if [ "$response" = "OPTIONS_OK" ]; then
-    echo "✓ Option set: websocket=true"
-else
-    echo "✗ Option failed: $response"
-fi
-
-echo ""
-echo "Service running... (Press Ctrl+C to stop)"
-
-# Keep connection alive
-while kill -0 "$NC_PID" 2>/dev/null; do
-    sleep 10
-done
-
-echo "Connection lost"
-```
-
-**Usage:**
-
-```bash
-# Make executable
-chmod +x register.sh
-
-# Run with defaults
-./register.sh
-
-# Run with custom values
-PROXY_HOST=proxy \
-SERVICE_NAME=my-api \
-HOSTNAME=my-api-v2 \
-SERVICE_PORT=8080 \
-MAINT_PORT=8081 \
-./register.sh
-```
-
-**Advanced Bash Client with Functions:**
-
-```bash
-#!/bin/bash
-
-set -euo pipefail
-
-# Configuration
-PROXY_HOST="${PROXY_HOST:-proxy}"
-PROXY_PORT="${PROXY_PORT:-81}"
-SESSION_ID=""
-
-# Connect to proxy
-exec 3<>/dev/tcp/$PROXY_HOST/$PROXY_PORT
-echo "Connected to $PROXY_HOST:$PROXY_PORT on fd 3"
-
-# Function to send command
-send_cmd() {
-    local cmd="$1"
-    echo "$cmd" >&3
-    read -r response <&3
-    echo "$response"
-}
-
-# Register service
-register() {
-    local service_name="$1"
-    local hostname="$2"
-    local service_port="$3"
-    local maint_port="$4"
-    
-    local response
-    response=$(send_cmd "REGISTER|$service_name|$hostname|$service_port|$maint_port")
-    
-    if [[ "$response" =~ ^ACK\|(.+)$ ]]; then
-        SESSION_ID="${BASH_REMATCH[1]}"
-        echo "✓ Registered with session: $SESSION_ID"
-        return 0
-    else
-        echo "✗ Registration failed: $response"
-        return 1
-    fi
-}
-
-# Add route
-add_route() {
-    local domains="$1"
-    local path="$2"
-    local backend="$3"
-    
-    if [ -z "$SESSION_ID" ]; then
-        echo "✗ Not registered"
-        return 1
-    fi
-    
-    local response
-    response=$(send_cmd "ROUTE|$SESSION_ID|$domains|$path|$backend")
-    
-    if [ "$response" = "ROUTE_OK" ]; then
-        echo "✓ Route added: $domains$path → $backend"
-        return 0
-    else
-        echo "✗ Route failed: $response"
-        return 1
-    fi
-}
-
-# Add header
-add_header() {
-    local name="$1"
-    local value="$2"
-    
-    if [ -z "$SESSION_ID" ]; then
-        echo "✗ Not registered"
-        return 1
-    fi
-    
-    local response
-    response=$(send_cmd "HEADER|$SESSION_ID|$name|$value")
-    
-    if [ "$response" = "HEADER_OK" ]; then
-        echo "✓ Header added: $name: $value"
-        return 0
-    else
-        echo "✗ Header failed: $response"
-        return 1
-    fi
-}
-
-# Set option
-set_option() {
-    local key="$1"
-    local value="$2"
-    
-    if [ -z "$SESSION_ID" ]; then
-        echo "✗ Not registered"
-        return 1
-    fi
-    
-    local response
-    response=$(send_cmd "OPTIONS|$SESSION_ID|$key|$value")
-    
-    if [ "$response" = "OPTIONS_OK" ]; then
-        echo "✓ Option set: $key=$value"
-        return 0
-    else
-        echo "✗ Option failed: $response"
-        return 1
-    fi
-}
-
-# Enter maintenance mode
-enter_maintenance() {
-    if [ -z "$SESSION_ID" ]; then
-        echo "✗ Not registered"
-        return 1
-    fi
-    
-    local response
-    response=$(send_cmd "MAINT_ENTER|$SESSION_ID")
-    
-    if [ "$response" = "MAINT_OK" ]; then
-        echo "✓ Entered maintenance mode"
-        return 0
-    else
-        echo "✗ Maintenance failed: $response"
-        return 1
-    fi
-}
-
-# Exit maintenance mode
-exit_maintenance() {
-    if [ -z "$SESSION_ID" ]; then
-        echo "✗ Not registered"
-        return 1
-    fi
-    
-    local response
-    response=$(send_cmd "MAINT_EXIT|$SESSION_ID")
-    
-    if [ "$response" = "MAINT_OK" ]; then
-        echo "✓ Exited maintenance mode"
-        return 0
-    else
-        echo "✗ Exit maintenance failed: $response"
-        return 1
-    fi
-}
-
-# Shutdown
-shutdown() {
-    if [ -z "$SESSION_ID" ]; then
-        return 0
-    fi
-    
-    local response
-    response=$(send_cmd "SHUTDOWN|$SESSION_ID")
-    echo "Shutting down: $response"
-    exec 3>&-  # Close connection
-}
-
-# Cleanup on exit
-trap 'shutdown' EXIT INT TERM
-
-# Main
-main() {
-    # Register
-    register "api-service" "api-v2" 9000 9001 || exit 1
-    
-    # Add routes
-    add_route "api.example.com" "/v2" "http://api-v2:9000"
-    add_route "api.example.com" "/v2/admin" "http://api-v2:9001"
-    
-    # Set headers
-    add_header "X-API-Version" "2.0"
-    add_header "X-Service-Name" "api-service"
-    
-    # Set options
-    set_option "timeout" "60s"
-    set_option "websocket" "true"
-    set_option "http2" "true"
-    
-    echo ""
-    echo "Service running... (Press Ctrl+C to stop)"
-    
-    # Keep connection alive
-    while true; do
-        sleep 10
-    done
-}
-
-main "$@"
-```
-
-**Docker Entrypoint Example:**
-
-```bash
-#!/bin/bash
-# entrypoint.sh - Register with proxy then start application
-
-set -e
-
-# Start registry client in background
-(
-    exec 3<>/dev/tcp/proxy/81
-    
-    echo "REGISTER|${SERVICE_NAME}|${HOSTNAME}|${SERVICE_PORT}|${MAINT_PORT}" >&3
-    read -r response <&3
-    
-    if [[ "$response" =~ ^ACK\|(.+)$ ]]; then
-        SESSION_ID="${BASH_REMATCH[1]}"
-        echo "Registered with proxy: $SESSION_ID"
-        
-        # Add route
-        echo "ROUTE|$SESSION_ID|${DOMAIN}|${PATH}|http://${HOSTNAME}:${SERVICE_PORT}" >&3
-        read -r response <&3
-        echo "Route registration: $response"
-        
-        # Keep connection alive
-        while true; do
-            sleep 30
-        done
-    fi
-) &
-
-REGISTRY_PID=$!
-
-# Cleanup on exit
-trap "kill $REGISTRY_PID 2>/dev/null || true" EXIT
-
-# Start main application
-exec "$@"
-```
-
-**Dockerfile:**
-```dockerfile
-FROM myapp:latest
-
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-ENV SERVICE_NAME=api-service
-ENV HOSTNAME=api-v2
-ENV SERVICE_PORT=9000
-ENV MAINT_PORT=9001
-ENV DOMAIN=api.example.com
-ENV PATH=/
-
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["./app"]
-```
-
----
-
-## Best Practices
-
-### 1. Keep Connection Alive
-
-The TCP connection must remain open for the lifetime of your service:
-
-```python
-# ✓ Good - connection stays open
-while True:
-    time.sleep(10)
-
-# ✗ Bad - connection closes after registration
-register()
-sys.exit(0)
-```
-
-### 2. Handle Reconnection
-
-Implement reconnection logic for network interruptions:
-
-```python
-def register_with_retry(client, max_attempts=5):
-    for attempt in range(max_attempts):
-        try:
-            client.connect()
-            client.register('api-service', 'api-v2', 9000, 9001)
-            return True
-        except Exception as e:
-            if attempt < max_attempts - 1:
-                time.sleep(2 ** attempt)  # Exponential backoff
-            else:
-                raise
-```
-
-### 3. Graceful Shutdown
-
-Always use `SHUTDOWN` command when terminating:
-
-```python
-import signal
-import sys
-
-def signal_handler(sig, frame):
-    logger.info("Shutting down...")
-    client.shutdown()
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-```
-
-### 4. Run in Background Thread
-
-Don't block main application thread:
-
-```python
-import threading
-
-def registry_thread():
-    client = ProxyRegistryClient()
-    client.connect()
-    client.register('api-service', 'api-v2', 9000, 9001)
-    # Keep connection alive
-    while True:
-        time.sleep(10)
-
-thread = threading.Thread(target=registry_thread, daemon=True)
-thread.start()
-
-# Main application continues
-app.run()
-```
-
-### 5. Monitor Connection Status
-
-Log connection events for debugging:
-
-```python
-import logging
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-logger.info("Connecting to registry...")
-client.connect()
-logger.info("Registering service...")
-client.register('api-service', 'api-v2', 9000, 9001)
-logger.info("Adding routes...")
-```
+### Connection Monitoring
+- Server enables TCP keepalive (default 30s period).
+- If the connection drops, routes are retained for a grace period (e.g., 5 minutes) and then cleaned up.
+- Clients should also enable TCP keepalive and implement reconnect logic.
+- Use `PING` for application-level keepalive and `SESSION_INFO` to monitor connection health.
+
+### Staged Configuration Management
+- All configuration changes are staged and require `CONFIG_APPLY` to take effect.
+- Staged changes timeout after 30 minutes if not applied (configurable).
+- Use `CONFIG_DIFF` to review changes before applying.
+- Use `CONFIG_ROLLBACK` to discard staged changes.
+- Use `CONFIG_VALIDATE` to check for errors before `CONFIG_APPLY`.
+- Use `CONFIG_APPLY_PARTIAL` to apply only specific types of changes.
+
+### Transaction IDs (Optional)
+- All commands support an optional transaction ID for request tracing.
+- Format: `COMMAND|session_id|txn_id|...` (insert `txn_id` after `session_id`).
+- Response includes the same `txn_id`: `RESPONSE|txn_id|...`.
+- Useful for correlating commands and responses in distributed tracing systems.
+- If omitted, responses do not include `txn_id`.
+
+### Response Compression (Optional)
+- Large responses (`ROUTE_LIST`, `STATS_GET`) support optional compression.
+- Add `compressed` parameter: `ROUTE_LIST|session_id|compressed`.
+- Response format: `ROUTE_LIST_OK|base64_gzipped_json`.
+- Reduces bandwidth for services with many routes or high-frequency stats queries.
 
 ---
 
@@ -1592,8 +1079,9 @@ The pipe character `|` is reserved. Do not use it in:
 
 ### Maximum Message Size
 
-- **Command:** 8 KB per line
-- **Response:** 1 KB per line
+- **Command:** 16 KB per line (increased for bulk operations and JSON payloads)
+- **Response:** 64 KB per line (supports large JSON responses from ROUTE_LIST, STATS_GET)
+- **Compressed Response:** 1 MB (base64-encoded gzipped data)
 
 ### Timeout
 
@@ -1616,12 +1104,12 @@ The pipe character `|` is reserved. Do not use it in:
 
 For integration help:
 
-- Review client examples in this guide
+- Review v2 command reference and client examples above
 - Check proxy logs: `docker service logs proxy_proxy`
 - Test protocol with `nc` or `telnet`:
   ```bash
   nc proxy 81
-  REGISTER|test|test-service|9000|9001
+  REGISTER|test|test-instance|9001|{}
   ```
 - Verify network connectivity between service and proxy
 
@@ -1629,4 +1117,5 @@ For integration help:
 - Connection refused → Check network/firewall
 - REREGISTER → Session expired, register again
 - ERROR|Invalid session → Wrong session ID
-- Routes not active → Check backend connectivity
+- Routes not active → Did you call CONFIG_APPLY? Check staged config with CONFIG_DIFF
+- Backend test failed → Verify backend is reachable from proxy

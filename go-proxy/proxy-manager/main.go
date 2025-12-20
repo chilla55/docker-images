@@ -41,7 +41,7 @@ var (
 	httpsAddr        = flag.String("https-addr", getEnv("HTTPS_ADDR", ":443"), "HTTPS listen address")
 	registryPort     = flag.Int("registry-port", getIntEnv("REGISTRY_PORT", 81), "Service registry port")
 	healthPort       = flag.Int("health-port", getIntEnv("HEALTH_PORT", 8080), "Health check HTTP port")
-	upstreamTimeout  = flag.Duration("upstream-timeout", getDurationEnv("UPSTREAM_CHECK_TIMEOUT", 2*time.Second), "Upstream check timeout")
+	upstreamTimeout  = flag.Duration("upstream-timeout", getDurationEnv("UPSTREAM_CHECK_TIMEOUT", 5*time.Second), "Timeout for upstream/backend checks")
 	shutdownTimeout  = flag.Duration("shutdown-timeout", getDurationEnv("SHUTDOWN_TIMEOUT", 30*time.Second), "Graceful shutdown timeout")
 	debug            = flag.Bool("debug", getEnv("DEBUG", "0") == "1", "Enable debug logging")
 	dashboardEnabled = flag.Bool("dashboard-enabled", getEnv("DASHBOARD_ENABLED", "1") == "1", "Enable admin dashboard endpoints")
@@ -164,8 +164,8 @@ func main() {
 		Notifier:         notifier,
 	})
 
-	// Initialize service registry
-	reg := registry.NewRegistry(*registryPort, *upstreamTimeout, proxyServer, *debug)
+	// Initialize service registry (v2)
+	regV2 := registry.NewRegistryV2(*registryPort, proxyServer, *debug, *upstreamTimeout, healthChecker)
 
 	// Initialize site watcher
 	siteWatcher := watcher.NewSiteWatcher(*sitesPath, proxyServer, *debug)
@@ -186,8 +186,8 @@ func main() {
 		}
 	}()
 
-	// Start service registry
-	go reg.Start(ctx)
+	// Start service registry v2
+	go regV2.StartV2(ctx)
 
 	// Start proxy servers (HTTP, HTTPS, HTTP/3)
 	go func() {
@@ -211,7 +211,7 @@ func main() {
 
 	// Notify all connected services
 	log.Info().Msg("Notifying connected services...")
-	reg.NotifyShutdown()
+	// regV2 handles shutdown notifications internally via connection close
 
 	// Give services time to receive shutdown notification
 	time.Sleep(2 * time.Second)

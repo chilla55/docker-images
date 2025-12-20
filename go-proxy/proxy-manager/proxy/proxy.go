@@ -47,6 +47,14 @@ type Backend struct {
 	MaxBodySize   int64
 	WebSocket     bool
 	mu            sync.RWMutex
+	// Maintenance and drain
+	InMaintenance      bool
+	MaintenancePageURL string // Custom maintenance page URL (optional)
+	MaintenanceHits    int64  // Count of requests during maintenance
+	Draining           bool
+	DrainStart         time.Time
+	DrainDuration      time.Duration
+	DrainRejected      int64 // Count of requests rejected during drain
 	// Phase 4 configs
 	slowEnabled        bool
 	slowWarning        time.Duration
@@ -86,12 +94,31 @@ type Backend struct {
 
 // Route represents a routing rule
 type Route struct {
-	Domains   []string
-	Path      string
-	Backend   *Backend
-	Headers   map[string]string
-	WebSocket bool
-	Priority  int // For sorting (longer paths = higher priority)
+	Domains         []string
+	Path            string
+	Backend         *Backend
+	Headers         map[string]string
+	WebSocket       bool
+	Priority        int // For sorting (longer paths = higher priority)
+	RateLimitReqs   int
+	RateLimitWindow time.Duration
+}
+
+// BackendStatus represents runtime backend health status
+type BackendStatus struct {
+	Healthy            bool
+	CircuitState       string
+	Failures           int
+	Successes          int
+	OpenedAt           time.Time
+	LastFailure        time.Time
+	InMaintenance      bool
+	MaintenancePageURL string
+	MaintenanceHits    int64
+	Draining           bool
+	DrainStart         time.Time
+	DrainRemaining     time.Duration
+	DrainRejected      int64
 }
 
 // CertMapping maps domain patterns to certificates
@@ -218,8 +245,73 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if backend is healthy or circuit open
+	// Check maintenance mode
 	backend.mu.Lock()
+	if backend.InMaintenance {
+		atomic.AddInt64(&backend.MaintenanceHits, 1)
+		maintenanceURL := backend.MaintenancePageURL
+		backend.mu.Unlock()
+
+		// If custom maintenance page URL is provided, proxy to it
+		if maintenanceURL != "" {
+			maintURL, err := url.Parse(maintenanceURL)
+			if err == nil {
+				// Create a temporary backend for maintenance page
+				maintProxy := httputil.NewSingleHostReverseProxy(maintURL)
+				maintProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+					log.Error().Err(err).Str("url", maintenanceURL).Msg("Maintenance page proxy error")
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_, _ = io.WriteString(w, "Maintenance page unavailable")
+				}
+				w.Header().Set("X-Maintenance-Mode", "true")
+				w.Header().Set("Retry-After", "300")
+				maintProxy.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		// Default maintenance page
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Retry-After", "300")
+		w.Header().Set("X-Maintenance-Mode", "true")
+		_, _ = io.WriteString(w, `<!DOCTYPE html>
+<html><head><title>Maintenance</title></head>
+<body><h1>Service Temporarily Unavailable</h1>
+<p>This service is currently undergoing maintenance. Please try again later.</p>
+</body></html>`)
+		return
+	}
+
+	// Check drain mode - reject some requests
+	if backend.Draining && backend.DrainDuration > 0 {
+		elapsed := time.Since(backend.DrainStart)
+		if elapsed < backend.DrainDuration {
+			// Calculate reject probability based on progress
+			progress := float64(elapsed) / float64(backend.DrainDuration)
+			// After 50% of drain time, start rejecting requests
+			if progress > 0.5 && (progress*100) > float64(time.Now().UnixNano()%100) {
+				atomic.AddInt64(&backend.DrainRejected, 1)
+				backend.mu.Unlock()
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Header().Set("Retry-After", "60")
+				w.Header().Set("X-Drain-Mode", "true")
+				_, _ = io.WriteString(w, "Service draining")
+				return
+			}
+		} else {
+			// Drain period expired, reject all new requests
+			atomic.AddInt64(&backend.DrainRejected, 1)
+			backend.mu.Unlock()
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Header().Set("Retry-After", "60")
+			w.Header().Set("X-Drain-Mode", "true")
+			_, _ = io.WriteString(w, "Service draining")
+			return
+		}
+	}
+
+	// Check if backend is healthy or circuit open
 	healthy := backend.Healthy
 	cbOpen := false
 	if backend.cbEnabled {
@@ -1370,6 +1462,127 @@ func (s *Server) routeMatches(route *Route, domains []string, path string) bool 
 		}
 	}
 	return false
+}
+
+// GetBackendStatus returns runtime status of a backend
+func (s *Server) GetBackendStatus(domain, path string) *BackendStatus {
+	backend := s.findBackend(domain, path)
+	if backend == nil {
+		return nil
+	}
+
+	backend.mu.RLock()
+	defer backend.mu.RUnlock()
+
+	var drainRemaining time.Duration
+	if backend.Draining && backend.DrainDuration > 0 {
+		elapsed := time.Since(backend.DrainStart)
+		if elapsed < backend.DrainDuration {
+			drainRemaining = backend.DrainDuration - elapsed
+		}
+	}
+
+	return &BackendStatus{
+		Healthy:            backend.Healthy,
+		CircuitState:       backend.cbState,
+		Failures:           backend.cbFailures,
+		Successes:          backend.cbSuccesses,
+		OpenedAt:           backend.cbOpenedAt,
+		LastFailure:        backend.cbLastFailure,
+		InMaintenance:      backend.InMaintenance,
+		MaintenancePageURL: backend.MaintenancePageURL,
+		MaintenanceHits:    atomic.LoadInt64(&backend.MaintenanceHits),
+		Draining:           backend.Draining,
+		DrainStart:         backend.DrainStart,
+		DrainRemaining:     drainRemaining,
+		DrainRejected:      atomic.LoadInt64(&backend.DrainRejected),
+	}
+}
+
+// SetMaintenance enables or disables maintenance mode for routes
+func (s *Server) SetMaintenance(domains []string, path string, enabled bool, maintenancePageURL string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	found := false
+	for _, route := range s.routes {
+		if s.routeMatches(route, domains, path) {
+			route.Backend.mu.Lock()
+			route.Backend.InMaintenance = enabled
+			if enabled {
+				route.Backend.MaintenancePageURL = maintenancePageURL
+				atomic.StoreInt64(&route.Backend.MaintenanceHits, 0) // Reset counter
+			} else {
+				route.Backend.MaintenancePageURL = ""
+			}
+			route.Backend.mu.Unlock()
+			found = true
+			log.Info().
+				Strs("domains", domains).
+				Str("path", path).
+				Bool("enabled", enabled).
+				Str("maintenance_url", maintenancePageURL).
+				Msg("Maintenance mode updated")
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("route not found")
+	}
+	return nil
+}
+
+// StartDrain begins draining traffic from routes over specified duration
+func (s *Server) StartDrain(domains []string, path string, duration time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	found := false
+	for _, route := range s.routes {
+		if s.routeMatches(route, domains, path) {
+			route.Backend.mu.Lock()
+			route.Backend.Draining = true
+			route.Backend.DrainStart = time.Now()
+			route.Backend.DrainDuration = duration
+			route.Backend.mu.Unlock()
+			found = true
+			log.Info().
+				Strs("domains", domains).
+				Str("path", path).
+				Dur("duration", duration).
+				Msg("Drain started")
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("route not found")
+	}
+	return nil
+}
+
+// CancelDrain cancels an active drain
+func (s *Server) CancelDrain(domains []string, path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	found := false
+	for _, route := range s.routes {
+		if s.routeMatches(route, domains, path) {
+			route.Backend.mu.Lock()
+			route.Backend.Draining = false
+			route.Backend.mu.Unlock()
+			found = true
+			log.Info().
+				Strs("domains", domains).
+				Str("path", path).
+				Msg("Drain cancelled")
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("route not found")
+	}
+	return nil
 }
 
 // Shutdown gracefully shuts down all servers

@@ -85,6 +85,19 @@ func (c *Checker) AddService(name, url string, interval, timeout time.Duration, 
 		Msg("Added service for health monitoring")
 }
 
+// RemoveService removes a service from monitoring
+func (c *Checker) RemoveService(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, exists := c.services[name]; exists {
+		delete(c.services, name)
+		log.Info().
+			Str("service", name).
+			Msg("Removed service from health monitoring")
+	}
+}
+
 // Start starts health checking for all services
 func (c *Checker) Start(ctx context.Context) {
 	c.mu.RLock()

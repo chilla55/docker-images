@@ -27,11 +27,23 @@ type RouteStatus struct {
 	Domain          string        `json:"domain"`
 	Path            string        `json:"path"`
 	Backend         string        `json:"backend"`
-	Status          string        `json:"status"` // healthy, degraded, down
+	Status          string        `json:"status"` // healthy, degraded, down, maintenance, draining
 	Requests24h     int64         `json:"requests_24h"`
 	AvgResponseTime time.Duration `json:"avg_response_time"`
 	ErrorRate       float64       `json:"error_rate"`
 	LastError       string        `json:"last_error,omitempty"`
+	// Maintenance mode
+	InMaintenance      bool   `json:"in_maintenance"`
+	MaintenancePageURL string `json:"maintenance_page_url,omitempty"`
+	MaintenanceHits    int64  `json:"maintenance_hits"`
+	// Drain mode
+	Draining       bool          `json:"draining"`
+	DrainProgress  float64       `json:"drain_progress"` // 0.0 to 1.0
+	DrainRemaining time.Duration `json:"drain_remaining"`
+	DrainRejected  int64         `json:"drain_rejected"`
+	// Circuit breaker
+	CircuitState    string `json:"circuit_state,omitempty"`
+	CircuitFailures int    `json:"circuit_failures,omitempty"`
 }
 
 // CertStatus holds certificate expiry information
@@ -98,6 +110,7 @@ func (d *Dashboard) Start(ctx context.Context, mux *http.ServeMux) error {
 	mux.HandleFunc("/api/dashboard", d.handleDashboardAPI)
 	mux.HandleFunc("/api/dashboard/stats", d.handleStats)
 	mux.HandleFunc("/api/dashboard/routes", d.handleRoutes)
+	mux.HandleFunc("/api/dashboard/maintenance", d.handleMaintenanceStats)
 	mux.HandleFunc("/api/dashboard/certificates", d.handleCertificates)
 	mux.HandleFunc("/api/dashboard/errors", d.handleErrors)
 	mux.HandleFunc("/api/dashboard/context", d.handleAIContext)
@@ -168,6 +181,16 @@ func (d *Dashboard) handleErrors(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(errors)
 }
 
+// handleMaintenanceStats returns maintenance and drain statistics
+func (d *Dashboard) handleMaintenanceStats(w http.ResponseWriter, r *http.Request) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	stats := d.getMaintenanceStats()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
 // handleAIContext returns AI-ready context export
 func (d *Dashboard) handleAIContext(w http.ResponseWriter, r *http.Request) {
 	d.mu.RLock()
@@ -222,6 +245,33 @@ func (d *Dashboard) getCertificateStatuses() []CertStatus {
 func (d *Dashboard) getRecentErrors() []ErrorLog {
 	// TODO: fetch from database
 	return []ErrorLog{}
+}
+
+// MaintenanceStats holds maintenance mode statistics
+type MaintenanceStats struct {
+	TotalInMaintenance int   `json:"total_in_maintenance"`
+	TotalDraining      int   `json:"total_draining"`
+	TotalHits          int64 `json:"total_maintenance_hits"`
+	TotalRejected      int64 `json:"total_drain_rejected"`
+	Routes             []struct {
+		Domain             string  `json:"domain"`
+		Path               string  `json:"path"`
+		MaintenanceHits    int64   `json:"maintenance_hits,omitempty"`
+		MaintenancePageURL string  `json:"maintenance_page_url,omitempty"`
+		DrainRejected      int64   `json:"drain_rejected,omitempty"`
+		DrainProgress      float64 `json:"drain_progress,omitempty"`
+	} `json:"routes"`
+}
+
+// getMaintenanceStats gathers maintenance/drain statistics from proxy server
+func (d *Dashboard) getMaintenanceStats() *MaintenanceStats {
+	stats := &MaintenanceStats{}
+
+	// TODO: Get from proxy server when interface is available
+	// For now, return empty stats
+	// This will be populated when we can query proxy.Server for routes
+
+	return stats
 }
 
 // generateAIContext creates an AI-ready export of current state
