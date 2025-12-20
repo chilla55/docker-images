@@ -33,6 +33,8 @@ func (d *Dashboard) getHTML() string {
     .status-healthy { background: #d4edda; color: #155724; }
     .status-degraded { background: #fff3cd; color: #856404; }
     .status-down { background: #f8d7da; color: #721c24; }
+    .status-maintenance { background: #cce5ff; color: #004085; }
+    .status-draining { background: #e2e3e5; color: #383d41; }
     .cert-card { background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; border-left: 4px solid #667eea; margin-bottom: 10px; }
     .error-item { background: #fff5f5; border-left: 3px solid #dc3545; padding: 12px; margin-bottom: 8px; border-radius: 4px; font-size: 13px; }
     .empty-state { text-align: center; padding: 30px; color: #999; }
@@ -77,11 +79,11 @@ func (d *Dashboard) getHTML() string {
       </div>
       <div class="section">
         <div class="section-title">Certificates</div>
-        <div id="certsList" class="empty-state">Loading...</div>
+        <div id="certsList">Loading...</div>
       </div>
       <div class="section">
         <div class="section-title">Recent Errors</div>
-        <div id="errorsList" class="empty-state">No errors</div>
+        <div id="errorsList">Loading...</div>
       </div>
       <div class="section">
         <div class="section-title">Debug Info</div>
@@ -140,39 +142,95 @@ func (d *Dashboard) getHTML() string {
       }
     }
     function updateUI(data) {
-      if (!data.system_stats) return;
-      const s = data.system_stats;
-      document.getElementById('uptime').textContent = formatDuration(s.uptime_ms);
-      document.getElementById('connections').textContent = s.active_connections;
-      document.getElementById('requestsPerSec').textContent = s.requests_per_sec.toFixed(1);
-      document.getElementById('errorRate').textContent = (s.error_rate * 100).toFixed(2) + '%';
-      updateRoutes(data.routes || []);
-      updateCerts(data.certificates || []);
-      updateErrors(data.recent_errors || []);
+      console.log('Dashboard data:', data);
+      if (!data) {
+        console.error('No data received');
+        return;
+      }
+      
+      // Update system stats if available
+      if (data.system_stats) {
+        const s = data.system_stats;
+        document.getElementById('uptime').textContent = formatDuration(s.uptime_ms);
+        document.getElementById('connections').textContent = s.active_connections;
+        document.getElementById('requestsPerSec').textContent = s.requests_per_sec.toFixed(1);
+        document.getElementById('errorRate').textContent = (s.error_rate * 100).toFixed(2) + '%';
+      }
+      
+      // Update routes
+      const routes = data.routes || [];
+      console.log('Routes:', routes);
+      updateRoutes(routes);
+      
+      // Update certificates
+      const certs = data.certificates || [];
+      console.log('Certificates:', certs);
+      updateCerts(certs);
+      
+      // Update errors
+      const errors = data.recent_errors || [];
+      console.log('Recent errors:', errors);
+      updateErrors(errors);
     }
     function updateRoutes(routes) {
       const tbody = document.getElementById('routesList');
-      if (routes.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No routes</td></tr>';
+      console.log('updateRoutes called with', routes.length, 'routes');
+      
+      if (!routes || routes.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No routes configured</td></tr>';
         return;
       }
-      tbody.innerHTML = routes.map(r => '<tr><td>' + r.domain + r.path + '</td><td>' + r.backend + '</td><td><span class="status-badge status-' + r.status + '">' + r.status.toUpperCase() + '</span></td><td>' + r.requests_24h + '</td><td>' + formatDuration(r.avg_response_time) + '</td><td>' + (r.error_rate * 100).toFixed(2) + '%</td></tr>').join('');
+      
+      tbody.innerHTML = routes.map(r => {
+        const statusClass = 'status-' + (r.status || 'unknown');
+        const statusText = (r.status || 'unknown').toUpperCase();
+        return '<tr>' +
+          '<td>' + r.domain + r.path + '</td>' +
+          '<td><small>' + r.backend + '</small></td>' +
+          '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span></td>' +
+          '<td>' + (r.requests_24h || 0) + '</td>' +
+          '<td>' + formatDuration(r.avg_response_time || 0) + '</td>' +
+          '<td>' + ((r.error_rate || 0) * 100).toFixed(2) + '%</td>' +
+          '</tr>';
+      }).join('');
     }
     function updateCerts(certs) {
       const div = document.getElementById('certsList');
-      if (certs.length === 0) {
-        div.innerHTML = '<div class="empty-state">No certificates</div>';
+      if (!certs || certs.length === 0) {
+        div.innerHTML = '<div class="empty-state">No certificates monitored</div>';
         return;
       }
-      div.innerHTML = certs.map(c => '<div class="cert-card"><strong>' + c.domain + '</strong><br/>' + c.days_left + ' days remaining</div>').join('');
+      
+      div.innerHTML = certs.map(c => {
+        const severityClass = c.severity === 2 ? 'status-down' : (c.severity === 1 ? 'status-degraded' : 'status-healthy');
+        const expiryDate = new Date(c.expires_at).toLocaleDateString();
+        return '<div class="cert-card" style="padding: 12px; margin: 8px 0; background: #f9f9f9; border-left: 4px solid ' + 
+               (c.severity === 2 ? '#e74c3c' : c.severity === 1 ? '#f39c12' : '#2ecc71') + ';">' +
+               '<strong>' + c.domain + '</strong>' +
+               '<span class="status-badge ' + severityClass + '" style="float: right;">' + c.status + '</span><br/>' +
+               '<small>Issuer: ' + c.issuer + '</small><br/>' +
+               '<small>Expires: ' + expiryDate + ' (' + c.days_left + ' days)</small>' +
+               '</div>';
+      }).join('');
     }
+    
     function updateErrors(errs) {
       const div = document.getElementById('errorsList');
-      if (errs.length === 0) {
-        div.innerHTML = '<div class="empty-state">No errors</div>';
+      if (!errs || errs.length === 0) {
+        div.innerHTML = '<div class="empty-state">No recent errors</div>';
         return;
       }
-      div.innerHTML = errs.map(e => '<div class="error-item">[' + new Date(e.timestamp).toLocaleTimeString() + '] ' + e.status_code + ' - ' + e.domain + e.path + '</div>').join('');
+      
+      div.innerHTML = errs.map(e => {
+        const time = new Date(e.timestamp).toLocaleTimeString();
+        const statusClass = e.status_code >= 500 ? 'status-down' : 'status-degraded';
+        return '<div class="error-item" style="padding: 8px; margin: 4px 0; background: #fff3cd; border-left: 3px solid #f39c12;">' +
+               '<span class="status-badge ' + statusClass + '">' + e.status_code + '</span> ' +
+               '<strong>' + e.domain + e.path + '</strong>' +
+               '<span style="float: right; color: #666; font-size: 0.9em;">' + time + '</span><br/>' +
+               (e.error ? '<small style="color: #666;">' + e.error + '</small>' : '') +
+               '</div>';
+      }).join('');
     }
     async function copyAIContext() {
       try {

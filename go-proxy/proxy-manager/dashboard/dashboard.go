@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chilla55/proxy-manager/certmonitor"
+	"github.com/chilla55/proxy-manager/database"
 	"github.com/chilla55/proxy-manager/proxy"
 	"github.com/rs/zerolog/log"
 )
@@ -292,16 +294,93 @@ func (d *Dashboard) getRouteStatuses() []RouteStatus {
 	return routes
 }
 
-// getCertificateStatuses returns certificate expiry information
+// getCertificateStatuses retrieves certificate expiry information
 func (d *Dashboard) getCertificateStatuses() []CertStatus {
-	// TODO: fetch from certMonitor
-	return []CertStatus{}
+	if d.certMonitor == nil {
+		return []CertStatus{}
+	}
+
+	monitor, ok := d.certMonitor.(*certmonitor.Monitor)
+	if !ok {
+		log.Warn().Msg("certMonitor type assertion failed")
+		return []CertStatus{}
+	}
+
+	allCerts := monitor.GetAllCertificates()
+	if len(allCerts) == 0 {
+		return []CertStatus{}
+	}
+
+	statuses := make([]CertStatus, 0, len(allCerts))
+	for _, cert := range allCerts {
+		status := "ok"
+		severity := 0
+
+		switch cert.WarningLevel {
+		case certmonitor.LevelCritical:
+			status = "critical"
+			severity = 2
+		case certmonitor.LevelUrgent, certmonitor.LevelWarning:
+			status = "warning"
+			severity = 1
+		default:
+			status = "ok"
+			severity = 0
+		}
+
+		statuses = append(statuses, CertStatus{
+			Domain:    cert.Domain,
+			Issuer:    cert.Issuer,
+			ExpiresAt: cert.NotAfter,
+			DaysLeft:  cert.DaysRemaining,
+			Status:    status,
+			Severity:  severity,
+		})
+	}
+
+	return statuses
 }
 
-// getRecentErrors returns the last N errors from the database
+// getRecentErrors retrieves recent error logs from the database
 func (d *Dashboard) getRecentErrors() []ErrorLog {
-	// TODO: fetch from database
-	return []ErrorLog{}
+	if d.database == nil {
+		return []ErrorLog{}
+	}
+
+	db, ok := d.database.(*database.DB)
+	if !ok {
+		log.Warn().Msg("database type assertion failed")
+		return []ErrorLog{}
+	}
+
+	entries, err := db.GetRecentRequests(100) // Get last 100 requests
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get recent requests")
+		return []ErrorLog{}
+	}
+
+	// Filter for errors (4xx and 5xx status codes)
+	errors := make([]ErrorLog, 0)
+	for _, entry := range entries {
+		if entry.Status >= 400 {
+			errorLog := ErrorLog{
+				Timestamp:  time.Unix(0, entry.Timestamp*int64(time.Millisecond)),
+				StatusCode: entry.Status,
+				Domain:     entry.Domain,
+				Path:       entry.Path,
+				Error:      entry.Error,
+				RequestID:  fmt.Sprintf("%s-%d", entry.ClientIP, entry.Timestamp),
+			}
+			errors = append(errors, errorLog)
+
+			// Limit to 50 errors
+			if len(errors) >= 50 {
+				break
+			}
+		}
+	}
+
+	return errors
 }
 
 // MaintenanceStats holds maintenance mode statistics
