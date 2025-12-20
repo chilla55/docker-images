@@ -138,6 +138,15 @@ type RouteSummary struct {
 	CircuitFailures    int
 }
 
+// ProxyDebugInfo exposes lightweight debug information for dashboards
+type ProxyDebugInfo struct {
+	RouteCount        int
+	CertificateCount  int
+	BlackholeCount    int64
+	DebugMode         bool
+	GeneratedAt       time.Time
+}
+
 // CertMapping maps domain patterns to certificates
 type CertMapping struct {
 	Domains []string // ["*.example.com", "example.com"]
@@ -455,6 +464,20 @@ func (s *Server) RemoveRoute(domains []string, path string) {
 // GetBlackholeCount returns the number of blackholed requests
 func (s *Server) GetBlackholeCount() int64 {
 	return atomic.LoadInt64(&s.blackholeMetric)
+}
+
+// DebugSnapshot returns a lightweight snapshot of server debug info
+func (s *Server) DebugSnapshot() ProxyDebugInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return ProxyDebugInfo{
+		RouteCount:       len(s.routes),
+		CertificateCount: len(s.certificates),
+		BlackholeCount:   atomic.LoadInt64(&s.blackholeMetric),
+		DebugMode:        s.debug,
+		GeneratedAt:      time.Now(),
+	}
 }
 
 // RouteSummaries returns a snapshot of all configured routes for dashboards/monitoring

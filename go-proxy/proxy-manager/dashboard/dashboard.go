@@ -115,6 +115,7 @@ func (d *Dashboard) Start(ctx context.Context, mux *http.ServeMux) error {
 	mux.HandleFunc("/api/dashboard/maintenance", d.handleMaintenanceStats)
 	mux.HandleFunc("/api/dashboard/certificates", d.handleCertificates)
 	mux.HandleFunc("/api/dashboard/errors", d.handleErrors)
+	mux.HandleFunc("/api/dashboard/debug", d.handleDebug)
 	mux.HandleFunc("/api/dashboard/context", d.handleAIContext)
 
 	log.Info().Msg("Dashboard enabled at /dashboard")
@@ -193,6 +194,16 @@ func (d *Dashboard) handleMaintenanceStats(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(stats)
 }
 
+// handleDebug returns debug information for troubleshooting
+func (d *Dashboard) handleDebug(w http.ResponseWriter, r *http.Request) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	debug := d.getDebugInfo()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(debug)
+}
+
 // handleAIContext returns AI-ready context export
 func (d *Dashboard) handleAIContext(w http.ResponseWriter, r *http.Request) {
 	d.mu.RLock()
@@ -253,23 +264,23 @@ func (d *Dashboard) getRouteStatuses() []RouteStatus {
 			}
 
 			routes = append(routes, RouteStatus{
-				Domain:            domain,
-				Path:              s.Path,
-				Backend:           s.BackendURL,
-				Status:            status,
-				Requests24h:       0, // TODO: wire metrics
-				AvgResponseTime:   0,
-				ErrorRate:         0,
-				LastError:         "",
-				InMaintenance:     s.InMaintenance,
+				Domain:             domain,
+				Path:               s.Path,
+				Backend:            s.BackendURL,
+				Status:             status,
+				Requests24h:        0, // TODO: wire metrics
+				AvgResponseTime:    0,
+				ErrorRate:          0,
+				LastError:          "",
+				InMaintenance:      s.InMaintenance,
 				MaintenancePageURL: s.MaintenancePageURL,
-				MaintenanceHits:   s.MaintenanceHits,
-				Draining:          s.Draining,
-				DrainProgress:     s.DrainProgress,
-				DrainRemaining:    s.DrainRemaining,
-				DrainRejected:     s.DrainRejected,
-				CircuitState:      s.CircuitState,
-				CircuitFailures:   s.CircuitFailures,
+				MaintenanceHits:    s.MaintenanceHits,
+				Draining:           s.Draining,
+				DrainProgress:      s.DrainProgress,
+				DrainRemaining:     s.DrainRemaining,
+				DrainRejected:      s.DrainRejected,
+				CircuitState:       s.CircuitState,
+				CircuitFailures:    s.CircuitFailures,
 			})
 		}
 	}
@@ -343,6 +354,30 @@ func (d *Dashboard) getMaintenanceStats() *MaintenanceStats {
 	}
 
 	return stats
+}
+
+// DebugInfo bundles debug-oriented data for the UI
+type DebugInfo struct {
+	Proxy       proxy.ProxyDebugInfo `json:"proxy"`
+	Routes      []proxy.RouteSummary `json:"routes"`
+	GeneratedAt time.Time            `json:"generated_at"`
+}
+
+// getDebugInfo collects debug information from proxy server
+func (d *Dashboard) getDebugInfo() *DebugInfo {
+	srv, ok := d.proxyServer.(interface {
+		DebugSnapshot() proxy.ProxyDebugInfo
+		RouteSummaries() []proxy.RouteSummary
+	})
+	if !ok {
+		return &DebugInfo{GeneratedAt: time.Now()}
+	}
+
+	return &DebugInfo{
+		Proxy:       srv.DebugSnapshot(),
+		Routes:      srv.RouteSummaries(),
+		GeneratedAt: time.Now(),
+	}
 }
 
 // generateAIContext creates an AI-ready export of current state
