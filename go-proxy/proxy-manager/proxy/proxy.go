@@ -140,11 +140,11 @@ type RouteSummary struct {
 
 // ProxyDebugInfo exposes lightweight debug information for dashboards
 type ProxyDebugInfo struct {
-	RouteCount        int
-	CertificateCount  int
-	BlackholeCount    int64
-	DebugMode         bool
-	GeneratedAt       time.Time
+	RouteCount       int
+	CertificateCount int
+	BlackholeCount   int64
+	DebugMode        bool
+	GeneratedAt      time.Time
 }
 
 // CertMapping maps domain patterns to certificates
