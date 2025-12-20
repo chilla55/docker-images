@@ -263,7 +263,12 @@ func (s *Server) Start(ctx context.Context, httpAddr, httpsAddr string) error {
 // ServeHTTP implements http.Handler
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Find backend for this request
-	backend := s.findBackend(r.Host, r.URL.Path)
+	// Strip port from Host header to match routes registered without port
+	host := r.Host
+	if idx := strings.LastIndex(host, ":"); idx > 0 {
+		host = host[:idx]
+	}
+	backend := s.findBackend(host, r.URL.Path)
 
 	if backend == nil {
 		// Unknown domain - blackhole
@@ -359,7 +364,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get route for headers
-	route := s.findRoute(r.Host, r.URL.Path)
+	route := s.findRoute(host, r.URL.Path)
 
 	// Handle WebSocket upgrade separately
 	if isWebSocketRequest(r) {
