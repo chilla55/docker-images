@@ -356,9 +356,15 @@ func startNPMServer() {
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			cmd.Dir = appDir
-			npmStartPID = cmd.Process.Pid
 
-			if err := cmd.Run(); err != nil {
+			if err := cmd.Start(); err != nil {
+				log("Failed to start Next.js: %v (retrying in 5s)", err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			npmStartPID = cmd.Process.Pid
+			if err := cmd.Wait(); err != nil {
 				log("Next.js exited (code: %v), restarting in 5s...", err)
 			}
 			time.Sleep(5 * time.Second)
