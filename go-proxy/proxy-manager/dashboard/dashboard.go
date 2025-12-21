@@ -11,6 +11,7 @@ import (
 
 	"github.com/chilla55/proxy-manager/certmonitor"
 	"github.com/chilla55/proxy-manager/database"
+	"github.com/chilla55/proxy-manager/metrics"
 	"github.com/chilla55/proxy-manager/proxy"
 	"github.com/rs/zerolog/log"
 )
@@ -233,15 +234,39 @@ func (d *Dashboard) getSystemStats() *SystemStats {
 	if elapsed < time.Millisecond {
 		elapsed = time.Millisecond // ensure non-zero for tests/UI
 	}
-	return &SystemStats{
+
+	stats := &SystemStats{
 		UptimeMs:         elapsed.Milliseconds(),
-		ActiveConnection: 0,   // TODO: get from metricsProvider
-		RequestsPerSec:   0.0, // TODO: calculate from metrics
-		ErrorRate:        0.0, // TODO: calculate from metrics
-		TotalRequests:    0,   // TODO: get from metricsProvider
-		TotalErrors:      0,   // TODO: get from metricsProvider
+		ActiveConnection: 0,
+		RequestsPerSec:   0.0,
+		ErrorRate:        0.0,
+		TotalRequests:    0,
+		TotalErrors:      0,
 		Timestamp:        time.Now(),
 	}
+
+	// Get metrics from metricsProvider if available
+	if d.metricsProvider != nil {
+		if collector, ok := d.metricsProvider.(*metrics.Collector); ok {
+			metricsStats := collector.GetStats()
+
+			stats.ActiveConnection = metricsStats.ActiveConnections
+			stats.TotalRequests = int64(metricsStats.TotalRequests)
+			stats.TotalErrors = int64(metricsStats.TotalErrors)
+
+			// Calculate requests per second
+			if metricsStats.Uptime > 0 {
+				stats.RequestsPerSec = float64(metricsStats.TotalRequests) / metricsStats.Uptime
+			}
+
+			// Calculate error rate
+			if metricsStats.TotalRequests > 0 {
+				stats.ErrorRate = float64(metricsStats.TotalErrors) / float64(metricsStats.TotalRequests)
+			}
+		}
+	}
+
+	return stats
 }
 
 // getRouteStatuses returns status for all configured routes
