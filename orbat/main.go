@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 var (
 	repoURL            = "https://github.com/6th-Maroon-Division/Homepage.git"
 	appDir             = "/app/repo"
+	statusFile         = "/tmp/status.json"
 	registryHost       = getEnv("REGISTRY_HOST", "proxy")
 	registryPort       = getEnv("REGISTRY_PORT", "81")
 	domainsStr         = getEnv("DOMAINS", "orbat.chilla55.de")
@@ -85,6 +87,19 @@ func setupDatabaseURL() error {
 
 func log(format string, args ...interface{}) {
 	fmt.Printf("[Orbat] "+format+"\n", args...)
+}
+
+func updateStatus(step, message string, progress int, details string) {
+	status := map[string]interface{}{
+		"step":         step,
+		"message":      message,
+		"progress":     progress,
+		"details":      details,
+		"timestamp":    time.Now().Format(time.RFC3339),
+		"showExtended": false,
+	}
+	data, _ := json.Marshal(status)
+	os.WriteFile(statusFile, data, 0644)
 }
 
 func cleanup() {
@@ -271,6 +286,7 @@ func performUpdate() error {
 
 	// Step 1: Enter maintenance mode
 	log("[Update 1/8] Entering maintenance mode...")
+	updateStatus("entering-maintenance", "Entering maintenance mode", 5, "Starting update process")
 	if !isMaintenanceServerRunning() {
 		log("[Update] Starting maintenance server...")
 		if err := startMaintenanceServer(); err != nil {
@@ -289,6 +305,7 @@ func performUpdate() error {
 
 	// Step 2: Stop Next.js
 	log("[Update 2/8] Stopping Next.js...")
+	updateStatus("stopping-app", "Stopping application", 10, "Gracefully shutting down Next.js")
 	if npmStartPID > 0 {
 		if err := syscall.Kill(npmStartPID, syscall.SIGTERM); err != nil {
 			log("Warning: failed to kill Next.js: %v", err)
@@ -299,6 +316,7 @@ func performUpdate() error {
 
 	// Step 3: Pull code
 	log("[Update 3/8] Pulling latest code...")
+	updateStatus("pulling", "Pulling latest changes", 15, "Downloading updated code from repository")
 	if err := runCommand("git", "pull", "origin", "main"); err != nil {
 		return fmt.Errorf("git pull failed: %w", err)
 	}
@@ -311,6 +329,7 @@ func performUpdate() error {
 
 	// Step 8: Wait for Next.js to be healthy
 	log("[Update 8/8] Waiting for Next.js to be healthy...")
+	updateStatus("waiting-healthy", "Waiting for app to start", 90, "Verifying service is responding")
 	if err := waitForNextJSHealthy(30 * time.Second); err != nil {
 		log("Warning: Next.js health check failed: %v", err)
 	}
@@ -318,11 +337,13 @@ func performUpdate() error {
 
 	// Step 9: Exit maintenance mode
 	log("[Update 9/9] Exiting maintenance mode...")
+	updateStatus("exiting-maintenance", "Exiting maintenance mode", 95, "Switching back to main service")
 	if err := exitProxyMaintenance(); err != nil {
 		log("Warning: failed to exit maintenance (no MAINT_OK): %v", err)
 	}
 	log("[Update] ✓ Maintenance mode exited, proxy confirmed")
 
+	updateStatus("complete", "Update complete", 100, "Service is now running with latest code")
 	log("========================================")
 	log("Zero-downtime update completed successfully")
 	log("========================================")
@@ -331,24 +352,28 @@ func performUpdate() error {
 
 func buildApp() error {
 	log("[Update 4/8] Installing dependencies...")
+	updateStatus("dependencies", "Installing dependencies", 25, "Running npm ci to install packages")
 	if err := runCommand("npm", "ci", "--production=false"); err != nil {
 		return fmt.Errorf("npm ci failed: %w", err)
 	}
 	log("[Update] ✓ Dependencies installed")
 
 	log("[Update 5/8] Generating Prisma client...")
+	updateStatus("prisma-generate", "Generating Prisma client", 45, "Creating database client from schema")
 	if err := runCommand("npx", "prisma", "generate"); err != nil {
 		return fmt.Errorf("prisma generate failed: %w", err)
 	}
 	log("[Update] ✓ Prisma client generated")
 
 	log("[Update 6/8] Running database migrations...")
+	updateStatus("migrations", "Running database migrations", 60, "Applying schema changes to database")
 	if err := runCommand("npx", "prisma", "migrate", "deploy"); err != nil {
 		return fmt.Errorf("prisma migrate deploy failed: %w", err)
 	}
 	log("[Update] ✓ Migrations applied")
 
 	log("[Update 7/8] Building Next.js application...")
+	updateStatus("building", "Building Next.js application", 75, "Compiling TypeScript and optimizing assets")
 	if err := runCommand("npm", "run", "build"); err != nil {
 		return fmt.Errorf("npm run build failed: %w", err)
 	}
@@ -404,15 +429,31 @@ func startMaintenanceServer() error {
 		const fs = require('fs');
 		const port = `+maintenancePort+`;
 		
+		// Read the maintenance HTML file
+		const maintenanceHTML = fs.existsSync('/maintenance.html') 
+			? fs.readFileSync('/maintenance.html', 'utf8')
+			: '<html><head><title>Orbat Maintenance</title></head><body><h1>Orbat is starting...</h1><p>Please wait while the service initializes.</p></body></html>';
+		
 		const server = http.createServer((req, res) => {
 			if (req.url === '/api/status') {
 				res.writeHead(200, {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'});
-				res.end('{"step":"startup","message":"Starting up...","progress":50}');
+				try {
+					const status = fs.readFileSync('`+statusFile+`', 'utf8');
+					res.end(status);
+				} catch (e) {
+					res.end('{"step":"initializing","message":"Starting up...","progress":5,"showExtended":false}');
+				}
 				return;
 			}
-			// Return 200 OK so proxy doesn't show "Maintenance page unavailable"
-			res.writeHead(200, {'Content-Type': 'text/html'});
-			res.end('<html><body><h1>Orbat is starting...</h1></body></html>');
+			// Return 204 No Content for favicon
+			if (req.url === '/favicon.ico') {
+				res.writeHead(204);
+				res.end();
+				return;
+			}
+			// Serve maintenance page for all other paths
+			res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+			res.end(maintenanceHTML);
 		});
 		
 		server.listen(port, () => {

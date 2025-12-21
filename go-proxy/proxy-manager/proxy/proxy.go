@@ -358,29 +358,34 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		maintenanceURL := backend.MaintenancePageURL
 		backend.mu.Unlock()
 
-		// If custom maintenance page URL is provided, proxy to it
+		rw.Header().Set("X-Maintenance-Mode", "true")
+		rw.Header().Set("Retry-After", "300")
+
+		// Method 1: If custom maintenance page URL is provided, proxy to it
 		if maintenanceURL != "" {
 			maintURL, err := url.Parse(maintenanceURL)
 			if err == nil {
 				// Create a temporary backend for maintenance page
 				maintProxy := httputil.NewSingleHostReverseProxy(maintURL)
 				maintProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-					log.Error().Err(err).Str("url", maintenanceURL).Msg("Maintenance page proxy error")
-					w.WriteHeader(http.StatusServiceUnavailable)
-					_, _ = io.WriteString(w, "Maintenance page unavailable")
+					log.Error().Err(err).Str("url", maintenanceURL).Msg("Maintenance page proxy error - falling back to static page")
+					// Fallback to static maintenance page on proxy error
+					w.WriteHeader(http.StatusOK)
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					_, _ = io.WriteString(w, `<!DOCTYPE html>
+<html><head><title>Maintenance</title></head>
+<body><h1>Service Temporarily Unavailable</h1>
+<p>This service is currently undergoing maintenance. Please try again later.</p>
+</body></html>`)
 				}
-				rw.Header().Set("X-Maintenance-Mode", "true")
-				rw.Header().Set("Retry-After", "300")
 				maintProxy.ServeHTTP(rw, r)
 				return
 			}
 		}
 
-		// Default maintenance page
-		rw.WriteHeader(http.StatusServiceUnavailable)
+		// Method 2: Default static maintenance page (no URL provided)
+		rw.WriteHeader(http.StatusOK)
 		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
-		rw.Header().Set("Retry-After", "300")
-		rw.Header().Set("X-Maintenance-Mode", "true")
 		_, _ = io.WriteString(rw, `<!DOCTYPE html>
 <html><head><title>Maintenance</title></head>
 <body><h1>Service Temporarily Unavailable</h1>
