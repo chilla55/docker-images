@@ -279,31 +279,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mc.IncrementActiveConnections()
 		defer mc.DecrementActiveConnections()
 	}
-	
+
 	// Wrap response writer to capture status code
 	rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-	
+
 	// Get client IP
 	clientIP := r.RemoteAddr
 	if idx := strings.LastIndex(clientIP, ":"); idx > 0 {
 		clientIP = clientIP[:idx]
 	}
-	
+
 	defer func() {
 		duration := time.Since(startTime)
-		
+
 		// Strip port from host for metrics/logging
 		host := r.Host
 		if idx := strings.LastIndex(host, ":"); idx > 0 {
 			host = host[:idx]
 		}
-		
+
 		// Record metrics
 		if mc, ok := s.metricsCollector.(*metrics.Collector); ok {
 			route := host + r.URL.Path
 			mc.RecordRequest(route, r.Method, rw.statusCode, duration, 0, 0)
 		}
-		
+
 		// Log to database
 		if s.db != nil {
 			if db, ok := s.db.(*database.DB); ok {
@@ -326,7 +326,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	
+
 	// Find backend for this request
 	// Strip port from Host header to match routes registered without port
 	host := r.Host
