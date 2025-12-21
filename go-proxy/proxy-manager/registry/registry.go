@@ -141,11 +141,27 @@ type RegistryV2 struct {
 	stats           map[RouteID]*StatsV2
 	stagedConfigTTL time.Duration
 	upstreamTimeout time.Duration
+
+	// Maintenance verification tasks
+	maintTasks    chan *maintenanceTask
+	maintCancel   map[SessionID]context.CancelFunc
+	maintCancelMu sync.Mutex
+}
+
+// maintenanceTask represents a task to verify maintenance URL or backend health
+type maintenanceTask struct {
+	sessionID SessionID
+	target    string
+	url       string
+	isEnter   bool // true for MAINT_ENTER, false for MAINT_EXIT
+	conn      net.Conn
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 // NewRegistryV2 creates a new v2 registry
 func NewRegistryV2(port int, proxyServer ProxyServer, debug bool, upstreamTimeout time.Duration, healthChecker HealthChecker) *RegistryV2 {
-	return &RegistryV2{
+	r := &RegistryV2{
 		services:        make(map[SessionID]*ServiceV2),
 		sessionsByConn:  make(map[net.Conn]SessionID),
 		port:            port,
@@ -156,7 +172,16 @@ func NewRegistryV2(port int, proxyServer ProxyServer, debug bool, upstreamTimeou
 		stats:           make(map[RouteID]*StatsV2),
 		stagedConfigTTL: 30 * time.Minute,
 		upstreamTimeout: upstreamTimeout,
+		maintTasks:      make(chan *maintenanceTask, 100),
+		maintCancel:     make(map[SessionID]context.CancelFunc),
 	}
+
+	// Start maintenance verification workers
+	for i := 0; i < 5; i++ {
+		go r.maintenanceVerificationWorker()
+	}
+
+	return r
 }
 
 // StartV2 starts the v2 registry listener
@@ -1536,6 +1561,83 @@ func (r *RegistryV2) handleUnsubscribeV2(conn net.Conn, sessionID SessionID, par
 	conn.Write([]byte("UNSUBSCRIBE_OK\n"))
 }
 
+// maintenanceVerificationWorker processes maintenance verification tasks
+func (r *RegistryV2) maintenanceVerificationWorker() {
+	for task := range r.maintTasks {
+		r.processMaintenanceTask(task)
+	}
+}
+
+// processMaintenanceTask verifies URL reachability and sends MAINT_OK or ERROR
+func (r *RegistryV2) processMaintenanceTask(task *maintenanceTask) {
+	maxRetries := 60 // Try for up to 60 seconds
+	retryDelay := 1 * time.Second
+
+	log.Printf("[registry-v2] Starting maintenance verification for %s: %s", task.sessionID, task.url)
+
+	for i := 0; i < maxRetries; i++ {
+		select {
+		case <-task.ctx.Done():
+			log.Printf("[registry-v2] Maintenance verification cancelled for %s", task.sessionID)
+			return
+		default:
+		}
+
+		if err := r.verifyMaintenanceURL(task.url); err == nil {
+			// URL is reachable!
+			log.Printf("[registry-v2] %s verified: %s",
+				map[bool]string{true: "Maintenance URL", false: "Backend"}[task.isEnter],
+				task.url)
+
+			// Send success
+			task.conn.Write([]byte(fmt.Sprintf("MAINT_OK|%s\n", task.target)))
+
+			// Clean up cancel function
+			r.maintCancelMu.Lock()
+			delete(r.maintCancel, task.sessionID)
+			r.maintCancelMu.Unlock()
+			return
+		}
+
+		// Not ready yet, wait and retry
+		time.Sleep(retryDelay)
+	}
+
+	// Failed to verify after all retries
+	log.Printf("[registry-v2] Maintenance verification timeout for %s: %s", task.sessionID, task.url)
+	task.conn.Write([]byte(fmt.Sprintf("ERROR|timeout waiting for %s to become reachable\n",
+		map[bool]string{true: "maintenance page", false: "backend"}[task.isEnter])))
+
+	// Clean up
+	r.maintCancelMu.Lock()
+	delete(r.maintCancel, task.sessionID)
+	r.maintCancelMu.Unlock()
+}
+
+// verifyMaintenanceURL checks if the maintenance URL is reachable
+func (r *RegistryV2) verifyMaintenanceURL(maintenanceURL string) error {
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 3 * time.Second,
+			}).DialContext,
+		},
+	}
+
+	resp, err := client.Get(maintenanceURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 500 {
+		return fmt.Errorf("server error: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
 func (r *RegistryV2) handleMaintenanceEnterV2(conn net.Conn, sessionID SessionID, parts []string) {
 	// MAINT_ENTER|session_id|target|maintenance_page_url
 	if len(parts) < 4 {
@@ -1555,6 +1657,7 @@ func (r *RegistryV2) handleMaintenanceEnterV2(conn net.Conn, sessionID SessionID
 		return
 	}
 
+	// Set maintenance mode immediately
 	svc.mu.Lock()
 	if target == "ALL" {
 		// All routes in maintenance
@@ -1580,9 +1683,35 @@ func (r *RegistryV2) handleMaintenanceEnterV2(conn net.Conn, sessionID SessionID
 	}
 	svc.mu.Unlock()
 
+	// Send immediate ACK
 	conn.Write([]byte("ACK\n"))
-	// Event sent asynchronously
-	conn.Write([]byte(fmt.Sprintf("MAINT_OK|%s\n", target)))
+
+	// If maintenance URL is provided, verify it asynchronously
+	if maintenancePageURL != "" {
+		// Cancel any existing verification task for this session
+		r.maintCancelMu.Lock()
+		if cancel, exists := r.maintCancel[sessionID]; exists {
+			cancel()
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		r.maintCancel[sessionID] = cancel
+		r.maintCancelMu.Unlock()
+
+		// Submit verification task to worker pool
+		task := &maintenanceTask{
+			sessionID: sessionID,
+			target:    target,
+			url:       maintenancePageURL,
+			isEnter:   true,
+			conn:      conn,
+			ctx:       ctx,
+			cancel:    cancel,
+		}
+		r.maintTasks <- task
+	} else {
+		// No URL to verify, send MAINT_OK immediately
+		conn.Write([]byte(fmt.Sprintf("MAINT_OK|%s\n", target)))
+	}
 }
 
 func (r *RegistryV2) handleMaintenanceExitV2(conn net.Conn, sessionID SessionID, parts []string) {
@@ -1603,6 +1732,33 @@ func (r *RegistryV2) handleMaintenanceExitV2(conn net.Conn, sessionID SessionID,
 		return
 	}
 
+	// Cancel any pending maintenance verification for this session
+	r.maintCancelMu.Lock()
+	if cancel, exists := r.maintCancel[sessionID]; exists {
+		cancel()
+		delete(r.maintCancel, sessionID)
+	}
+	r.maintCancelMu.Unlock()
+
+	// Get backend URL to verify
+	svc.mu.RLock()
+	var backendURLToCheck string
+	if target == "ALL" {
+		// Check the first route's backend
+		for _, route := range svc.activeRoutes {
+			backendURLToCheck = route.BackendURL
+			break
+		}
+	} else {
+		// Check specific route
+		routeID := RouteID(strings.TrimSpace(target))
+		if route, found := svc.activeRoutes[routeID]; found {
+			backendURLToCheck = route.BackendURL
+		}
+	}
+	svc.mu.RUnlock()
+
+	// Exit maintenance mode immediately (but don't send MAINT_OK yet)
 	svc.mu.Lock()
 	if target == "ALL" {
 		// Exit all from maintenance
@@ -1628,8 +1784,30 @@ func (r *RegistryV2) handleMaintenanceExitV2(conn net.Conn, sessionID SessionID,
 	}
 	svc.mu.Unlock()
 
+	// Send immediate ACK
 	conn.Write([]byte("ACK\n"))
-	conn.Write([]byte(fmt.Sprintf("MAINT_OK|%s\n", target)))
+
+	// Verify backend is healthy asynchronously before sending MAINT_OK
+	if backendURLToCheck != "" {
+		ctx, cancel := context.WithCancel(context.Background())
+		r.maintCancelMu.Lock()
+		r.maintCancel[sessionID] = cancel
+		r.maintCancelMu.Unlock()
+
+		task := &maintenanceTask{
+			sessionID: sessionID,
+			target:    target,
+			url:       backendURLToCheck,
+			isEnter:   false,
+			conn:      conn,
+			ctx:       ctx,
+			cancel:    cancel,
+		}
+		r.maintTasks <- task
+	} else {
+		// No backend to verify, send MAINT_OK immediately
+		conn.Write([]byte(fmt.Sprintf("MAINT_OK|%s\n", target)))
+	}
 }
 
 func (r *RegistryV2) handleMaintenanceStatusV2(conn net.Conn, sessionID SessionID) {

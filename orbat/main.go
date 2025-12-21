@@ -550,7 +550,7 @@ func main() {
 	if maintenancePageURL == "" {
 		maintenancePageURL = getEnv("MAINTENANCE_PAGE_URL", "")
 		if maintenancePageURL == "" {
-			// Use local maintenance server as fallback
+			// Use service name - same as backend URL
 			maintenancePageURL = fmt.Sprintf("http://%s:%s/", backendHost, maintenancePort)
 			log("Using default maintenance page: %s", maintenancePageURL)
 		}
@@ -604,6 +604,10 @@ func main() {
 	// we continue — the local maintenance server remains available on the
 	// maintenance port for debugging and manual routing.
 	if registered {
+		// Wait a moment for Docker Swarm DNS to propagate
+		log("Waiting for DNS propagation...")
+		time.Sleep(3 * time.Second)
+
 		if err := enterProxyMaintenance(); err != nil {
 			log("Warning: enterProxyMaintenance failed: %v", err)
 		}
