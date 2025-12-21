@@ -9,6 +9,7 @@ services:
     deploy:
       mode: replicated
       replicas: 1
+      endpoint_mode: dnsrr
       placement:
         constraints:
           - node.labels.web.node == web
