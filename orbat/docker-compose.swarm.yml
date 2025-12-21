@@ -71,7 +71,7 @@ services:
       REGISTRY_PORT: "81"
       DOMAINS: "orbat.chilla55.de"
       ROUTE_PATH: "/"
-      BACKEND_HOST: "tasks.orbat_orbat"
+      BACKEND_HOST: "orbat_orbat"
     
     secrets:
       - nextauth_secret
