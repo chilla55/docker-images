@@ -92,6 +92,17 @@ type Backend struct {
 	cbLastFailure      time.Time
 }
 
+// responseWriter wraps http.ResponseWriter to capture status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
 // Route represents a routing rule
 type Route struct {
 	Domains         []string
@@ -262,6 +273,60 @@ func (s *Server) Start(ctx context.Context, httpAddr, httpsAddr string) error {
 
 // ServeHTTP implements http.Handler
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Record request metrics
+	startTime := time.Now()
+	if mc, ok := s.metricsCollector.(*metrics.Collector); ok {
+		mc.IncrementActiveConnections()
+		defer mc.DecrementActiveConnections()
+	}
+	
+	// Wrap response writer to capture status code
+	rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+	
+	// Get client IP
+	clientIP := r.RemoteAddr
+	if idx := strings.LastIndex(clientIP, ":"); idx > 0 {
+		clientIP = clientIP[:idx]
+	}
+	
+	defer func() {
+		duration := time.Since(startTime)
+		
+		// Strip port from host for metrics/logging
+		host := r.Host
+		if idx := strings.LastIndex(host, ":"); idx > 0 {
+			host = host[:idx]
+		}
+		
+		// Record metrics
+		if mc, ok := s.metricsCollector.(*metrics.Collector); ok {
+			route := host + r.URL.Path
+			mc.RecordRequest(route, r.Method, rw.statusCode, duration, 0, 0)
+		}
+		
+		// Log to database
+		if s.db != nil {
+			if db, ok := s.db.(*database.DB); ok {
+				entry := database.AccessLogEntry{
+					Timestamp:      time.Now().UnixMilli(),
+					Domain:         host,
+					Method:         r.Method,
+					Path:           r.URL.Path,
+					Query:          r.URL.RawQuery,
+					Status:         rw.statusCode,
+					ResponseTimeMs: duration.Milliseconds(),
+					ClientIP:       clientIP,
+					UserAgent:      r.UserAgent(),
+					Referer:        r.Referer(),
+					Protocol:       r.Proto,
+				}
+				if err := db.LogAccessRequest(entry); err != nil {
+					log.Error().Err(err).Msg("Failed to log access request")
+				}
+			}
+		}
+	}()
+	
 	// Find backend for this request
 	// Strip port from Host header to match routes registered without port
 	host := r.Host
@@ -272,7 +337,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if backend == nil {
 		// Unknown domain - blackhole
-		s.blackhole(w, r)
+		s.blackhole(rw, r)
 		return
 	}
 
@@ -294,19 +359,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusServiceUnavailable)
 					_, _ = io.WriteString(w, "Maintenance page unavailable")
 				}
-				w.Header().Set("X-Maintenance-Mode", "true")
-				w.Header().Set("Retry-After", "300")
-				maintProxy.ServeHTTP(w, r)
+				rw.Header().Set("X-Maintenance-Mode", "true")
+				rw.Header().Set("Retry-After", "300")
+				maintProxy.ServeHTTP(rw, r)
 				return
 			}
 		}
 
 		// Default maintenance page
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Retry-After", "300")
-		w.Header().Set("X-Maintenance-Mode", "true")
-		_, _ = io.WriteString(w, `<!DOCTYPE html>
+		rw.WriteHeader(http.StatusServiceUnavailable)
+		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+		rw.Header().Set("Retry-After", "300")
+		rw.Header().Set("X-Maintenance-Mode", "true")
+		_, _ = io.WriteString(rw, `<!DOCTYPE html>
 <html><head><title>Maintenance</title></head>
 <body><h1>Service Temporarily Unavailable</h1>
 <p>This service is currently undergoing maintenance. Please try again later.</p>
@@ -324,20 +389,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if progress > 0.5 && (progress*100) > float64(time.Now().UnixNano()%100) {
 				atomic.AddInt64(&backend.DrainRejected, 1)
 				backend.mu.Unlock()
-				w.WriteHeader(http.StatusServiceUnavailable)
-				w.Header().Set("Retry-After", "60")
-				w.Header().Set("X-Drain-Mode", "true")
-				_, _ = io.WriteString(w, "Service draining")
+				rw.WriteHeader(http.StatusServiceUnavailable)
+				rw.Header().Set("Retry-After", "60")
+				rw.Header().Set("X-Drain-Mode", "true")
+				_, _ = io.WriteString(rw, "Service draining")
 				return
 			}
 		} else {
 			// Drain period expired, reject all new requests
 			atomic.AddInt64(&backend.DrainRejected, 1)
 			backend.mu.Unlock()
-			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Header().Set("Retry-After", "60")
-			w.Header().Set("X-Drain-Mode", "true")
-			_, _ = io.WriteString(w, "Service draining")
+			rw.WriteHeader(http.StatusServiceUnavailable)
+			rw.Header().Set("Retry-After", "60")
+			rw.Header().Set("X-Drain-Mode", "true")
+			_, _ = io.WriteString(rw, "Service draining")
 			return
 		}
 	}
@@ -359,7 +424,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend.mu.Unlock()
 
 	if !healthy || cbOpen {
-		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+		http.Error(rw, "Service Unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -369,19 +434,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Handle WebSocket upgrade separately
 	if isWebSocketRequest(r) {
 		if route != nil && route.WebSocket {
-			s.handleWebSocket(w, r, route, backend)
+			s.handleWebSocket(rw, r, route, backend)
 		} else {
-			http.Error(w, "WebSocket not allowed", http.StatusBadRequest)
+			http.Error(rw, "WebSocket not allowed", http.StatusBadRequest)
 		}
 		return
 	}
 
 	// Apply security headers
-	s.applyHeaders(w, route)
+	s.applyHeaders(rw, route)
 
 	// Proxy request with slow-request tracking
 	start := time.Now()
-	backend.Proxy.ServeHTTP(w, r)
+	backend.Proxy.ServeHTTP(rw, r)
 	elapsed := time.Since(start)
 	if backend.slowEnabled {
 		if backend.slowCritical > 0 && elapsed >= backend.slowCritical {

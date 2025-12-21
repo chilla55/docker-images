@@ -48,6 +48,7 @@ func (d *Dashboard) getHTML() string {
       <h1>📊 Proxy Manager Dashboard</h1>
       <div class="controls">
         <button onclick="refreshData()">🔄 Refresh</button>
+          <button onclick="openDebug()">🔍 Debug</button>
         <button onclick="copyAIContext()">📋 Copy AI</button>
       </div>
     </header>
@@ -262,6 +263,13 @@ func (d *Dashboard) getHTML() string {
         console.error('Failed to load debug data:', err);
         document.getElementById('debugData').textContent = 'Error loading debug data: ' + err.message;
         document.getElementById('debugData').style.display = 'block';
+      }
+    }
+    function openDebug() {
+      const debugSection = document.getElementById('debugData');
+      loadDebugData();
+      if (debugSection) {
+        debugSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     }
     function formatDuration(ms) {
