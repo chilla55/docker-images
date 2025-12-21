@@ -14,10 +14,58 @@ type RegistryClientV2 struct {
 	conn      net.Conn
 	sessionID string
 	scanner   *bufio.Scanner
+	localIP   string // The container's IP on the web-net network
+}
+
+// getContainerIP detects the container's IP address on the web-net network (10.2.2.0/24)
+func getContainerIP() string {
+	// Try to get IP from network interfaces
+	// We specifically want the IP on web-net (10.2.2.0/24)
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		fmt.Printf("[client] Warning: failed to get interface addresses: %v\n", err)
+		return ""
+	}
+
+	// Look for IP in 10.2.2.0/24 subnet (web-net)
+	_, webNet, _ := net.ParseCIDR("10.2.2.0/24")
+	
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil && webNet != nil && webNet.Contains(ipnet.IP) {
+				return ipnet.IP.String()
+			}
+		}
+	}
+
+	// Fallback: return first non-loopback IPv4
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				fmt.Printf("[client] Warning: using IP outside web-net: %s\n", ipnet.IP.String())
+				return ipnet.IP.String()
+			}
+		}
+	}
+
+	fmt.Printf("[client] Warning: no non-loopback IP found\n")
+	return ""
 }
 
 // NewRegistryClientV2 connects to the registry and registers the service
 func NewRegistryClientV2(registryAddr string, serviceName string, instanceName string, maintenancePort int, metadata map[string]interface{}) (*RegistryClientV2, error) {
+	// Detect container IP first
+	localIP := getContainerIP()
+	if localIP == "" {
+		return nil, fmt.Errorf("failed to detect container IP address")
+	}
+	fmt.Printf("[client] Detected container IP: %s\n", localIP)
+
+	// Use IP as instance name if not provided
+	if instanceName == "" {
+		instanceName = localIP
+	}
+
 	conn, err := net.Dial("tcp", registryAddr)
 	if err != nil {
 		return nil, err
@@ -55,6 +103,7 @@ func NewRegistryClientV2(registryAddr string, serviceName string, instanceName s
 		conn:      conn,
 		sessionID: sessionID,
 		scanner:   scanner,
+		localIP:   localIP,
 	}
 
 	return client, nil
@@ -616,4 +665,19 @@ func (c *RegistryClientV2) Shutdown() error {
 // Close closes the connection
 func (c *RegistryClientV2) Close() {
 	c.conn.Close()
+}
+
+// GetLocalIP returns the detected container IP address
+func (c *RegistryClientV2) GetLocalIP() string {
+	return c.localIP
+}
+
+// BuildBackendURL builds a backend URL using the container's IP and specified port
+func (c *RegistryClientV2) BuildBackendURL(port string) string {
+	return fmt.Sprintf("http://%s:%s", c.localIP, port)
+}
+
+// BuildMaintenanceURL builds a maintenance URL using the container's IP and specified port
+func (c *RegistryClientV2) BuildMaintenanceURL(port string) string {
+	return fmt.Sprintf("http://%s:%s/", c.localIP, port)
 }
