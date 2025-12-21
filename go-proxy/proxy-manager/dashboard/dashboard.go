@@ -299,9 +299,9 @@ func (d *Dashboard) getRouteStatuses() []RouteStatus {
 				Path:               s.Path,
 				Backend:            s.BackendURL,
 				Status:             status,
-				Requests24h:        0, // TODO: wire metrics
-				AvgResponseTime:    0,
-				ErrorRate:          0,
+				Requests24h:        int64(s.Requests),
+				AvgResponseTime:    s.AvgDuration,
+				ErrorRate:          s.ErrorRate,
 				LastError:          "",
 				InMaintenance:      s.InMaintenance,
 				MaintenancePageURL: s.MaintenancePageURL,

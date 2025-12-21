@@ -147,6 +147,10 @@ type RouteSummary struct {
 	DrainRejected      int64
 	CircuitState       string
 	CircuitFailures    int
+	Requests           uint64
+	Errors             uint64
+	AvgDuration        time.Duration
+	ErrorRate          float64
 }
 
 // ProxyDebugInfo exposes lightweight debug information for dashboards
@@ -558,6 +562,13 @@ func (s *Server) RouteSummaries() []RouteSummary {
 	summaries := make([]RouteSummary, 0, len(s.routes))
 	now := time.Now()
 
+	// Snapshot metrics once to reuse
+	var routeStats map[string]metrics.RouteStats
+	if mc, ok := s.metricsCollector.(*metrics.Collector); ok {
+		stats := mc.GetStats()
+		routeStats = stats.RouteMetrics
+	}
+
 	for _, route := range s.routes {
 		backend := route.Backend
 		backend.mu.RLock()
@@ -578,6 +589,29 @@ func (s *Server) RouteSummaries() []RouteSummary {
 			}
 		}
 
+		var requests uint64
+		var errors uint64
+		var totalDurationSeconds float64
+		if routeStats != nil {
+			for _, domain := range route.Domains {
+				prefix := domain + route.Path + ":"
+				for key, stats := range routeStats {
+					if strings.HasPrefix(key, prefix) {
+						requests += stats.Requests
+						errors += stats.Errors
+						totalDurationSeconds += stats.AverageDuration * float64(stats.Requests)
+					}
+				}
+			}
+		}
+
+		var avgDuration time.Duration
+		var errorRate float64
+		if requests > 0 {
+			avgDuration = time.Duration(totalDurationSeconds / float64(requests) * float64(time.Second))
+			errorRate = float64(errors) / float64(requests)
+		}
+
 		summaries = append(summaries, RouteSummary{
 			Domains:            append([]string(nil), route.Domains...),
 			Path:               route.Path,
@@ -592,6 +626,10 @@ func (s *Server) RouteSummaries() []RouteSummary {
 			DrainRejected:      atomic.LoadInt64(&backend.DrainRejected),
 			CircuitState:       backend.cbState,
 			CircuitFailures:    backend.cbFailures,
+			Requests:           requests,
+			Errors:             errors,
+			AvgDuration:        avgDuration,
+			ErrorRate:          errorRate,
 		})
 
 		backend.mu.RUnlock()
