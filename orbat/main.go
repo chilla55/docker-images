@@ -424,6 +424,10 @@ func waitForMaintenanceServerHealthy(timeout time.Duration) error {
 
 func startMaintenanceServer() error {
 	log("Starting maintenance server on port %s...", maintenancePort)
+	
+	// Create initial status file
+	updateStatus("initializing", "Service is starting up", 0, "Initializing Orbat service")
+	
 	cmd := exec.Command("node", "-e", `
 		const http = require('http');
 		const fs = require('fs');
