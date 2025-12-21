@@ -83,7 +83,7 @@ func (d *Dashboard) getHTML() string {
         <div id="certsList">Loading...</div>
       </div>
       <div class="section">
-        <div class="section-title">Recent Errors</div>
+        <div class="section-title">Recent Errors (Grouped)</div>
         <div id="errorsList">Loading...</div>
       </div>
       <div class="section">
@@ -190,7 +190,7 @@ func (d *Dashboard) getHTML() string {
           '<td><small>' + r.backend + '</small></td>' +
           '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span></td>' +
           '<td>' + (r.requests_24h || 0) + '</td>' +
-          '<td>' + formatDuration(r.avg_response_time || 0) + '</td>' +
+          '<td>' + formatResponseTime(r.avg_response_time || 0) + '</td>' +
           '<td>' + ((r.error_rate || 0) * 100).toFixed(2) + '%</td>' +
           '</tr>';
       }).join('');
@@ -223,13 +223,21 @@ func (d *Dashboard) getHTML() string {
       }
       
       div.innerHTML = errs.map(e => {
-        const time = new Date(e.timestamp).toLocaleTimeString();
+        const lastTime = new Date(e.last_occurred).toLocaleString();
         const statusClass = e.status_code >= 500 ? 'status-down' : 'status-degraded';
-        return '<div class="error-item" style="padding: 8px; margin: 4px 0; background: #fff3cd; border-left: 3px solid #f39c12;">' +
+        const countBadge = e.count > 1 ? '<span style="background: #e74c3c; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.85em; font-weight: bold; margin-left: 8px;">×' + e.count + '</span>' : '';
+        return '<div class="error-item" style="padding: 10px 12px; margin: 6px 0; background: #fff3cd; border-left: 4px solid ' + 
+               (e.status_code >= 500 ? '#e74c3c' : '#f39c12') + '; border-radius: 4px;">' +
+               '<div style="display: flex; justify-content: space-between; align-items: center;">' +
+               '<div>' +
                '<span class="status-badge ' + statusClass + '">' + e.status_code + '</span> ' +
-               '<strong>' + e.domain + e.path + '</strong>' +
-               '<span style="float: right; color: #666; font-size: 0.9em;">' + time + '</span><br/>' +
-               (e.error ? '<small style="color: #666;">' + e.error + '</small>' : '') +
+               '<strong>' + e.domain + e.path + '</strong>' + countBadge +
+               '</div>' +
+               '<div style="text-align: right;">' +
+               '<small style="color: #666;">Last: ' + lastTime + '</small>' +
+               '</div>' +
+               '</div>' +
+               (e.error ? '<div style="margin-top: 6px;"><small style="color: #666; font-family: monospace;">' + e.error + '</small></div>' : '') +
                '</div>';
       }).join('');
     }
@@ -291,6 +299,17 @@ func (d *Dashboard) getHTML() string {
       if (h > 0) return h + 'h ' + m + 'm';
       if (m > 0) return m + 'm';
       return '<1m';
+    }
+    function formatResponseTime(ms) {
+      // Format response time in ms or seconds
+      if (ms >= 1000) {
+        return (ms / 1000).toFixed(2) + 's';
+      } else if (ms >= 1) {
+        return ms.toFixed(1) + 'ms';
+      } else if (ms > 0) {
+        return '<1ms';
+      }
+      return '0ms';
     }
     refreshData();
     setInterval(refreshData, 5000);

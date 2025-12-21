@@ -340,8 +340,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := s.findBackend(host, r.URL.Path)
 
 	if backend == nil {
-		// Unknown domain - blackhole
-		s.blackhole(rw, r)
+		// No route found - check if we have a certificate for this domain
+		if s.hasCertificateForDomain(host) {
+			// We have a cert but no service - show service unavailable
+			s.serviceUnavailable(rw, r)
+		} else {
+			// No cert and no service - blackhole (drop connection)
+			s.blackhole(rw, r)
+		}
 		return
 	}
 
@@ -1505,7 +1511,102 @@ func (s *Server) applyHeaders(w http.ResponseWriter, route *Route) {
 	}
 }
 
-// blackhole handles unknown domains
+// hasCertificateForDomain checks if we have a certificate (including wildcard) for the given domain
+func (s *Server) hasCertificateForDomain(domain string) bool {
+	domain = strings.ToLower(domain)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Check for exact match
+	for _, mapping := range s.certificates {
+		for _, pattern := range mapping.Domains {
+			if strings.ToLower(pattern) == domain {
+				return true
+			}
+		}
+	}
+
+	// Check for wildcard match
+	for _, mapping := range s.certificates {
+		for _, pattern := range mapping.Domains {
+			if s.matchWildcard(pattern, domain) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// serviceUnavailable displays a proper service unavailable page for domains with certificates
+func (s *Server) serviceUnavailable(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Retry-After", "60")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = io.WriteString(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Temporarily Unavailable</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+            max-width: 600px;
+        }
+        h1 {
+            font-size: 3rem;
+            margin: 0 0 1rem 0;
+            font-weight: 700;
+        }
+        .status-code {
+            font-size: 8rem;
+            font-weight: 900;
+            margin: 0;
+            line-height: 1;
+            opacity: 0.3;
+        }
+        p {
+            font-size: 1.25rem;
+            margin: 1rem 0;
+            opacity: 0.9;
+        }
+        .domain {
+            font-family: monospace;
+            background: rgba(255,255,255,0.2);
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            display: inline-block;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="status-code">503</div>
+        <h1>Service Temporarily Unavailable</h1>
+        <div class="domain">`+r.Host+`</div>
+        <p>The requested service is not currently configured or is temporarily unavailable.</p>
+        <p>Please check back later or contact the administrator if this problem persists.</p>
+    </div>
+</body>
+</html>`)
+}
+
+// blackhole handles unknown domains without certificates (drops connection)
 func (s *Server) blackhole(w http.ResponseWriter, r *http.Request) {
 	atomic.AddInt64(&s.blackholeMetric, 1)
 

@@ -29,23 +29,23 @@ type SystemStats struct {
 
 // RouteStatus holds per-route monitoring data
 type RouteStatus struct {
-	Domain          string        `json:"domain"`
-	Path            string        `json:"path"`
-	Backend         string        `json:"backend"`
-	Status          string        `json:"status"` // healthy, degraded, down, maintenance, draining
-	Requests24h     int64         `json:"requests_24h"`
-	AvgResponseTime time.Duration `json:"avg_response_time"`
-	ErrorRate       float64       `json:"error_rate"`
-	LastError       string        `json:"last_error,omitempty"`
+	Domain        string  `json:"domain"`
+	Path          string  `json:"path"`
+	Backend       string  `json:"backend"`
+	Status        string  `json:"status"` // healthy, degraded, down, maintenance, draining
+	Requests24h   int64   `json:"requests_24h"`
+	AvgResponseMs float64 `json:"avg_response_time"` // Changed to milliseconds as float
+	ErrorRate     float64 `json:"error_rate"`
+	LastError     string  `json:"last_error,omitempty"`
 	// Maintenance mode
 	InMaintenance      bool   `json:"in_maintenance"`
 	MaintenancePageURL string `json:"maintenance_page_url,omitempty"`
 	MaintenanceHits    int64  `json:"maintenance_hits"`
 	// Drain mode
-	Draining       bool          `json:"draining"`
-	DrainProgress  float64       `json:"drain_progress"` // 0.0 to 1.0
-	DrainRemaining time.Duration `json:"drain_remaining"`
-	DrainRejected  int64         `json:"drain_rejected"`
+	Draining       bool    `json:"draining"`
+	DrainProgress  float64 `json:"drain_progress"`  // 0.0 to 1.0
+	DrainRemaining int64   `json:"drain_remaining"` // Changed to milliseconds
+	DrainRejected  int64   `json:"drain_rejected"`
 	// Circuit breaker
 	CircuitState    string `json:"circuit_state,omitempty"`
 	CircuitFailures int    `json:"circuit_failures,omitempty"`
@@ -71,13 +71,24 @@ type ErrorLog struct {
 	RequestID  string    `json:"request_id"`
 }
 
+// GroupedError represents grouped error statistics
+type GroupedError struct {
+	StatusCode    int       `json:"status_code"`
+	Domain        string    `json:"domain"`
+	Path          string    `json:"path"`
+	Error         string    `json:"error"`
+	Count         int       `json:"count"`
+	LastOccurred  time.Time `json:"last_occurred"`
+	FirstOccurred time.Time `json:"first_occurred"`
+}
+
 // DashboardData holds all dashboard information
 type DashboardData struct {
-	SystemStats  *SystemStats  `json:"system_stats"`
-	Routes       []RouteStatus `json:"routes"`
-	Certificates []CertStatus  `json:"certificates"`
-	RecentErrors []ErrorLog    `json:"recent_errors"`
-	GeneratedAt  time.Time     `json:"generated_at"`
+	SystemStats  *SystemStats   `json:"system_stats"`
+	Routes       []RouteStatus  `json:"routes"`
+	Certificates []CertStatus   `json:"certificates"`
+	RecentErrors []GroupedError `json:"recent_errors"`
+	GeneratedAt  time.Time      `json:"generated_at"`
 }
 
 // Dashboard manages the web dashboard
@@ -300,7 +311,7 @@ func (d *Dashboard) getRouteStatuses() []RouteStatus {
 				Backend:            s.BackendURL,
 				Status:             status,
 				Requests24h:        int64(s.Requests),
-				AvgResponseTime:    s.AvgDuration,
+				AvgResponseMs:      float64(s.AvgDuration.Nanoseconds()) / 1e6, // Convert nanoseconds to milliseconds
 				ErrorRate:          s.ErrorRate,
 				LastError:          "",
 				InMaintenance:      s.InMaintenance,
@@ -308,7 +319,7 @@ func (d *Dashboard) getRouteStatuses() []RouteStatus {
 				MaintenanceHits:    s.MaintenanceHits,
 				Draining:           s.Draining,
 				DrainProgress:      s.DrainProgress,
-				DrainRemaining:     s.DrainRemaining,
+				DrainRemaining:     s.DrainRemaining.Milliseconds(), // Convert to milliseconds
 				DrainRejected:      s.DrainRejected,
 				CircuitState:       s.CircuitState,
 				CircuitFailures:    s.CircuitFailures,
@@ -366,46 +377,87 @@ func (d *Dashboard) getCertificateStatuses() []CertStatus {
 	return statuses
 }
 
-// getRecentErrors retrieves recent error logs from the database
-func (d *Dashboard) getRecentErrors() []ErrorLog {
+// getRecentErrors retrieves and groups recent error logs from the database
+func (d *Dashboard) getRecentErrors() []GroupedError {
 	if d.database == nil {
-		return []ErrorLog{}
+		return []GroupedError{}
 	}
 
 	db, ok := d.database.(*database.DB)
 	if !ok {
 		log.Warn().Msg("database type assertion failed")
-		return []ErrorLog{}
+		return []GroupedError{}
 	}
 
-	entries, err := db.GetRecentRequests(100) // Get last 100 requests
+	entries, err := db.GetRecentRequests(500) // Get last 500 requests for better grouping
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to get recent requests")
-		return []ErrorLog{}
+		return []GroupedError{}
 	}
 
-	// Filter for errors (4xx and 5xx status codes)
-	errors := make([]ErrorLog, 0)
+	// Group errors by domain+path+status+error
+	type errorKey struct {
+		Domain     string
+		Path       string
+		StatusCode int
+		Error      string
+	}
+	errorGroups := make(map[errorKey]*GroupedError)
+
 	for _, entry := range entries {
 		if entry.Status >= 400 {
-			errorLog := ErrorLog{
-				Timestamp:  time.Unix(0, entry.Timestamp*int64(time.Millisecond)),
-				StatusCode: entry.Status,
+			key := errorKey{
 				Domain:     entry.Domain,
 				Path:       entry.Path,
+				StatusCode: entry.Status,
 				Error:      entry.Error,
-				RequestID:  fmt.Sprintf("%s-%d", entry.ClientIP, entry.Timestamp),
 			}
-			errors = append(errors, errorLog)
 
-			// Limit to 50 errors
-			if len(errors) >= 50 {
-				break
+			timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
+
+			if existing, ok := errorGroups[key]; ok {
+				existing.Count++
+				if timestamp.After(existing.LastOccurred) {
+					existing.LastOccurred = timestamp
+				}
+				if timestamp.Before(existing.FirstOccurred) {
+					existing.FirstOccurred = timestamp
+				}
+			} else {
+				errorGroups[key] = &GroupedError{
+					StatusCode:    entry.Status,
+					Domain:        entry.Domain,
+					Path:          entry.Path,
+					Error:         entry.Error,
+					Count:         1,
+					LastOccurred:  timestamp,
+					FirstOccurred: timestamp,
+				}
 			}
 		}
 	}
 
-	return errors
+	// Convert map to sorted slice (most recent first)
+	groupedErrors := make([]GroupedError, 0, len(errorGroups))
+	for _, group := range errorGroups {
+		groupedErrors = append(groupedErrors, *group)
+	}
+
+	// Sort by last occurrence (most recent first)
+	for i := 0; i < len(groupedErrors)-1; i++ {
+		for j := i + 1; j < len(groupedErrors); j++ {
+			if groupedErrors[j].LastOccurred.After(groupedErrors[i].LastOccurred) {
+				groupedErrors[i], groupedErrors[j] = groupedErrors[j], groupedErrors[i]
+			}
+		}
+	}
+
+	// Limit to top 30 error groups
+	if len(groupedErrors) > 30 {
+		groupedErrors = groupedErrors[:30]
+	}
+
+	return groupedErrors
 }
 
 // MaintenanceStats holds maintenance mode statistics
@@ -526,7 +578,7 @@ func (d *Dashboard) generateAIContext() string {
 		ctx += fmt.Sprintf("- %s%s → %s\n", route.Domain, route.Path, route.Backend)
 		ctx += fmt.Sprintf("  - Status: %s\n", route.Status)
 		ctx += fmt.Sprintf("  - Requests (24h): %d\n", route.Requests24h)
-		ctx += fmt.Sprintf("  - Avg Response Time: %v\n", route.AvgResponseTime)
+		ctx += fmt.Sprintf("  - Avg Response Time: %.2fms\n", route.AvgResponseMs)
 		ctx += fmt.Sprintf("  - Error Rate: %.2f%%\n", route.ErrorRate*100)
 	}
 
@@ -535,10 +587,10 @@ func (d *Dashboard) generateAIContext() string {
 		ctx += fmt.Sprintf("- %s: %d days remaining (expires %s)\n", cert.Domain, cert.DaysLeft, cert.ExpiresAt.Format("2006-01-02"))
 	}
 
-	ctx += "\n## Recent Errors\n"
+	ctx += "\n## Recent Errors (Grouped)\n"
 	for _, err := range data.RecentErrors {
-		ctx += fmt.Sprintf("- [%s] %d - %s%s - %s (req: %s)\n",
-			err.Timestamp.Format("15:04:05"), err.StatusCode, err.Domain, err.Path, err.Error, err.RequestID)
+		ctx += fmt.Sprintf("- [%s] %d - %s%s - %s (count: %d, last: %s)\n",
+			err.LastOccurred.Format("15:04:05"), err.StatusCode, err.Domain, err.Path, err.Error, err.Count, err.LastOccurred.Format("2006-01-02 15:04:05"))
 	}
 
 	return ctx
