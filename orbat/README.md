@@ -16,6 +16,7 @@ This container hosts the 6th Maroon Division Homepage (Orbat system) with automa
 - ✅ **Real-time progress tracking** with live status API
 - ✅ Built-in Prisma database migrations
 - ✅ Discord & Steam OAuth integration
+- ✅ **All secrets properly configured** (NEXTAUTH_SECRET, OAuth credentials)
 - ✅ Persistent data with Docker volumes
 - ✅ Deployed on web node with 1 replica
 - ✅ Health checks for container monitoring
@@ -96,6 +97,16 @@ make deploy
 - `steam_api_key` - Steam Web API key
 - `database_password` - PostgreSQL database password
 
+**How Secrets Work:**
+1. Secrets are mounted as files in `/run/secrets/`
+2. The Go entrypoint (`main.go`) reads these files on startup
+3. They are exported as environment variables for Next.js:
+   - `NEXTAUTH_SECRET` - Read from `nextauth_secret` secret
+   - `DISCORD_CLIENT_ID` - Read from `discord_client_id` secret
+   - `DISCORD_CLIENT_SECRET` - Read from `discord_client_secret` secret
+   - `STEAM_API_KEY` - Read from `steam_api_key` secret
+   - `DATABASE_URL` - Constructed from components + `database_password` secret
+
 ### OAuth Configuration
 - `DISCORD_REDIRECT_URI` - https://orbat.chilla55.de/api/auth/callback/discord
 - `STEAM_REDIRECT_URI` - https://orbat.chilla55.de/api/auth/callback/steam
@@ -118,6 +129,7 @@ When the container restarts:
     - Shows maintenance page
     - Pulls latest code
     - Rebuilds application
+    - Runs Prisma migrations
   - If no updates: Starts immediately
 
 ### 2. Periodic Background Checks
@@ -127,6 +139,7 @@ A background process runs continuously and:
 - When updates are detected:
   - Shows maintenance page to users
   - Pulls and rebuilds application
+  - Runs database migrations
   - Gracefully restarts the Next.js server
   - Returns to normal operation
 

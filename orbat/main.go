@@ -85,6 +85,34 @@ func setupDatabaseURL() error {
 	return nil
 }
 
+func setupSecrets() error {
+	// Setup NEXTAUTH_SECRET from secret
+	if nextAuthSecret := readSecret("nextauth_secret"); nextAuthSecret != "" {
+		os.Setenv("NEXTAUTH_SECRET", nextAuthSecret)
+		log("NEXTAUTH_SECRET configured from secret")
+	} else {
+		return fmt.Errorf("nextauth_secret secret not found")
+	}
+
+	// Setup Discord OAuth from secrets
+	if discordClientID := readSecret("discord_client_id"); discordClientID != "" {
+		os.Setenv("DISCORD_CLIENT_ID", discordClientID)
+		log("DISCORD_CLIENT_ID configured from secret")
+	}
+	if discordClientSecret := readSecret("discord_client_secret"); discordClientSecret != "" {
+		os.Setenv("DISCORD_CLIENT_SECRET", discordClientSecret)
+		log("DISCORD_CLIENT_SECRET configured from secret")
+	}
+
+	// Setup Steam API key from secret
+	if steamAPIKey := readSecret("steam_api_key"); steamAPIKey != "" {
+		os.Setenv("STEAM_API_KEY", steamAPIKey)
+		log("STEAM_API_KEY configured from secret")
+	}
+
+	return nil
+}
+
 func log(format string, args ...interface{}) {
 	fmt.Printf("[Orbat] "+format+"\n", args...)
 }
@@ -613,6 +641,12 @@ func main() {
 	// Setup DATABASE_URL from secrets before any database operations
 	if err := setupDatabaseURL(); err != nil {
 		log("WARNING: Failed to setup DATABASE_URL: %v", err)
+	}
+
+	// Setup all secrets (NEXTAUTH_SECRET, Discord, Steam, etc.)
+	if err := setupSecrets(); err != nil {
+		log("ERROR: Failed to setup secrets: %v", err)
+		os.Exit(1)
 	}
 
 	// Ensure app directory exists
