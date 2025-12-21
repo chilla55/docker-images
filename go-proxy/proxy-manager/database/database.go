@@ -144,6 +144,28 @@ func (db *DB) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_metrics_service ON metrics(service_id);
 	CREATE INDEX IF NOT EXISTS idx_metrics_type ON metrics(metric_type);
 
+	-- Access log (HTTP requests)
+	CREATE TABLE IF NOT EXISTS access_log (
+		timestamp INTEGER,
+		domain TEXT,
+		method TEXT,
+		path TEXT,
+		query TEXT,
+		status INTEGER,
+		response_time_ms INTEGER,
+		backend TEXT,
+		backend_ip TEXT,
+		client_ip TEXT,
+		user_agent TEXT,
+		referer TEXT,
+		bytes_sent INTEGER,
+		bytes_received INTEGER,
+		protocol TEXT,
+		error TEXT
+	);
+	CREATE INDEX IF NOT EXISTS idx_access_log_ts ON access_log(timestamp);
+	CREATE INDEX IF NOT EXISTS idx_access_log_status ON access_log(status);
+
 	-- Request Logs
 	CREATE TABLE IF NOT EXISTS request_logs (
 		log_id INTEGER PRIMARY KEY AUTOINCREMENT,
