@@ -405,7 +405,7 @@ func waitForNextJSHealthy(timeout time.Duration) error {
 }
 
 func waitForMaintenanceServerHealthy(timeout time.Duration) error {
-	maintenanceURL := fmt.Sprintf("http://%s:%s/", backendHost, maintenancePort)
+	maintenanceURL := fmt.Sprintf("http://localhost:%s/", maintenancePort)
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
