@@ -410,7 +410,8 @@ func startMaintenanceServer() error {
 				res.end('{"step":"startup","message":"Starting up...","progress":50}');
 				return;
 			}
-			res.writeHead(503, {'Content-Type': 'text/html'});
+			// Return 200 OK so proxy doesn't show "Maintenance page unavailable"
+			res.writeHead(200, {'Content-Type': 'text/html'});
 			res.end('<html><body><h1>Orbat is starting...</h1></body></html>');
 		});
 		
