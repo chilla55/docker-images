@@ -424,10 +424,10 @@ func waitForMaintenanceServerHealthy(timeout time.Duration) error {
 
 func startMaintenanceServer() error {
 	log("Starting maintenance server on port %s...", maintenancePort)
-	
+
 	// Create initial status file
 	updateStatus("initializing", "Service is starting up", 0, "Initializing Orbat service")
-	
+
 	cmd := exec.Command("node", "-e", `
 		const http = require('http');
 		const fs = require('fs');
@@ -439,6 +439,13 @@ func startMaintenanceServer() error {
 			: '<html><head><title>Orbat Maintenance</title></head><body><h1>Orbat is starting...</h1><p>Please wait while the service initializes.</p></body></html>';
 		
 		const server = http.createServer((req, res) => {
+			// Health check endpoint for Docker/Kubernetes
+			if (req.url === '/healthcheck' || req.url === '/health') {
+				res.writeHead(200, {'Content-Type': 'text/plain'});
+				res.end('OK');
+				return;
+			}
+			// Status API endpoint for progress updates
 			if (req.url === '/api/status') {
 				res.writeHead(200, {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'});
 				try {
@@ -449,13 +456,7 @@ func startMaintenanceServer() error {
 				}
 				return;
 			}
-			// Return 204 No Content for favicon
-			if (req.url === '/favicon.ico') {
-				res.writeHead(204);
-				res.end();
-				return;
-			}
-			// Serve maintenance page for all other paths
+			// Serve maintenance page for all paths (including /, /favicon.ico, etc.)
 			res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
 			res.end(maintenanceHTML);
 		});

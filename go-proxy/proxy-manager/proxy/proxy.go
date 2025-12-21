@@ -378,12 +378,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 <p>This service is currently undergoing maintenance. Please try again later.</p>
 </body></html>`)
 				}
+				// Proxy the request to the maintenance page
+				log.Debug().Str("url", maintenanceURL).Str("path", r.URL.Path).Msg("Proxying to maintenance page")
 				maintProxy.ServeHTTP(rw, r)
 				return
+			} else {
+				log.Error().Err(err).Str("url", maintenanceURL).Msg("Failed to parse maintenance URL - using static page")
 			}
 		}
 
-		// Method 2: Default static maintenance page (no URL provided)
+		// Method 2: Default static maintenance page (no URL provided or parse error)
 		rw.WriteHeader(http.StatusOK)
 		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = io.WriteString(rw, `<!DOCTYPE html>
