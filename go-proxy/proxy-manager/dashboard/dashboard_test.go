@@ -70,7 +70,7 @@ func TestDashboardDataStructures(t *testing.T) {
 		},
 		Routes:       []RouteStatus{},
 		Certificates: []CertStatus{},
-		RecentErrors: []ErrorLog{},
+		RecentErrors: []GroupedError{},
 		GeneratedAt:  time.Now(),
 	}
 
