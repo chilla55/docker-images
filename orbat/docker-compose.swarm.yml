@@ -67,11 +67,11 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       
       # go-proxy TCP registry (port 81)
-      REGISTRY_HOST: "proxy"
+      REGISTRY_HOST: "tasks.go-proxy_proxy"
       REGISTRY_PORT: "81"
       DOMAINS: "orbat.chilla55.de"
       ROUTE_PATH: "/"
-      BACKEND_HOST: "orbat"
+      BACKEND_HOST: "tasks.orbat_orbat"
     
     secrets:
       - nextauth_secret
