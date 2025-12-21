@@ -360,6 +360,45 @@ func (r *RegistryV2) handleRegisterV2(conn net.Conn, parts []string) (SessionID,
 		}
 	}
 
+	// Cleanup old sessions for the same service/instance (handles fast restarts)
+	r.mu.Lock()
+	var oldSessions []SessionID
+	for sid, svc := range r.services {
+		if svc.ServiceName == serviceName && svc.InstanceName == instanceName {
+			oldSessions = append(oldSessions, sid)
+		}
+	}
+	r.mu.Unlock()
+
+	// Remove routes from old sessions
+	for _, oldSID := range oldSessions {
+		r.mu.RLock()
+		oldSvc, exists := r.services[oldSID]
+		r.mu.RUnlock()
+
+		if exists {
+			oldSvc.mu.Lock()
+			log.Printf("[registry-v2] Cleaning up old session %s for %s/%s", oldSID, serviceName, instanceName)
+			// Remove all active routes from proxy
+			for routeID, route := range oldSvc.activeRoutes {
+				r.proxyServer.RemoveRoute(route.Domains, route.Path)
+				log.Printf("[registry-v2] Removed old route %s: %v%s", routeID, route.Domains, route.Path)
+			}
+			oldSvc.mu.Unlock()
+
+			// Remove old session
+			r.mu.Lock()
+			delete(r.services, oldSID)
+			// Also cleanup sessionsByConn if present
+			for c, sid := range r.sessionsByConn {
+				if sid == oldSID {
+					delete(r.sessionsByConn, c)
+				}
+			}
+			r.mu.Unlock()
+		}
+	}
+
 	sessionID := SessionID(fmt.Sprintf("%s-%d-%d", instanceName, time.Now().Unix(), rand64()))
 
 	service := &ServiceV2{
@@ -393,7 +432,11 @@ func (r *RegistryV2) handleRegisterV2(conn net.Conn, parts []string) (SessionID,
 	r.services[sessionID] = service
 	r.mu.Unlock()
 
-	log.Printf("[registry-v2] Service registered: %s/%s (session: %s)", serviceName, instanceName, sessionID)
+	if len(oldSessions) > 0 {
+		log.Printf("[registry-v2] Service re-registered (cleaned up %d old session(s)): %s/%s (new session: %s)", len(oldSessions), serviceName, instanceName, sessionID)
+	} else {
+		log.Printf("[registry-v2] Service registered: %s/%s (session: %s)", serviceName, instanceName, sessionID)
+	}
 	conn.Write([]byte(fmt.Sprintf("ACK|%s\n", sessionID)))
 
 	return sessionID, nil
