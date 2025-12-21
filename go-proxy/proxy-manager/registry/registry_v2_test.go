@@ -422,21 +422,28 @@ func TestRegistryV2_MaintenanceFlow(t *testing.T) {
 
 	go reg.handleConnectionV2(ctx, server)
 
+	// Start a test HTTP server for maintenance URL verification
+	maintServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer maintServer.Close()
+	maintURL := maintServer.URL
+
 	resp, err := send(client, "REGISTER|svc|inst1|9000|{}")
 	if err != nil {
 		t.Fatalf("register error: %v", err)
 	}
 	sessionID := strings.TrimPrefix(resp, "ACK|")
 
-	// Enter ALL
-	resp, err = send(client, "MAINT_ENTER|"+sessionID+"|ALL|http://localhost:9999")
+	// Enter ALL with a working maintenance URL
+	resp, err = send(client, "MAINT_ENTER|"+sessionID+"|ALL|"+maintURL)
 	if err != nil {
 		t.Fatalf("maint enter error: %v", err)
 	}
 	if resp != "ACK" {
 		t.Fatalf("expected ACK, got %q", resp)
 	}
-	// Maintenance event line
+	// Maintenance event line - should arrive after async verification
 	evt, err := recv(client)
 	if err != nil {
 		t.Fatalf("maint event recv error: %v", err)
