@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -41,6 +42,40 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+func getContainerIP() string {
+	// Try to get IP from network interfaces
+	// We specifically want the IP on web-net (10.2.2.0/24)
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		log("Warning: failed to get interface addresses: %v", err)
+		return ""
+	}
+
+	// Look for IP in 10.2.2.0/24 subnet (web-net)
+	_, webNet, _ := net.ParseCIDR("10.2.2.0/24")
+	
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil && webNet != nil && webNet.Contains(ipnet.IP) {
+				return ipnet.IP.String()
+			}
+		}
+	}
+
+	// Fallback: return first non-loopback IPv4
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				log("Warning: using IP outside web-net: %s", ipnet.IP.String())
+				return ipnet.IP.String()
+			}
+		}
+	}
+
+	log("Warning: no non-loopback IP found")
+	return ""
 }
 
 func readSecret(secretName string) string {
@@ -159,16 +194,25 @@ func registerWithProxy() error {
 		"auto_update": true,
 	}
 
+	// Get container IP address
+	containerIP := getContainerIP()
+	if containerIP == "" {
+		log("Warning: Could not determine container IP, using backendHost from env")
+		containerIP = backendHost
+	} else {
+		log("Using container IP: %s", containerIP)
+	}
+
 	// Connect and register with V2 protocol
-	instanceName := backendHost
+	instanceName := containerIP
 	var err error
 	registryClientV2, err = NewRegistryClientV2(registryAddr, serviceName, instanceName, 3001, metadata)
 	if err != nil {
 		return fmt.Errorf("failed to register with V2: %w", err)
 	}
 
-	// Add route
-	backendURL := fmt.Sprintf("http://%s:%s", backendHost, port)
+	// Add route using actual container IP
+	backendURL := fmt.Sprintf("http://%s:%s", containerIP, port)
 	domains := strings.Split(strings.ReplaceAll(domainsStr, " ", ""), ",")
 
 	routeID, err = registryClientV2.AddRoute(domains, routePath, backendURL, 10)
@@ -176,6 +220,7 @@ func registerWithProxy() error {
 		return fmt.Errorf("failed to add route: %w", err)
 	}
 	log("Route added with ID: %s", routeID)
+	log("Backend URL: %s", backendURL)
 
 	// Configure health check
 	err = registryClientV2.SetHealthCheck(routeID, "/", "30s", "5s")
@@ -546,12 +591,21 @@ func main() {
 	log("Starting entrypoint...")
 	log("Service: %s, Port: %s, Maintenance: %s", serviceName, port, maintenancePort)
 
+	// Get container IP early
+	containerIP := getContainerIP()
+	if containerIP == "" {
+		log("Warning: Could not determine container IP, using backendHost from env")
+		containerIP = backendHost
+	} else {
+		log("Container IP detected: %s", containerIP)
+	}
+
 	// Setup maintenance page URL if not provided
 	if maintenancePageURL == "" {
 		maintenancePageURL = getEnv("MAINTENANCE_PAGE_URL", "")
 		if maintenancePageURL == "" {
-			// Use service name - same as backend URL
-			maintenancePageURL = fmt.Sprintf("http://%s:%s/", backendHost, maintenancePort)
+			// Use container IP for maintenance page
+			maintenancePageURL = fmt.Sprintf("http://%s:%s/", containerIP, maintenancePort)
 			log("Using default maintenance page: %s", maintenancePageURL)
 		}
 	}
