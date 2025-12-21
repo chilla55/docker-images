@@ -208,15 +208,13 @@ func enterProxyMaintenance() error {
 		return fmt.Errorf("registry client not connected")
 	}
 
+	log("Entering maintenance mode with URL: %s", maintenancePageURL)
 	err := registryClientV2.MaintenanceEnterWithURL("ALL", maintenancePageURL)
 	if err != nil {
 		return fmt.Errorf("failed to enter maintenance: %w", err)
 	}
 
-	log("Proxy maintenance mode entered")
-	if maintenancePageURL != "" {
-		log("Using custom maintenance page: %s", maintenancePageURL)
-	}
+	log("Proxy maintenance mode entered successfully")
 	return nil
 }
 
