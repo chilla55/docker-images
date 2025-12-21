@@ -41,7 +41,7 @@ type RegistryClientV2 struct {
 	sessionID string
 	scanner   *bufio.Scanner
 	localIP   string // The container's IP on the web-net network
-	
+
 	// Event handling
 	handlers map[EventType][]EventHandler
 	mu       sync.RWMutex
@@ -59,7 +59,7 @@ func getContainerIP() string {
 
 	// Look for IP in 10.2.2.0/24 subnet (web-net)
 	_, webNet, _ := net.ParseCIDR("10.2.2.0/24")
-	
+
 	for _, addr := range addrs {
 		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 			if ipnet.IP.To4() != nil && webNet != nil && webNet.Contains(ipnet.IP) {
@@ -759,14 +759,14 @@ func (c *RegistryClientV2) Shutdown() error {
 	}
 
 	c.conn.Close()
-	
+
 	// Emit disconnected event
 	c.emit(Event{
 		Type:      EventDisconnected,
 		Data:      map[string]interface{}{"reason": "shutdown"},
 		Timestamp: time.Now(),
 	})
-	
+
 	return nil
 }
 
@@ -799,7 +799,7 @@ func (c *RegistryClientV2) emit(event Event) {
 	c.mu.RLock()
 	handlers := c.handlers[event.Type]
 	c.mu.RUnlock()
-	
+
 	for _, handler := range handlers {
 		// Run handlers in goroutines to avoid blocking
 		go handler(event)
