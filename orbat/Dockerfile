@@ -24,7 +24,7 @@ RUN chmod +x /entrypoint
 COPY healthcheck.sh /healthcheck.sh
 RUN chmod +x /healthcheck.sh
 
-EXPOSE 3000
+EXPOSE 3000 3001
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
