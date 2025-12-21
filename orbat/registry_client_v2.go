@@ -414,13 +414,34 @@ func (c *RegistryClientV2) MaintenanceEnterWithURL(target string, maintenancePag
 		}
 	}
 
-	// Read the event line (MAINT_OK)
-	if c.scanner.Scan() {
-		event := c.scanner.Text()
-		fmt.Printf("[client] Maintenance event: %s\n", event)
+	// Read the event line (expecting MAINT_OK). Wait up to a short timeout
+	// for the registry to confirm maintenance was applied.
+	waitTimeout := 10 * time.Second
+	// Set read deadline on the underlying connection so scanner.Scan() will
+	// unblock on timeout.
+	if conn, ok := c.conn.(interface{ SetReadDeadline(time.Time) error }); ok {
+		_ = conn.SetReadDeadline(time.Now().Add(waitTimeout))
+		defer conn.SetReadDeadline(time.Time{})
 	}
 
-	return nil
+	for c.scanner.Scan() {
+		event := c.scanner.Text()
+		fmt.Printf("[client] Maintenance event: %s\n", event)
+		// go-proxy sends "MAINT_OK|target" so use prefix check
+		if strings.HasPrefix(event, "MAINT_OK") {
+			return nil
+		}
+		if strings.HasPrefix(event, "ERROR") {
+			return fmt.Errorf("maintenance enter failed: %s", event)
+		}
+		// Ignore other events and continue waiting until timeout or MAINT_OK
+	}
+
+	if err := c.scanner.Err(); err != nil {
+		return fmt.Errorf("no MAINT_OK received within timeout: %w", err)
+	}
+
+	return fmt.Errorf("no MAINT_OK received")
 }
 
 // MaintenanceExit exits maintenance mode
@@ -439,13 +460,30 @@ func (c *RegistryClientV2) MaintenanceExit(target string) error {
 		}
 	}
 
-	// Read the event line (MAINT_OK)
-	if c.scanner.Scan() {
-		event := c.scanner.Text()
-		fmt.Printf("[client] Maintenance event: %s\n", event)
+	// Read the event line (expecting MAINT_OK). Wait up to a short timeout
+	waitTimeout := 10 * time.Second
+	if conn, ok := c.conn.(interface{ SetReadDeadline(time.Time) error }); ok {
+		_ = conn.SetReadDeadline(time.Now().Add(waitTimeout))
+		defer conn.SetReadDeadline(time.Time{})
 	}
 
-	return nil
+	for c.scanner.Scan() {
+		event := c.scanner.Text()
+		fmt.Printf("[client] Maintenance event: %s\n", event)
+		// go-proxy sends "MAINT_OK|target" so use prefix check
+		if strings.HasPrefix(event, "MAINT_OK") {
+			return nil
+		}
+		if strings.HasPrefix(event, "ERROR") {
+			return fmt.Errorf("maintenance exit failed: %s", event)
+		}
+	}
+
+	if err := c.scanner.Err(); err != nil {
+		return fmt.Errorf("no MAINT_OK received within timeout: %w", err)
+	}
+
+	return fmt.Errorf("no MAINT_OK received")
 }
 
 // MaintenanceStatus gets maintenance status

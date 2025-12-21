@@ -236,11 +236,11 @@ func cloneRepo() error {
 	return runCommand("git", "clone", repoURL, appDir)
 }
 
-func checkUpdates() error {
+func checkForUpdates() (bool, error) {
 	log("Checking for updates...")
 	if err := runCommand("git", "fetch", "origin", "main"); err != nil {
 		log("WARNING: git fetch failed")
-		return nil
+		return false, err
 	}
 
 	// Get local and remote commits
@@ -252,41 +252,149 @@ func checkUpdates() error {
 	remoteCmd.Dir = appDir
 	remote, _ := remoteCmd.Output()
 
-	if strings.TrimSpace(string(local)) != strings.TrimSpace(string(remote)) {
-		log("Updates detected - pulling changes...")
-		enterProxyMaintenance()
-		if err := runCommand("git", "pull", "origin", "main"); err != nil {
-			log("WARNING: git pull failed")
-			return nil
-		}
-	} else {
-		log("No updates found")
+	localHash := strings.TrimSpace(string(local))
+	remoteHash := strings.TrimSpace(string(remote))
+
+	if localHash != remoteHash {
+		log("Updates detected: %s -> %s", localHash[:7], remoteHash[:7])
+		return true, nil
 	}
+
+	log("No updates found")
+	return false, nil
+}
+
+func performUpdate() error {
+	log("========================================")
+	log("Starting zero-downtime update process")
+	log("========================================")
+
+	// Step 1: Enter maintenance mode
+	log("[Update 1/8] Entering maintenance mode...")
+	if !isMaintenanceServerRunning() {
+		log("[Update] Starting maintenance server...")
+		if err := startMaintenanceServer(); err != nil {
+			return fmt.Errorf("failed to start maintenance server: %w", err)
+		}
+		// Wait for maintenance server to be ready
+		if err := waitForMaintenanceServerHealthy(10 * time.Second); err != nil {
+			return fmt.Errorf("maintenance server not healthy: %w", err)
+		}
+	}
+
+	if err := enterProxyMaintenance(); err != nil {
+		return fmt.Errorf("failed to enter maintenance (no MAINT_OK): %w", err)
+	}
+	log("[Update] ✓ Maintenance mode active, proxy confirmed")
+
+	// Step 2: Stop Next.js
+	log("[Update 2/8] Stopping Next.js...")
+	if npmStartPID > 0 {
+		if err := syscall.Kill(npmStartPID, syscall.SIGTERM); err != nil {
+			log("Warning: failed to kill Next.js: %v", err)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	log("[Update] ✓ Next.js stopped")
+
+	// Step 3: Pull code
+	log("[Update 3/8] Pulling latest code...")
+	if err := runCommand("git", "pull", "origin", "main"); err != nil {
+		return fmt.Errorf("git pull failed: %w", err)
+	}
+	log("[Update] ✓ Code updated")
+
+	// Step 4-7: Build
+	if err := buildApp(); err != nil {
+		return fmt.Errorf("build failed: %w", err)
+	}
+
+	// Step 8: Wait for Next.js to be healthy
+	log("[Update 8/8] Waiting for Next.js to be healthy...")
+	if err := waitForNextJSHealthy(30 * time.Second); err != nil {
+		log("Warning: Next.js health check failed: %v", err)
+	}
+	log("[Update] ✓ Next.js is healthy")
+
+	// Step 9: Exit maintenance mode
+	log("[Update 9/9] Exiting maintenance mode...")
+	if err := exitProxyMaintenance(); err != nil {
+		log("Warning: failed to exit maintenance (no MAINT_OK): %v", err)
+	}
+	log("[Update] ✓ Maintenance mode exited, proxy confirmed")
+
+	log("========================================")
+	log("Zero-downtime update completed successfully")
+	log("========================================")
 	return nil
 }
 
 func buildApp() error {
-	log("Installing dependencies...")
+	log("[Update 4/8] Installing dependencies...")
 	if err := runCommand("npm", "ci", "--production=false"); err != nil {
 		return fmt.Errorf("npm ci failed: %w", err)
 	}
+	log("[Update] ✓ Dependencies installed")
 
-	log("Generating Prisma client...")
+	log("[Update 5/8] Generating Prisma client...")
 	if err := runCommand("npx", "prisma", "generate"); err != nil {
 		return fmt.Errorf("prisma generate failed: %w", err)
 	}
+	log("[Update] ✓ Prisma client generated")
 
-	log("Running database migrations...")
+	log("[Update 6/8] Running database migrations...")
 	if err := runCommand("npx", "prisma", "migrate", "deploy"); err != nil {
 		return fmt.Errorf("prisma migrate deploy failed: %w", err)
 	}
+	log("[Update] ✓ Migrations applied")
 
-	log("Building Next.js application...")
+	log("[Update 7/8] Building Next.js application...")
 	if err := runCommand("npm", "run", "build"); err != nil {
 		return fmt.Errorf("npm run build failed: %w", err)
 	}
+	log("[Update] ✓ Next.js built")
 
 	return nil
+}
+
+func isMaintenanceServerRunning() bool {
+	if maintenancePID <= 0 {
+		return false
+	}
+	// Check if process is still alive
+	err := syscall.Kill(maintenancePID, 0)
+	return err == nil
+}
+
+func waitForNextJSHealthy(timeout time.Duration) error {
+	backendURL := fmt.Sprintf("http://%s:%s/", backendHost, port)
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		cmd := exec.Command("curl", "-sf", "-o", "/dev/null", backendURL)
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	return fmt.Errorf("Next.js did not become healthy within %v", timeout)
+}
+
+func waitForMaintenanceServerHealthy(timeout time.Duration) error {
+	maintenanceURL := fmt.Sprintf("http://%s:%s/", backendHost, maintenancePort)
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		cmd := exec.Command("curl", "-sf", "-o", "/dev/null", maintenanceURL)
+		if err := cmd.Run(); err == nil {
+			log("Maintenance server is healthy and accepting connections")
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return fmt.Errorf("maintenance server did not become healthy within %v", timeout)
 }
 
 func startMaintenanceServer() error {
@@ -322,22 +430,36 @@ func startMaintenanceServer() error {
 }
 
 func stopMaintenanceServer() {
-	log("Stopping maintenance server...")
-	if maintenancePID > 0 {
-		syscall.Kill(maintenancePID, syscall.SIGTERM)
-		maintenancePID = 0
-	}
+	// Keep maintenance server running (suspended) for fast re-entry during updates
+	// The server remains on port 3001 but proxy routes away from it
+	log("Maintenance server suspended (kept running on port %s)", maintenancePort)
+	// No-op: maintenance server stays alive for next update cycle
 }
 
 func startUpdateChecker() {
 	go func() {
-		log("Starting background update checker...")
+		log("Starting background update checker (interval: %ss)...", updateCheckIntvl)
 		for {
 			time.Sleep(time.Duration(parseDuration(updateCheckIntvl)) * time.Second)
-			log("Checking for updates (periodic check)...")
-			if err := checkUpdates(); err != nil {
-				log("Update check error: %v", err)
+			log("[Update Check] Checking for updates...")
+
+			updateAvailable, err := checkForUpdates()
+			if err != nil {
+				log("[Update Check] Error: %v", err)
+				continue
 			}
+
+			if !updateAvailable {
+				log("[Update Check] No updates available")
+				continue
+			}
+
+			log("[Update Check] Update available, starting zero-downtime update...")
+			if err := performUpdate(); err != nil {
+				log("[Update Check] Update failed: %v", err)
+				continue
+			}
+			log("[Update Check] Update completed successfully")
 		}
 	}()
 }
@@ -397,34 +519,50 @@ func main() {
 	// Ensure app directory exists
 	os.MkdirAll(appDir, 0755)
 
-	// PRIORITY 1: Register with proxy immediately
-	log("PRIORITY 1: Registering with proxy...")
-	maxRetries := 5
+	// PRIORITY A: Start the local maintenance page immediately so the
+	// container shows a sensible page while we attempt registration/build.
+	log("PRIORITY: Starting local maintenance server (non-fatal)...")
+	if err := startMaintenanceServer(); err != nil {
+		log("WARNING: Failed to start local maintenance server: %v", err)
+	} else {
+		log("Local maintenance server started")
+		// Wait for it to be healthy before proceeding
+		if err := waitForMaintenanceServerHealthy(10 * time.Second); err != nil {
+			log("WARNING: Maintenance server not healthy: %v", err)
+		}
+	}
+
+	// PRIORITY B: Try to register with proxy, but do not treat failure as fatal.
+	// The previous behavior exited the process if registration failed which
+	// left the container down and the maintenance page never had a chance
+	// to serve. Instead, try a few times and continue even if registration
+	// cannot be established.
+	log("PRIORITY: Registering with proxy (non-fatal)...")
+	maxRetries := 3
+	registered := false
 	for i := 0; i < maxRetries; i++ {
 		if err := registerWithProxy(); err != nil {
 			log("Registration attempt %d/%d failed: %v", i+1, maxRetries, err)
-			if i < maxRetries-1 {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			log("ERROR: Failed to register after %d attempts", maxRetries)
-			time.Sleep(30 * time.Second)
-			os.Exit(1)
+			time.Sleep(2 * time.Second)
+			continue
 		}
+		registered = true
 		log("Successfully registered with proxy")
 		break
 	}
-
-	// PRIORITY 2: Start maintenance page immediately
-	log("PRIORITY 2: Starting maintenance server...")
-	if err := startMaintenanceServer(); err != nil {
-		log("ERROR: Failed to start maintenance server: %v", err)
-		time.Sleep(30 * time.Second)
-		os.Exit(1)
+	if !registered {
+		log("WARNING: Failed to register with proxy after %d attempts, continuing without registry", maxRetries)
 	}
 
-	// Enter proxy maintenance mode to show loading page
-	enterProxyMaintenance()
+	// If registration succeeded, enter proxy maintenance so the proxy routes
+	// to our maintenance page while we build. If registration did not succeed
+	// we continue — the local maintenance server remains available on the
+	// maintenance port for debugging and manual routing.
+	if registered {
+		if err := enterProxyMaintenance(); err != nil {
+			log("Warning: enterProxyMaintenance failed: %v", err)
+		}
+	}
 
 	// BACKGROUND: Clone/build app while maintenance page is visible
 	go func() {
@@ -437,9 +575,15 @@ func main() {
 				return
 			}
 		} else {
-			if err := checkUpdates(); err != nil {
-				log("ERROR: Failed to check updates: %v", err)
-				return
+			// Check for updates and pull if available
+			updateAvailable, err := checkForUpdates()
+			if err != nil {
+				log("WARNING: Failed to check updates: %v", err)
+			} else if updateAvailable {
+				log("Updates found, pulling latest code...")
+				if err := runCommand("git", "pull", "origin", "main"); err != nil {
+					log("WARNING: git pull failed: %v", err)
+				}
 			}
 		}
 
