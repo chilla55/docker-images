@@ -6,8 +6,34 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
+
+// EventType represents different registry events
+type EventType string
+
+const (
+	EventMaintenanceEnter EventType = "MAINT_ENTER"
+	EventMaintenanceOK    EventType = "MAINT_OK"
+	EventMaintenanceExit  EventType = "MAINT_EXIT"
+	EventConnected        EventType = "CONNECTED"
+	EventDisconnected     EventType = "DISCONNECTED"
+	EventRouteAdded       EventType = "ROUTE_ADDED"
+	EventRouteRemoved     EventType = "ROUTE_REMOVED"
+	EventHealthCheckSet   EventType = "HEALTH_CHECK_SET"
+	EventConfigApplied    EventType = "CONFIG_APPLIED"
+)
+
+// Event represents a registry event with associated data
+type Event struct {
+	Type      EventType
+	Data      map[string]interface{}
+	Timestamp time.Time
+}
+
+// EventHandler is a function that handles registry events
+type EventHandler func(event Event)
 
 // RegistryClientV2 handles v2 protocol communication with the registry
 type RegistryClientV2 struct {
@@ -15,6 +41,10 @@ type RegistryClientV2 struct {
 	sessionID string
 	scanner   *bufio.Scanner
 	localIP   string // The container's IP on the web-net network
+	
+	// Event handling
+	handlers map[EventType][]EventHandler
+	mu       sync.RWMutex
 }
 
 // getContainerIP detects the container's IP address on the web-net network (10.2.2.0/24)
@@ -104,7 +134,15 @@ func NewRegistryClientV2(registryAddr string, serviceName string, instanceName s
 		sessionID: sessionID,
 		scanner:   scanner,
 		localIP:   localIP,
+		handlers:  make(map[EventType][]EventHandler),
 	}
+
+	// Emit connected event
+	client.emit(Event{
+		Type:      EventConnected,
+		Data:      map[string]interface{}{"session_id": sessionID, "local_ip": localIP},
+		Timestamp: time.Now(),
+	})
 
 	return client, nil
 }
@@ -133,6 +171,19 @@ func (c *RegistryClientV2) AddRoute(domains []string, path string, backendURL st
 	if len(parts) > 1 {
 		routeID = parts[1]
 	}
+
+	// Emit route added event
+	c.emit(Event{
+		Type: EventRouteAdded,
+		Data: map[string]interface{}{
+			"route_id":    routeID,
+			"domains":     domains,
+			"path":        path,
+			"backend_url": backendURL,
+			"priority":    priority,
+		},
+		Timestamp: time.Now(),
+	})
 
 	return routeID, nil
 }
@@ -266,6 +317,18 @@ func (c *RegistryClientV2) SetHealthCheck(routeID string, path string, interval 
 		return fmt.Errorf("set health check failed: %s", response)
 	}
 
+	// Emit health check set event
+	c.emit(Event{
+		Type: EventHealthCheckSet,
+		Data: map[string]interface{}{
+			"route_id": routeID,
+			"path":     path,
+			"interval": interval,
+			"timeout":  timeout,
+		},
+		Timestamp: time.Now(),
+	})
+
 	return nil
 }
 
@@ -335,6 +398,14 @@ func (c *RegistryClientV2) ApplyConfig() error {
 	}
 
 	fmt.Printf("[client] Configuration applied\n")
+
+	// Emit config applied event
+	c.emit(Event{
+		Type:      EventConfigApplied,
+		Data:      map[string]interface{}{},
+		Timestamp: time.Now(),
+	})
+
 	return nil
 }
 
@@ -452,6 +523,16 @@ func (c *RegistryClientV2) MaintenanceEnterWithURL(target string, maintenancePag
 	cmd := fmt.Sprintf("MAINT_ENTER|%s|%s|%s\n", c.sessionID, target, maintenancePageURL)
 	c.conn.Write([]byte(cmd))
 
+	// Emit maintenance enter event
+	c.emit(Event{
+		Type: EventMaintenanceEnter,
+		Data: map[string]interface{}{
+			"target":               target,
+			"maintenance_page_url": maintenancePageURL,
+		},
+		Timestamp: time.Now(),
+	})
+
 	if !c.scanner.Scan() {
 		return fmt.Errorf("no response from registry")
 	}
@@ -478,6 +559,12 @@ func (c *RegistryClientV2) MaintenanceEnterWithURL(target string, maintenancePag
 		fmt.Printf("[client] Maintenance event: %s\n", event)
 		// go-proxy sends "MAINT_OK|target" so use prefix check
 		if strings.HasPrefix(event, "MAINT_OK") {
+			// Emit maintenance OK event
+			c.emit(Event{
+				Type:      EventMaintenanceOK,
+				Data:      map[string]interface{}{"target": target, "event": event},
+				Timestamp: time.Now(),
+			})
 			return nil
 		}
 		if strings.HasPrefix(event, "ERROR") {
@@ -497,6 +584,13 @@ func (c *RegistryClientV2) MaintenanceEnterWithURL(target string, maintenancePag
 func (c *RegistryClientV2) MaintenanceExit(target string) error {
 	cmd := fmt.Sprintf("MAINT_EXIT|%s|%s\n", c.sessionID, target)
 	c.conn.Write([]byte(cmd))
+
+	// Emit maintenance exit event
+	c.emit(Event{
+		Type:      EventMaintenanceExit,
+		Data:      map[string]interface{}{"target": target},
+		Timestamp: time.Now(),
+	})
 
 	if !c.scanner.Scan() {
 		return fmt.Errorf("no response from registry")
@@ -521,6 +615,12 @@ func (c *RegistryClientV2) MaintenanceExit(target string) error {
 		fmt.Printf("[client] Maintenance event: %s\n", event)
 		// go-proxy sends "MAINT_OK|target" so use prefix check
 		if strings.HasPrefix(event, "MAINT_OK") {
+			// Emit maintenance OK event
+			c.emit(Event{
+				Type:      EventMaintenanceOK,
+				Data:      map[string]interface{}{"target": target, "event": event},
+				Timestamp: time.Now(),
+			})
 			return nil
 		}
 		if strings.HasPrefix(event, "ERROR") {
@@ -659,12 +759,51 @@ func (c *RegistryClientV2) Shutdown() error {
 	}
 
 	c.conn.Close()
+	
+	// Emit disconnected event
+	c.emit(Event{
+		Type:      EventDisconnected,
+		Data:      map[string]interface{}{"reason": "shutdown"},
+		Timestamp: time.Now(),
+	})
+	
 	return nil
 }
 
 // Close closes the connection
 func (c *RegistryClientV2) Close() {
 	c.conn.Close()
+	c.emit(Event{
+		Type:      EventDisconnected,
+		Data:      map[string]interface{}{"reason": "close"},
+		Timestamp: time.Now(),
+	})
+}
+
+// On registers an event handler for a specific event type
+func (c *RegistryClientV2) On(eventType EventType, handler EventHandler) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.handlers[eventType] = append(c.handlers[eventType], handler)
+}
+
+// Off removes all handlers for a specific event type
+func (c *RegistryClientV2) Off(eventType EventType) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.handlers, eventType)
+}
+
+// emit triggers all handlers for a specific event
+func (c *RegistryClientV2) emit(event Event) {
+	c.mu.RLock()
+	handlers := c.handlers[event.Type]
+	c.mu.RUnlock()
+	
+	for _, handler := range handlers {
+		// Run handlers in goroutines to avoid blocking
+		go handler(event)
+	}
 }
 
 // GetLocalIP returns the detected container IP address

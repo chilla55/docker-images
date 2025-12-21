@@ -169,6 +169,67 @@ func registerWithProxy() error {
 
 	log("Using container IP: %s", registryClientV2.GetLocalIP())
 
+	// Register comprehensive event handlers for all lifecycle events
+	registryClientV2.On(EventConnected, func(event Event) {
+		sessionID := event.Data["session_id"]
+		localIP := event.Data["local_ip"]
+		log("✓ Connected to registry - Session: %v, IP: %v", sessionID, localIP)
+	})
+
+	registryClientV2.On(EventDisconnected, func(event Event) {
+		reason := event.Data["reason"]
+		log("⚠ Disconnected from registry - Reason: %v", reason)
+	})
+
+	registryClientV2.On(EventRouteAdded, func(event Event) {
+		routeID := event.Data["route_id"]
+		domains := event.Data["domains"]
+		backendURL := event.Data["backend_url"]
+		log("✓ Route registered - ID: %v", routeID)
+		log("  Domains: %v", domains)
+		log("  Backend: %v", backendURL)
+	})
+
+	registryClientV2.On(EventHealthCheckSet, func(event Event) {
+		routeID := event.Data["route_id"]
+		path := event.Data["path"]
+		interval := event.Data["interval"]
+		timeout := event.Data["timeout"]
+		log("✓ Health check configured for route %v", routeID)
+		log("  Path: %v, Interval: %v, Timeout: %v", path, interval, timeout)
+	})
+
+	registryClientV2.On(EventConfigApplied, func(event Event) {
+		log("✓ Configuration applied and active on proxy")
+	})
+
+	registryClientV2.On(EventMaintenanceEnter, func(event Event) {
+		target := event.Data["target"]
+		url := event.Data["maintenance_page_url"]
+		log("→ Entering maintenance mode")
+		log("  Target: %v", target)
+		log("  Maintenance URL: %v", url)
+		updateStatus("maintenance", "Entering maintenance mode", 10, "Requesting proxy to enter maintenance")
+	})
+
+	registryClientV2.On(EventMaintenanceOK, func(event Event) {
+		target := event.Data["target"]
+		log("✓ Maintenance mode confirmed by proxy")
+		log("  Target: %v", target)
+		updateStatus("maintenance", "Maintenance mode active", 100, "Proxy confirmed maintenance mode")
+	})
+
+	registryClientV2.On(EventMaintenanceExit, func(event Event) {
+		target := event.Data["target"]
+		log("→ Exiting maintenance mode")
+		log("  Target: %v", target)
+		updateStatus("running", "Exiting maintenance", 90, "Requesting proxy to exit maintenance")
+	})
+
+	registryClientV2.On(EventDisconnected, func(event Event) {
+		log("⚠ Disconnected from registry: %v", event.Data["reason"])
+	})
+
 	// Build backend URL using the detected IP and configured port
 	backendURL := registryClientV2.BuildBackendURL(port)
 	domains := strings.Split(strings.ReplaceAll(domainsStr, " ", ""), ",")
@@ -211,14 +272,8 @@ func enterProxyMaintenance() error {
 		return fmt.Errorf("registry client not connected")
 	}
 
-	log("Entering maintenance mode with URL: %s", maintenancePageURL)
-	err := registryClientV2.MaintenanceEnterWithURL("ALL", maintenancePageURL)
-	if err != nil {
-		return fmt.Errorf("failed to enter maintenance: %w", err)
-	}
-
-	log("Proxy maintenance mode entered successfully")
-	return nil
+	// Event handlers will provide feedback
+	return registryClientV2.MaintenanceEnterWithURL("ALL", maintenancePageURL)
 }
 
 func exitProxyMaintenance() error {
@@ -226,13 +281,13 @@ func exitProxyMaintenance() error {
 		return fmt.Errorf("registry client not connected")
 	}
 
+	// Event handlers will provide feedback, retry logic here
 	for i := 0; i < 3; i++ {
 		err := registryClientV2.MaintenanceExit("ALL")
 		if err == nil {
-			log("Proxy maintenance mode exited")
 			return nil
 		}
-		log("Proxy maintenance exit retry %d: %v", i+1, err)
+		log("Retry %d/3: %v", i+1, err)
 		time.Sleep(1 * time.Second)
 	}
 
@@ -603,16 +658,13 @@ func main() {
 	// we continue — the local maintenance server remains available on the
 	// maintenance port for debugging and manual routing.
 	if registered {
-		// Set maintenance URL using the detected IP if not already set
+		// Set maintenance URL using the registry client helper
 		if maintenancePageURL == "" {
 			maintenancePageURL = registryClientV2.BuildMaintenanceURL(maintenancePort)
 			log("Using maintenance page URL: %s", maintenancePageURL)
 		}
 
-		// Wait a moment for Docker Swarm DNS to propagate
-		log("Waiting for DNS propagation...")
-		time.Sleep(3 * time.Second)
-
+		// No need for DNS propagation delay since we're using direct IP
 		if err := enterProxyMaintenance(); err != nil {
 			log("Warning: enterProxyMaintenance failed: %v", err)
 		}
