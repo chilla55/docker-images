@@ -221,6 +221,15 @@ services:
         target: /etc/caddy/Caddyfile
         mode: 0444
     
+    environment:
+      # go-proxy registry v2
+      REGISTRY_HOST: proxy
+      REGISTRY_PORT: "81"
+      SERVICE_NAME: pterodactyl
+      DOMAINS: gpanel.chilla55.de
+      ROUTE_PATH: /
+      PORT: "80"
+    
     deploy:
       mode: replicated
       replicas: 1
@@ -243,15 +252,6 @@ services:
         - "com.pterodactyl.service=caddy"
     
     stop_grace_period: 10s
-    
-    environment:
-      # go-proxy registry
-      REGISTRY_HOST: proxy
-      REGISTRY_PORT: "81"
-      DOMAINS: gpanel.chilla55.de
-      ROUTE_PATH: /
-      BACKEND_HOST: pterodactyl-caddy
-      PORT: "80"
 
   # ────────────────────────────────────────────────────────────────────────
   # Queue Worker Service

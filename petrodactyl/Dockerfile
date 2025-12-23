@@ -14,7 +14,7 @@
 FROM golang:1.21-alpine AS go-builder
 
 WORKDIR /build
-COPY main.go go.mod ./
+COPY main.go go.mod registry_client_v2.go ./
 RUN go build -o entrypoint .
 
 # ──────────────────────────────────────────────────────────────────────────
