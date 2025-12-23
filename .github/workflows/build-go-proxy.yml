@@ -180,10 +180,8 @@ jobs:
             VERSION=${{ needs.detect-version.outputs.version }}
             BUILDKIT_INLINE_CACHE=1
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
             type=gha
           cache-to: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
             type=gha,mode=max
 
       - name: Build Summary
