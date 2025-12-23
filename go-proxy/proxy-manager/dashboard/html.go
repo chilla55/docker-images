@@ -35,6 +35,7 @@ func (d *Dashboard) getHTML() string {
     .status-down { background: #f8d7da; color: #721c24; }
     .status-maintenance { background: #cce5ff; color: #004085; }
     .status-draining { background: #e2e3e5; color: #383d41; }
+    .status-disabled { background: #6c757d; color: #ffffff; }
     .cert-card { background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; border-left: 4px solid #667eea; margin-bottom: 10px; }
     .error-item { background: #fff5f5; border-left: 3px solid #dc3545; padding: 12px; margin-bottom: 8px; border-radius: 4px; font-size: 13px; }
     .empty-state { text-align: center; padding: 30px; color: #999; }

@@ -297,7 +297,9 @@ func (d *Dashboard) getRouteStatuses() []RouteStatus {
 	for _, s := range summaries {
 		for _, domain := range s.Domains {
 			status := "healthy"
-			if s.InMaintenance {
+			if !s.Enabled {
+				status = "disabled"
+			} else if s.InMaintenance {
 				status = "maintenance"
 			} else if s.Draining {
 				status = "draining"

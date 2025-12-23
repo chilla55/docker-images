@@ -139,6 +139,7 @@ type RouteSummary struct {
 	Domains            []string
 	Path               string
 	BackendURL         string
+	Enabled            bool
 	Healthy            bool
 	InMaintenance      bool
 	MaintenancePageURL string
@@ -650,6 +651,7 @@ func (s *Server) RouteSummaries() []RouteSummary {
 			Domains:            append([]string(nil), route.Domains...),
 			Path:               route.Path,
 			BackendURL:         backend.URL.String(),
+			Enabled:            route.Enabled,
 			Healthy:            backend.Healthy,
 			InMaintenance:      backend.InMaintenance,
 			MaintenancePageURL: backend.MaintenancePageURL,
