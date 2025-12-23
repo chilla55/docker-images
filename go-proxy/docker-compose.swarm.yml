@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   proxy:
-    image: ghcr.io/chilla55/go-proxy:nightly
+    image: ghcr.io/chilla55/go-proxy:latest
     networks:
       - web-net
     

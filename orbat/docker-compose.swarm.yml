@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   orbat:
-    image: ghcr.io/chilla55/orbat:nightly
+    image: ghcr.io/chilla55/orbat:latest
     networks:
       - web-net
       - postgres-net
