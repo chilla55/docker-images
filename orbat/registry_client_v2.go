@@ -23,6 +23,9 @@ const (
 	EventRouteRemoved     EventType = "ROUTE_REMOVED"
 	EventHealthCheckSet   EventType = "HEALTH_CHECK_SET"
 	EventConfigApplied    EventType = "CONFIG_APPLIED"
+	EventRetrying         EventType = "RETRYING"
+	EventExtendedRetry    EventType = "EXTENDED_RETRY"
+	EventReconnected      EventType = "RECONNECTED"
 )
 
 // Event represents a registry event with associated data
@@ -45,6 +48,16 @@ type RegistryClientV2 struct {
 	// Event handling
 	handlers map[EventType][]EventHandler
 	mu       sync.RWMutex
+
+	// Retry mechanism
+	registryAddr    string
+	serviceName     string
+	instanceName    string
+	maintenancePort int
+	metadata        map[string]interface{}
+	failureCount    int
+	inExtendedRetry bool
+	done            chan struct{}
 }
 
 // getContainerIP detects the container's IP address on the web-net network (10.2.2.0/24)
@@ -82,23 +95,61 @@ func getContainerIP() string {
 	return ""
 }
 
-// NewRegistryClientV2 connects to the registry and registers the service
-func NewRegistryClientV2(registryAddr string, serviceName string, instanceName string, maintenancePort int, metadata map[string]interface{}) (*RegistryClientV2, error) {
+// NewRegistryClient creates a new registry client without connecting
+// Call Init() to establish the connection
+func NewRegistryClient(registryAddr string, serviceName string, instanceName string, maintenancePort int, metadata map[string]interface{}) *RegistryClientV2 {
+	return &RegistryClientV2{
+		registryAddr:    registryAddr,
+		serviceName:     serviceName,
+		instanceName:    instanceName,
+		maintenancePort: maintenancePort,
+		metadata:        metadata,
+		handlers:        make(map[EventType][]EventHandler),
+		done:            make(chan struct{}),
+	}
+}
+
+// Init establishes connection to the registry and registers the service
+// Set cleanupOldRoutes to true to remove routes from previous sessions
+func (c *RegistryClientV2) Init() error {
+	return c.InitWithCleanup(true)
+}
+
+// InitWithCleanup establishes connection with optional route cleanup
+func (c *RegistryClientV2) InitWithCleanup(cleanupOldRoutes bool) error {
 	// Detect container IP first
 	localIP := getContainerIP()
 	if localIP == "" {
-		return nil, fmt.Errorf("failed to detect container IP address")
+		return fmt.Errorf("failed to detect container IP address")
 	}
 	fmt.Printf("[client] Detected container IP: %s\n", localIP)
+	c.localIP = localIP
 
 	// Use IP as instance name if not provided
-	if instanceName == "" {
-		instanceName = localIP
+	if c.instanceName == "" {
+		c.instanceName = localIP
 	}
 
-	conn, err := net.Dial("tcp", registryAddr)
+	if err := c.connect(); err != nil {
+		return err
+	}
+
+	// Cleanup old routes if requested
+	if cleanupOldRoutes {
+		if err := c.CleanupOldRoutes(); err != nil {
+			fmt.Printf("[client] Warning: failed to cleanup old routes: %v\n", err)
+			// Don't fail Init if cleanup fails
+		}
+	}
+
+	return nil
+}
+
+// connect performs the actual TCP connection and registration
+func (c *RegistryClientV2) connect() error {
+	conn, err := net.Dial("tcp", c.registryAddr)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Enable TCP keepalive on client side
@@ -110,41 +161,77 @@ func NewRegistryClientV2(registryAddr string, serviceName string, instanceName s
 	scanner := bufio.NewScanner(conn)
 
 	// Register
-	metadataJSON, _ := json.Marshal(metadata)
-	registerCmd := fmt.Sprintf("REGISTER|%s|%s|%d|%s\n", serviceName, instanceName, maintenancePort, string(metadataJSON))
+	metadataJSON, _ := json.Marshal(c.metadata)
+	registerCmd := fmt.Sprintf("REGISTER|%s|%s|%d|%s\n", c.serviceName, c.instanceName, c.maintenancePort, string(metadataJSON))
 	conn.Write([]byte(registerCmd))
 
 	if !scanner.Scan() {
 		conn.Close()
-		return nil, fmt.Errorf("no response from registry")
+		return fmt.Errorf("no response from registry")
 	}
 
 	response := scanner.Text()
 	parts := strings.Split(response, "|")
 	if len(parts) < 2 || parts[0] != "ACK" {
 		conn.Close()
-		return nil, fmt.Errorf("registration failed: %s", response)
+		return fmt.Errorf("registration failed: %s", response)
 	}
 
 	sessionID := parts[1]
 	fmt.Printf("[client] Registered with session ID: %s\n", sessionID)
 
-	client := &RegistryClientV2{
-		conn:      conn,
-		sessionID: sessionID,
-		scanner:   scanner,
-		localIP:   localIP,
-		handlers:  make(map[EventType][]EventHandler),
-	}
+	c.conn = conn
+	c.sessionID = sessionID
+	c.scanner = scanner
 
 	// Emit connected event
-	client.emit(Event{
+	c.emit(Event{
 		Type:      EventConnected,
-		Data:      map[string]interface{}{"session_id": sessionID, "local_ip": localIP},
+		Data:      map[string]interface{}{"session_id": sessionID, "local_ip": c.localIP},
 		Timestamp: time.Now(),
 	})
 
-	return client, nil
+	return nil
+}
+
+// CleanupOldRoutes removes all routes from previous sessions
+// This is useful when restarting to avoid stale route configurations
+func (c *RegistryClientV2) CleanupOldRoutes() error {
+	fmt.Printf("[client] Checking for old routes to cleanup...\n")
+
+	// List all current routes
+	routes, err := c.ListRoutes()
+	if err != nil {
+		return fmt.Errorf("failed to list routes: %w", err)
+	}
+
+	if len(routes) == 0 {
+		fmt.Printf("[client] No old routes found\n")
+		return nil
+	}
+
+	fmt.Printf("[client] Found %d routes from previous session(s)\n", len(routes))
+
+	// Remove all old routes
+	for _, route := range routes {
+		if routeMap, ok := route.(map[string]interface{}); ok {
+			if routeID, ok := routeMap["id"].(string); ok {
+				fmt.Printf("[client] Removing old route: %s\n", routeID)
+				if err := c.RemoveRoute(routeID); err != nil {
+					fmt.Printf("[client] Warning: failed to remove route %s: %v\n", routeID, err)
+					// Continue removing other routes
+				}
+			}
+		}
+	}
+
+	// Apply the removal
+	if err := c.ApplyConfig(); err != nil {
+		return fmt.Errorf("failed to apply route cleanup: %w", err)
+	}
+
+	fmt.Printf("[client] Old routes cleaned up successfully\n")
+	return nil
 }
 
 // AddRoute stages and applies a new route
@@ -770,9 +857,12 @@ func (c *RegistryClientV2) Shutdown() error {
 	return nil
 }
 
-// Close closes the connection
+// Close closes the connection and stops the keepalive loop
 func (c *RegistryClientV2) Close() {
-	c.conn.Close()
+	close(c.done)
+	if c.conn != nil {
+		c.conn.Close()
+	}
 	c.emit(Event{
 		Type:      EventDisconnected,
 		Data:      map[string]interface{}{"reason": "close"},
@@ -820,3 +910,118 @@ func (c *RegistryClientV2) BuildBackendURL(port string) string {
 func (c *RegistryClientV2) BuildMaintenanceURL(port string) string {
 	return fmt.Sprintf("http://%s:%s/", c.localIP, port)
 }
+
+// StartKeepalive starts the keepalive loop with automatic retry mechanism
+func (c *RegistryClientV2) StartKeepalive() {
+	normalInterval := 30 * time.Second
+	extendedRetryInterval := 60 * time.Second
+	maxQuickRetries := 5
+
+	ticker := time.NewTicker(normalInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			err := c.Ping()
+			if err != nil {
+				c.failureCount++
+				fmt.Printf("[client] Keepalive ping failed (attempt %d): %v\n", c.failureCount, err)
+
+				// Emit retry event
+				c.emit(Event{
+					Type: EventRetrying,
+					Data: map[string]interface{}{
+						"attempt": c.failureCount,
+						"error":   err.Error(),
+					},
+					Timestamp: time.Now(),
+				})
+
+				// Try to reconnect with backoff strategy
+				go c.reconnectWithBackoff(maxQuickRetries, &ticker, normalInterval, extendedRetryInterval)
+			} else {
+				// Successful ping - reset failure count
+				if c.failureCount > 0 {
+					c.failureCount = 0
+					if c.inExtendedRetry {
+						fmt.Printf("[client] Connection stable, returning to normal ping interval\n")
+						c.inExtendedRetry = false
+						ticker.Reset(normalInterval)
+					}
+				}
+			}
+		case <-c.done:
+			return
+		}
+	}
+}
+
+// reconnectWithBackoff attempts to reconnect with exponential backoff
+func (c *RegistryClientV2) reconnectWithBackoff(maxQuickRetries int, ticker **time.Ticker, normalInterval, extendedRetryInterval time.Duration) {
+	attempt := c.failureCount
+	var retryDelay time.Duration
+
+	// First 5 attempts: exponential backoff (5s, 10s, 15s, 20s, 25s)
+	if attempt <= maxQuickRetries {
+		retryDelay = time.Duration(attempt*5) * time.Second
+	} else {
+		// After 5 failures: switch to 1-minute retries
+		if !c.inExtendedRetry {
+			fmt.Printf("[client] Switching to extended retry mode (1-minute intervals)\n")
+			c.inExtendedRetry = true
+			(*ticker).Reset(extendedRetryInterval)
+
+			// Emit extended retry event
+			c.emit(Event{
+				Type:      EventExtendedRetry,
+				Data:      map[string]interface{}{"interval": extendedRetryInterval.String()},
+				Timestamp: time.Now(),
+			})
+		}
+		retryDelay = 5 * time.Second
+	}
+
+	time.Sleep(retryDelay)
+	fmt.Printf("[client] Attempting reconnection (attempt %d, after %v delay)...\n", attempt, retryDelay)
+
+	if err := c.reconnect(); err != nil {
+		fmt.Printf("[client] Reconnection attempt %d failed: %v\n", attempt, err)
+	} else {
+		// Connection successful - reset to normal behavior
+		c.failureCount = 0
+		if c.inExtendedRetry {
+			fmt.Printf("[client] Connection restored! Returning to normal ping interval\n")
+			c.inExtendedRetry = false
+			(*ticker).Reset(normalInterval)
+		}
+		fmt.Printf("[client] Successfully reconnected to registry\n")
+
+		// Emit reconnected event
+		c.emit(Event{
+			Type:      EventReconnected,
+			Data:      map[string]interface{}{"attempt": attempt, "session_id": c.sessionID},
+			Timestamp: time.Now(),
+		})
+	}
+}
+
+// reconnect attempts to reconnect to the registry
+func (c *RegistryClientV2) reconnect() error {
+	// Close old connection if it exists
+	if c.conn != nil {
+		c.conn.Close()
+	}
+
+	// Detect container IP
+	localIP := getContainerIP()
+	if localIP == "" {
+		return fmt.Errorf("failed to detect container IP address")
+	}
+	c.localIP = localIP
+
+	// Use connect method for reconnection
+	return c.connect()
+}
+
+// Close stops the keepalive loop and closes the connection

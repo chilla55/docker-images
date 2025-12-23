@@ -148,33 +148,6 @@ func cleanup() {
 	}
 }
 
-// keepAliveLoop sends periodic pings to keep the V2 connection alive
-func keepAliveLoop() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if registryClientV2 != nil {
-				err := registryClientV2.Ping()
-				if err != nil {
-					log("Keepalive ping failed: %v", err)
-					// Try to reconnect
-					go func() {
-						time.Sleep(5 * time.Second)
-						if err := registerWithProxy(); err != nil {
-							log("Reconnection failed: %v", err)
-						}
-					}()
-				}
-			}
-		case <-done:
-			return
-		}
-	}
-}
-
 func registerWithProxy() error {
 	log("Registering service with go-proxy registry (V2 protocol)...")
 
@@ -187,17 +160,11 @@ func registerWithProxy() error {
 		"auto_update": true,
 	}
 
-	// Connect and register with V2 protocol
-	// The client will auto-detect the container IP and use it as instance name
-	var err error
-	registryClientV2, err = NewRegistryClientV2(registryAddr, serviceName, "", 3001, metadata)
-	if err != nil {
-		return fmt.Errorf("failed to register with V2: %w", err)
-	}
-
-	log("Using container IP: %s", registryClientV2.GetLocalIP())
+	// Create registry client
+	registryClientV2 = NewRegistryClient(registryAddr, serviceName, "", 3001, metadata)
 
 	// Register comprehensive event handlers for all lifecycle events
+	// Configure event handlers before connecting
 	registryClientV2.On(EventConnected, func(event Event) {
 		sessionID := event.Data["session_id"]
 		localIP := event.Data["local_ip"]
@@ -275,9 +242,50 @@ func registerWithProxy() error {
 		log("⚠ Disconnected from registry: %v", event.Data["reason"])
 	})
 
+	registryClientV2.On(EventRetrying, func(event Event) {
+		attempt := event.Data["attempt"]
+		err := event.Data["error"]
+		log("⚠ Connection lost, retrying (attempt %v): %v", attempt, err)
+	})
+
+	registryClientV2.On(EventExtendedRetry, func(event Event) {
+		interval := event.Data["interval"]
+		log("⏱ Switching to extended retry mode (interval: %v)", interval)
+	})
+
+	registryClientV2.On(EventReconnected, func(event Event) {
+		attempt := event.Data["attempt"]
+		log("✓ Successfully reconnected after %v attempts", attempt)
+	})
+
+	registryClientV2.On(EventRetrying, func(event Event) {
+		attempt := event.Data["attempt"]
+		err := event.Data["error"]
+		log("⚠ Connection lost, retrying (attempt %v): %v", attempt, err)
+	})
+
+	registryClientV2.On(EventExtendedRetry, func(event Event) {
+		interval := event.Data["interval"]
+		log("⏱ Switching to extended retry mode (interval: %v)", interval)
+	})
+
+	registryClientV2.On(EventReconnected, func(event Event) {
+		attempt := event.Data["attempt"]
+		log("✓ Successfully reconnected after %v attempts", attempt)
+	})
+
+	// Initialize connection (with automatic cleanup of old routes)
+	log("Initializing connection to registry...")
+	if err := registryClientV2.Init(); err != nil {
+		return fmt.Errorf("failed to initialize registry client: %w", err)
+	}
+
+	log("Using container IP: %s", registryClientV2.GetLocalIP())
+
 	// Build backend URL using the detected IP and configured port
 	backendURL := registryClientV2.BuildBackendURL(port)
 	domains := strings.Split(strings.ReplaceAll(domainsStr, " ", ""), ",")
+	var err error
 
 	routeID, err = registryClientV2.AddRoute(domains, routePath, backendURL, 10)
 	if err != nil {
@@ -306,8 +314,8 @@ func registerWithProxy() error {
 
 	log("Service successfully registered with V2 protocol")
 
-	// Start keepalive pinger
-	go keepAliveLoop()
+	// Start keepalive with automatic retry mechanism
+	go registryClientV2.StartKeepalive()
 
 	return nil
 }
