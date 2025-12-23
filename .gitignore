@@ -68,3 +68,6 @@ fabric.properties
 
 !.idea/codeStyles
 !.idea/runConfigurations
+
+# Go build artifacts
+go-proxy/proxy-manager/proxy-manager

@@ -17,9 +17,10 @@ services:
         constraints:
           - node.labels.web.node == web
       restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
+        condition: any
+        delay: 10s
+        max_attempts: 5
+        window: 300s
       resources:
         limits:
           cpus: '1'

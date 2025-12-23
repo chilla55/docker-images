@@ -33,9 +33,10 @@ services:
         constraints:
           - node.labels.mariadb.node == srv1
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 10s
         max_attempts: 5
+        window: 300s
       resources:
         limits:
           cpus: '4'

@@ -1,11 +1,26 @@
 # ============================================================================
 # Multi-stage build for optimized Pterodactyl Panel Docker image
 # ============================================================================
+# Designed for 4-service architecture:
+# - php-fpm: PHP FastCGI Process Manager
+# - caddy: HTTP server
+# - queue: Laravel queue workers
+# - cron: Laravel scheduler
+# ============================================================================
 
 # ──────────────────────────────────────────────────────────────────────────
-# Stage 1: Builder - Install Composer dependencies
+# Stage 1: Go Builder - Build entrypoint binary
 # ──────────────────────────────────────────────────────────────────────────
-FROM alpine:3.20 AS builder
+FROM golang:1.21-alpine AS go-builder
+
+WORKDIR /build
+COPY main.go go.mod registry_client_v2.go ./
+RUN go build -o entrypoint .
+
+# ──────────────────────────────────────────────────────────────────────────
+# Stage 2: PHP Builder - Install Composer dependencies
+# ──────────────────────────────────────────────────────────────────────────
+FROM alpine:3.20 AS php-builder
 
 ARG PANEL_VERSION
 
@@ -73,7 +88,7 @@ RUN rm -rf \
     bootstrap/cache/*.php
 
 # ──────────────────────────────────────────────────────────────────────────
-# Stage 2: Runtime - Final optimized image
+# Stage 3: Runtime - Final optimized image
 # ──────────────────────────────────────────────────────────────────────────
 FROM alpine:3.20
 
@@ -83,7 +98,7 @@ ENV APP_DIR=/var/www/pterodactyl \
 
 LABEL maintainer="chilla55" \
       org.opencontainers.image.title="Pterodactyl Panel" \
-      org.opencontainers.image.description="All-in-one Pterodactyl Panel container with Caddy, PHP-FPM, Queue Worker, and Scheduler" \
+      org.opencontainers.image.description="Pterodactyl Panel for 4-service architecture (php-fpm, caddy, queue, cron)" \
       org.opencontainers.image.version="${PANEL_VERSION}" \
       org.opencontainers.image.source="https://github.com/chilla55/docker-images"
 
@@ -96,6 +111,7 @@ RUN apk add --no-cache \
     curl \
     ca-certificates \
     tzdata \
+    netcat-openbsd \
     php83 \
     php83-fpm \
     php83-opcache \
@@ -120,78 +136,49 @@ RUN apk add --no-cache \
     php83-sodium \
     php83-intl \
     caddy \
-    supervisor \
     mariadb-client && \
     ln -sf /usr/bin/php83 /usr/bin/php && \
     ln -sf /usr/sbin/php-fpm83 /usr/sbin/php-fpm && \
-    addgroup -g 82 www-data 2>/dev/null || true && \
-    adduser -u 82 -D -S -G www-data www-data 2>/dev/null || true && \
+    rm -f /etc/php83/php-fpm.d/www.conf
+
+# Create nginx user and directories (use different GID since 101 is taken)
+RUN addgroup -g 1001 -S nginx && \
+    adduser -u 1001 -D -S -G nginx nginx && \
     mkdir -p \
         ${APP_DIR} \
-        /var/log/ptero \
-        /run/php \
+        /var/log/php-fpm \
         /run/php-fpm && \
-    chown -R www-data:www-data /var/log/ptero /run/php /run/php-fpm
+    chown -R nginx:nginx /var/log/php-fpm /run/php-fpm
 
 WORKDIR ${APP_DIR}
 
-# Copy application from builder
-COPY --from=builder --chown=www-data:www-data /build ${APP_DIR}
+# Copy Go entrypoint binary from go-builder
+COPY --from=go-builder /build/entrypoint /entrypoint
+RUN chmod +x /entrypoint
 
-# Copy configuration files
-COPY --chown=root:root Caddyfile /etc/caddy/Caddyfile
-COPY --chown=root:root supervisord.conf /etc/supervisord.conf
-COPY --chown=root:root entrypoint.sh /entrypoint.sh
+# Copy application from php-builder
+COPY --from=php-builder --chown=nginx:nginx /build ${APP_DIR}
+
+# Copy healthcheck script
 COPY --chown=root:root healthcheck.sh /healthcheck.sh
-
-# Make scripts executable
-RUN chmod +x /entrypoint.sh /healthcheck.sh
-
-# Configure PHP-FPM for production
-RUN sed -i \
-    -e 's/^;daemonize = yes/daemonize = no/' \
-    -e 's/^;error_log = log\/php83\/error.log/error_log = \/proc\/self\/fd\/2/' \
-    -e 's/^;log_level = notice/log_level = warning/' \
-    /etc/php83/php-fpm.conf && \
-    sed -i \
-    -e 's/^user = nobody/user = www-data/' \
-    -e 's/^group = nobody/group = www-data/' \
-    -e 's/^listen = 127.0.0.1:9000/listen = \/run\/php-fpm\/pterodactyl.sock/' \
-    -e 's/^;listen.owner = nobody/listen.owner = www-data/' \
-    -e 's/^;listen.group = nobody/listen.group = www-data/' \
-    -e 's/^;listen.mode = 0660/listen.mode = 0660/' \
-    -e 's/^pm = dynamic/pm = ondemand/' \
-    -e 's/^pm.max_children = 5/pm.max_children = 20/' \
-    -e 's/^;pm.process_idle_timeout = 10s/pm.process_idle_timeout = 10s/' \
-    -e 's/^;catch_workers_output = yes/catch_workers_output = yes/' \
-    -e 's/^;decorate_workers_output = no/decorate_workers_output = no/' \
-    /etc/php83/php-fpm.d/www.conf
-
-# Configure PHP for production
-RUN sed -i \
-    -e 's/^expose_php = On/expose_php = Off/' \
-    -e 's/^;date.timezone =/date.timezone = UTC/' \
-    -e 's/^memory_limit = 128M/memory_limit = 256M/' \
-    -e 's/^upload_max_filesize = 2M/upload_max_filesize = 100M/' \
-    -e 's/^post_max_size = 8M/post_max_size = 100M/' \
-    -e 's/^max_execution_time = 30/max_execution_time = 300/' \
-    /etc/php83/php.ini
+RUN chmod +x /healthcheck.sh
 
 # Set proper permissions
-RUN chown -R www-data:www-data \
+RUN chown -R nginx:nginx \
     ${APP_DIR}/storage \
     ${APP_DIR}/bootstrap/cache && \
     chmod -R 755 ${APP_DIR}/storage ${APP_DIR}/bootstrap/cache
 
-# Expose ports
+# Expose ports (php-fpm: 9000, caddy: 80)
 EXPOSE 80 9000
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD /healthcheck.sh
 
-# Security: Run as non-root for entrypoint (supervisord will handle user switching)
+# Run as root (services will drop privileges as needed)
 USER root
 
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+ENTRYPOINT ["/entrypoint"]
+# Default command can be overridden by docker-compose
+CMD ["php-fpm"]

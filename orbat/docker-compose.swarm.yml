@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   orbat:
-    image: ghcr.io/chilla55/orbat:latest
+    image: ghcr.io/chilla55/orbat:nightly
     networks:
       - web-net
       - postgres-net
@@ -10,6 +10,7 @@ services:
     deploy:
       mode: replicated
       replicas: 1
+      endpoint_mode: dnsrr
       placement:
         constraints:
           - node.labels.web.node == web
@@ -18,9 +19,10 @@ services:
         delay: 10s
         order: start-first
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 5s
-        max_attempts: 3
+        max_attempts: 5
+        window: 300s
       resources:
         limits:
           cpus: '2'
@@ -57,6 +59,7 @@ services:
       DISCORD_CLIENT_ID: ""  # Will be populated from secret
       DISCORD_CLIENT_SECRET: ""  # Will be populated from secret
       DISCORD_REDIRECT_URI: "https://orbat.chilla55.de/api/auth/callback/discord"
+      DISCORD_OAUTH_URL: "https://discord.com/oauth2/authorize?client_id=1342882316716085318&response_type=code&redirect_uri=https%3A%2F%2Forbat.chilla55.de%3A8443%2Fapi%2Fauth%2Fcallback%2Fdiscord&scope=identify"
       
       # Steam OAuth (from secrets)
       STEAM_API_KEY: ""  # Will be populated from secret
@@ -64,6 +67,13 @@ services:
       
       # Next.js configuration
       NEXT_TELEMETRY_DISABLED: "1"
+      
+      # go-proxy TCP registry (port 81)
+      REGISTRY_HOST: "tasks.go-proxy_proxy"
+      REGISTRY_PORT: "81"
+      DOMAINS: "orbat.chilla55.de"
+      ROUTE_PATH: "/"
+      BACKEND_HOST: "tasks.orbat_orbat"
     
     secrets:
       - nextauth_secret

@@ -1,0 +1,90 @@
+# Example site configuration with Phase 0 features
+# Pterodactyl Game Panel
+
+enabled: true
+
+service:
+  name: pterodactyl_panel
+  maintenance_port: 8080
+
+# Route configurations
+routes:
+  - domains:
+      - gpanel.chilla55.de
+    path: /
+    backend: http://pterodactyl_panel:80
+    websocket: true  # Required for server console
+    headers:
+      # Additional headers specific to this route
+      X-Proxy-Service: "pterodactyl"
+      X-Frame-Options: "SAMEORIGIN"  # Override global setting for iframes
+
+# Timeout configurations (Phase 0 - Task #23)
+options:
+  timeouts:
+    connect: 5s       # Backend connection timeout
+    read: 30s         # Read timeout for backend response
+    write: 30s        # Write timeout for client response
+    idle: 120s        # Idle connection timeout
+
+  # Size limits (Phase 0 - Task #24)
+  limits:
+    max_request_body: 104857600   # 100 MB (allows server backup uploads)
+    max_response_body: 52428800   # 50 MB
+
+  # Rate limiting (Phase 1 - Task #14)
+  rate_limit:
+    enabled: true
+    requests_per_min: 120         # Higher limit for game panel
+    requests_per_hour: 2000
+    burst_size: 20                # Allow bursts for WebSocket
+    per_ip: true
+
+  # Web Application Firewall (Phase 1 - Task #15)
+  waf:
+    enabled: true
+    block_mode: true              # Block attacks
+    sensitivity: medium           # Medium sensitivity for game panel
+    check_path: true
+    check_headers: true
+    check_query: true
+    check_body: true              # Important for upload protection
+    max_body_size: 2097152        # 2 MB inspection limit
+
+  # PII Masking (Phase 1 - Task #16) - GDPR Compliance
+  pii:
+    enabled: true                 # GDPR compliance for EU users
+    mask_ip_method: last_octet    # Mask last octet
+    mask_ipv6_method: last_64
+    preserve_localhost: true
+
+  # Data Retention (Phase 1 - Task #22) - Public Service Policy
+  retention:
+    enabled: true
+    policy_type: public           # Shorter retention for public service
+    access_log_days: 7            # 7 days for access logs
+    security_log_days: 30         # 30 days for security events
+    audit_log_days: 90            # 90 days for audit
+    metrics_days: 30              # 30 days for metrics
+
+  # Health check configuration
+  health_check_path: /up
+  health_check_interval: 10s
+  health_check_timeout: 5s
+
+  # General options
+  timeout: 30s
+  compression: true
+  websocket: true
+  http2: true
+  http3: false  # Disabled for compatibility
+
+# Security headers (Phase 0 - Task #25)
+headers:
+  Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"
+  X-Frame-Options: "SAMEORIGIN"  # Allow iframes from same origin
+  X-Content-Type-Options: "nosniff"
+  X-XSS-Protection: "1; mode=block"
+  Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' wss:"
+  Referrer-Policy: "strict-origin-when-cross-origin"
+  Permissions-Policy: "geolocation=(), microphone=(), camera=()"

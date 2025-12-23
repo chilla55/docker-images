@@ -1,0 +1,29 @@
+# Global Proxy Configuration
+defaults:
+  headers:
+    Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+    X-Frame-Options: "SAMEORIGIN"
+    X-Content-Type-Options: "nosniff"
+    X-XSS-Protection: "1; mode=block"
+    Referrer-Policy: "strict-origin-when-cross-origin"
+    Permissions-Policy: "geolocation=(), microphone=(), camera=()"
+
+  options:
+    health_check_interval: 10s
+    health_check_timeout: 5s
+    timeout: 30s
+    compression: true
+
+blackhole:
+  unknown_domains: true
+  metrics_only: true
+
+tls:
+  certificates:
+    # Example certificate configuration
+    # In production, use Let's Encrypt certificates
+    - domains:
+        - "localhost"
+        - "*.localhost"
+      cert_file: /tmp/test-cert.pem
+      key_file: /tmp/test-key.pem

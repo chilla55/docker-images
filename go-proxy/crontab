@@ -1,0 +1,9 @@
+# Proxy Manager Backup Schedule
+# Full backup - Every Sunday at 02:00 UTC
+0 2 * * 0 /usr/local/bin/backup-full.sh >> /var/log/backup.log 2>&1
+# Differential backup - Every Wednesday at 02:00 UTC
+0 2 * * 3 /usr/local/bin/backup-differential.sh >> /var/log/backup.log 2>&1
+# Incremental backup - Every hour
+0 * * * * /usr/local/bin/backup-incremental.sh >> /var/log/backup.log 2>&1
+# Daily retention cleanup at 03:00 UTC
+0 3 * * * /usr/local/bin/cleanup-retention.sh >> /var/log/retention-cleanup.log 2>&1

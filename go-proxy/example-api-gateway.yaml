@@ -1,0 +1,44 @@
+# Example: API gateway with multiple routes and WebSocket support
+
+enabled: true
+
+service:
+  name: api-gateway
+  maintenance_port: 8081
+
+routes:
+  # API v1
+  - domains:
+      - api.example.com
+    path: /v1
+    backend: http://api-v1:8080
+  
+  # API v2 with WebSocket
+  - domains:
+      - api.example.com
+    path: /v2
+    backend: http://api-v2:9000
+    websocket: true
+  
+  # WebSocket endpoint
+  - domains:
+      - api.example.com
+    path: /ws
+    backend: http://websocket-server:3000
+    websocket: true
+  
+  # Default fallback
+  - domains:
+      - api.example.com
+    path: /
+    backend: http://api-default:8080
+
+headers:
+  Access-Control-Allow-Origin: "*"
+  Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+  Access-Control-Allow-Headers: Content-Type, Authorization
+
+options:
+  health_check_path: /health
+  timeout: 60s
+  max_body_size: 10M

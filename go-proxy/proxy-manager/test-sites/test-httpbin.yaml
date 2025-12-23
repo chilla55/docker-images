@@ -1,0 +1,37 @@
+# Test site configuration
+enabled: true
+
+service:
+  name: test-httpbin
+  maintenance_port: 8080
+
+routes:
+  - domains:
+      - localhost
+    path: /
+    backend: http://httpbin.org:80
+    websocket: false
+
+# Timeout configuration (Phase 0 - Task #23)
+options:
+  timeouts:
+    connect: 5s
+    read: 30s
+    write: 30s
+    idle: 120s
+
+  # Size limits (Phase 0 - Task #24)
+  limits:
+    max_request_body: 1048576    # 1 MB
+    max_response_body: 1048576   # 1 MB
+
+  health_check_path: /status/200
+  health_check_interval: 10s
+  health_check_timeout: 3s
+  timeout: 30s
+  compression: true
+
+# Security headers (Phase 0 - Task #25)
+headers:
+  X-Test-Header: "test-value"
+  X-Proxy-By: "go-proxy-test"

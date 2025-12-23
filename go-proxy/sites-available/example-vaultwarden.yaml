@@ -1,0 +1,100 @@
+# Example site configuration with Phase 0 features
+# Vaultwarden (Private Password Manager)
+
+enabled: true
+
+service:
+  name: vaultwarden
+  maintenance_port: 8080
+
+routes:
+  - domains:
+      - vault.chilla55.de
+    path: /
+    backend: http://vaultwarden:80
+    websocket: true  # Required for live sync
+    headers:
+      X-Proxy-Service: "vaultwarden"
+      X-Robots-Tag: "noindex, nofollow"  # Prevent indexing
+
+# Strict timeouts for private service (Phase 0 - Task #23)
+options:
+  timeouts:
+    connect: 3s       # Faster timeout for local service
+    read: 15s         # Shorter read timeout
+    write: 15s        # Shorter write timeout
+    idle: 60s         # Shorter idle timeout
+
+  # Strict size limits (Phase 0 - Task #24)
+  limits:
+    max_request_body: 10485760    # 10 MB (vault exports)
+    max_response_body: 10485760   # 10 MB
+
+  # Rate limiting (Phase 1 - Task #14)
+  rate_limit:
+    enabled: true
+    requests_per_min: 30          # Strict limit for private service
+    requests_per_hour: 500
+    burst_size: 5
+    per_ip: true
+    whitelist:
+      - "10.0.0.0/8"              # Internal network
+      - "192.168.0.0/16"          # Private network
+
+  # Web Application Firewall (Phase 1 - Task #15)
+  waf:
+    enabled: true
+    block_mode: true              # Block malicious requests
+    sensitivity: high             # High sensitivity for password manager
+    check_path: true
+    check_headers: true
+    check_query: true
+    check_body: true
+    max_body_size: 1048576        # 1 MB inspection limit
+
+  # PII Masking (Phase 1 - Task #16) - GDPR Compliance
+  pii:
+    enabled: true                 # Required for GDPR
+    mask_ip_method: last_octet    # 203.0.113.45 -> 203.0.113.xxx
+    mask_ipv6_method: last_64     # Mask last 64 bits
+    preserve_localhost: true      # Don't mask internal IPs
+
+  # Data Retention (Phase 1 - Task #22) - Private Service Policy
+  retention:
+    enabled: true
+    policy_type: private          # Longer retention for sensitive service
+    access_log_days: 30           # 30 days for access logs
+    security_log_days: 90         # 90 days for security events
+    audit_log_days: 365           # 1 year for audit (compliance)
+    metrics_days: 90              # 90 days for metrics
+    health_check_days: 7          # 7 days for health checks
+    strip_headers:
+      - Authorization
+      - Cookie
+      - X-API-Key
+    mask_query_params:
+      - token
+      - password
+      - secret
+
+  # Aggressive health checks
+  health_check_path: /alive
+  health_check_interval: 5s
+  health_check_timeout: 2s
+
+  timeout: 15s
+  compression: true
+  websocket: true
+  http2: true
+  http3: false
+
+# Strict security headers (Phase 0 - Task #25)
+headers:
+  Strict-Transport-Security: "max-age=63072000; includeSubDomains; preload"
+  X-Frame-Options: "DENY"
+  X-Content-Type-Options: "nosniff"
+  X-XSS-Protection: "1; mode=block"
+  Content-Security-Policy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://icons.bitwarden.net; font-src 'self' data:; connect-src 'self' wss: https://api.pwnedpasswords.com https://twofactorauth.org; frame-ancestors 'none'"
+  Referrer-Policy: "same-origin"
+  Permissions-Policy: "geolocation=(), microphone=(), camera=(), payment=()"
+  X-Robots-Tag: "noindex, nofollow"

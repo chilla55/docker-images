@@ -1,0 +1,21 @@
+# Example: Simple single-domain site
+
+enabled: true
+
+service:
+  name: myapp
+  maintenance_port: 8081
+
+routes:
+  - domains:
+      - myapp.example.com
+      - www.myapp.example.com
+    path: /
+    backend: http://myapp:8080
+
+headers:
+  X-Frame-Options: SAMEORIGIN
+
+options:
+  health_check_path: /health
+  timeout: 30s

@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  proxy:
+    build: .
+    image: proxy-manager:latest
+    ports:
+      - "80:80"           # HTTP (redirects to HTTPS)
+      - "443:443/tcp"     # HTTPS (HTTP/2)
+      - "443:443/udp"     # HTTP/3 (QUIC)
+      - "81:81"           # Service Registry
+      - "8080:8080"       # Health/Metrics
+    volumes:
+      - ./sites-available:/etc/proxy/sites-available:ro
+      - ./global.yaml:/etc/proxy/global.yaml:ro
+      - ./certs:/etc/proxy/certs:ro  # Mount your certificates directory
+      - proxy-data:/data             # Persist SQLite DB
+      - ./backups:/mnt/storagebox/backups/proxy  # Local backups directory (dev)
+    environment:
+      - DEBUG=1
+      - SITES_PATH=/etc/proxy/sites-available
+      - GLOBAL_CONFIG=/etc/proxy/global.yaml
+      - DB_PATH=/data/proxy.db
+      - BACKUP_DIR=/mnt/storagebox/backups/proxy
+      - TZ=UTC
+    networks:
+      - web
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # Example backend service
+  demo-app:
+    image: traefik/whoami
+    networks:
+      - web
+    environment:
+      - WHOAMI_NAME=demo-app
+
+networks:
+  web:
+    driver: bridge
+
+volumes:
+  proxy-data:
