@@ -21,6 +21,15 @@ services:
     environment:
       DOMAIN: ${VAULTWARDEN_DOMAIN:-https://vw.chilla55.de}
       
+      # go-proxy registry v2
+      ENABLE_REGISTRY: ${ENABLE_REGISTRY:-true}
+      REGISTRY_HOST: ${REGISTRY_HOST:-proxy}
+      REGISTRY_PORT: ${REGISTRY_PORT:-81}
+      SERVICE_NAME: ${SERVICE_NAME:-vaultwarden}
+      DOMAINS: ${DOMAINS:-vw.chilla55.de}
+      ROUTE_PATH: ${ROUTE_PATH:-/}
+      PORT: ${PORT:-80}
+      
       # Admin token from secret
       ADMIN_TOKEN_FILE: /run/secrets/vaultwarden_admin_token
       

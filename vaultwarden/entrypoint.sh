@@ -29,5 +29,16 @@ if [ -d "/data/keys" ]; then
     fi
 fi
 
+# Start registry client in background if enabled
+if [ "${ENABLE_REGISTRY:-true}" = "true" ]; then
+    echo "Starting go-proxy registry client..."
+    /usr/local/bin/registry-client &
+    REGISTRY_PID=$!
+    echo "Registry client started (PID: $REGISTRY_PID)"
+    
+    # Trap signals to ensure registry client is also terminated
+    trap "echo 'Shutting down registry client...'; kill $REGISTRY_PID 2>/dev/null; wait $REGISTRY_PID 2>/dev/null" SIGTERM SIGINT
+fi
+
 # Execute original Vaultwarden entrypoint
 exec /start.sh "$@"
