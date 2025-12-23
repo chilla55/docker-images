@@ -242,9 +242,26 @@ func registerWithProxy() error {
 
 	registryClientV2.On(EventMaintenanceOK, func(event Event) {
 		target := event.Data["target"]
+		eventStr := fmt.Sprintf("%v", event.Data["event"])
+
+		// MAINT_OK is sent for both enter and exit
+		// We can tell which by checking the event string or our state
 		log("✓ Maintenance mode confirmed by proxy")
 		log("  Target: %v", target)
-		updateStatus("maintenance", "Maintenance mode active", 100, "Proxy confirmed maintenance mode")
+		log("  Event: %v", eventStr)
+
+		// If we see MAINT_OK and we're exiting, stop the maintenance server
+		if strings.Contains(eventStr, "MAINT_OK") {
+			// Check if this is an exit confirmation by seeing if npm is running
+			if npmStartPID > 0 {
+				log("✓ Detected maintenance exit confirmation")
+				updateStatus("running", "Application online", 100, "Service fully operational")
+				stopMaintenanceServer()
+			} else {
+				// This is maintenance enter confirmation
+				updateStatus("maintenance", "Maintenance mode active", 100, "Proxy confirmed maintenance mode")
+			}
+		}
 	})
 
 	registryClientV2.On(EventMaintenanceExit, func(event Event) {
@@ -411,21 +428,28 @@ func performUpdate() error {
 		return fmt.Errorf("build failed: %w", err)
 	}
 
-	// Step 8: Wait for Next.js to be healthy
-	log("[Update 8/8] Waiting for Next.js to be healthy...")
+	// Step 8: Start Next.js (if not already running)
+	log("[Update 8/9] Starting Next.js...")
+	updateStatus("starting-app", "Starting application", 85, "Launching Next.js server")
+	if npmStartPID <= 0 {
+		startNPMServer()
+	}
+
+	// Step 9: Wait for Next.js to be healthy
+	log("[Update 9/9] Waiting for Next.js to be healthy...")
 	updateStatus("waiting-healthy", "Waiting for app to start", 90, "Verifying service is responding")
-	if err := waitForNextJSHealthy(30 * time.Second); err != nil {
-		log("Warning: Next.js health check failed: %v", err)
+	if err := waitForNextJSHealthy(60 * time.Second); err != nil {
+		return fmt.Errorf("Next.js not healthy after update: %w", err)
 	}
 	log("[Update] ✓ Next.js is healthy")
 
-	// Step 9: Exit maintenance mode
-	log("[Update 9/9] Exiting maintenance mode...")
+	// Step 10: Exit maintenance mode
+	log("[Update 10/10] Exiting maintenance mode...")
 	updateStatus("exiting-maintenance", "Exiting maintenance mode", 95, "Switching back to main service")
 	if err := exitProxyMaintenance(); err != nil {
-		log("Warning: failed to exit maintenance (no MAINT_OK): %v", err)
+		log("Warning: failed to exit maintenance: %v", err)
 	}
-	log("[Update] ✓ Maintenance mode exited, proxy confirmed")
+	// Maintenance server will be stopped by EventMaintenanceExitOK handler
 
 	updateStatus("complete", "Update complete", 100, "Service is now running with latest code")
 	log("========================================")
@@ -733,9 +757,7 @@ func main() {
 			return
 		}
 
-		log("Build complete, exiting maintenance mode...")
-		exitProxyMaintenance()
-		stopMaintenanceServer()
+		log("Build complete, starting Next.js server...")
 
 		// Start update checker
 		startUpdateChecker()
@@ -743,6 +765,19 @@ func main() {
 		// Start npm server
 		log("Starting application supervisor...")
 		startNPMServer()
+
+		// Wait for Next.js to be healthy
+		log("Waiting for Next.js to be healthy...")
+		if err := waitForNextJSHealthy(60 * time.Second); err != nil {
+			log("ERROR: Next.js not healthy after build: %v", err)
+			return
+		}
+
+		log("Next.js is healthy, exiting maintenance mode...")
+		if err := exitProxyMaintenance(); err != nil {
+			log("Warning: Failed to exit maintenance mode: %v", err)
+		}
+		// Maintenance server will be stopped by EventMaintenanceExitOK handler
 	}()
 
 	// Keep connection alive and wait for signals

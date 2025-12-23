@@ -19,6 +19,7 @@ import (
 	"github.com/andybalholm/brotli"
 	"github.com/chilla55/proxy-manager/database"
 	"github.com/chilla55/proxy-manager/metrics"
+	"github.com/chilla55/proxy-manager/staticpages"
 	"github.com/chilla55/proxy-manager/tracing"
 	"github.com/chilla55/proxy-manager/webhook"
 	"github.com/quic-go/quic-go/http3"
@@ -370,13 +371,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				maintProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 					log.Error().Err(err).Str("url", maintenanceURL).Msg("Maintenance page proxy error - falling back to static page")
 					// Fallback to static maintenance page on proxy error
-					w.WriteHeader(http.StatusOK)
+					pageData := staticpages.PageData{}
+					status, html := staticpages.GetPage(staticpages.PageMaintenanceFallback, pageData)
+					w.WriteHeader(status)
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					_, _ = io.WriteString(w, `<!DOCTYPE html>
-<html><head><title>Maintenance</title></head>
-<body><h1>Service Temporarily Unavailable</h1>
-<p>This service is currently undergoing maintenance. Please try again later.</p>
-</body></html>`)
+					_, _ = io.WriteString(w, html)
 				}
 				// Proxy the request to the maintenance page
 				log.Debug().Str("url", maintenanceURL).Str("path", r.URL.Path).Msg("Proxying to maintenance page")
@@ -388,13 +387,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Method 2: Default static maintenance page (no URL provided or parse error)
-		rw.WriteHeader(http.StatusOK)
+		// Method 2: Default static maintenance page (no URL provided or parse error)
+		pageData := staticpages.PageData{}
+		status, html := staticpages.GetPage(staticpages.PageMaintenanceFallback, pageData)
+		rw.WriteHeader(status)
 		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(rw, `<!DOCTYPE html>
-<html><head><title>Maintenance</title></head>
-<body><h1>Service Temporarily Unavailable</h1>
-<p>This service is currently undergoing maintenance. Please try again later.</p>
-</body></html>`)
+		_, _ = io.WriteString(rw, html)
 		return
 	}
 
@@ -1550,69 +1548,18 @@ func (s *Server) hasCertificateForDomain(domain string) bool {
 
 // serviceUnavailable displays a proper service unavailable page for domains with certificates
 func (s *Server) serviceUnavailable(w http.ResponseWriter, r *http.Request) {
+	// Use centralized staticpages package
+	pageData := staticpages.PageData{
+		Domain: r.Host,
+	}
+
+	status, html := staticpages.GetPage(staticpages.PageServiceUnavailable, pageData)
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Retry-After", "60")
-	w.WriteHeader(http.StatusServiceUnavailable)
-	_, _ = io.WriteString(w, `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Service Temporarily Unavailable</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #fff;
-        }
-        .container {
-            text-align: center;
-            padding: 2rem;
-            max-width: 600px;
-        }
-        h1 {
-            font-size: 3rem;
-            margin: 0 0 1rem 0;
-            font-weight: 700;
-        }
-        .status-code {
-            font-size: 8rem;
-            font-weight: 900;
-            margin: 0;
-            line-height: 1;
-            opacity: 0.3;
-        }
-        p {
-            font-size: 1.25rem;
-            margin: 1rem 0;
-            opacity: 0.9;
-        }
-        .domain {
-            font-family: monospace;
-            background: rgba(255,255,255,0.2);
-            padding: 0.5rem 1rem;
-            border-radius: 0.5rem;
-            display: inline-block;
-            margin: 1rem 0;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="status-code">503</div>
-        <h1>Service Temporarily Unavailable</h1>
-        <div class="domain">`+r.Host+`</div>
-        <p>The requested service is not currently configured or is temporarily unavailable.</p>
-        <p>Please check back later or contact the administrator if this problem persists.</p>
-    </div>
-</body>
-</html>`)
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, html)
 }
 
 // blackhole handles unknown domains without certificates (drops connection)

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chilla55/proxy-manager/staticpages"
 	"github.com/rs/zerolog/log"
 )
 
@@ -116,53 +117,44 @@ func (m *Manager) RenderMaintenancePage(w http.ResponseWriter, domain string) {
 		return
 	}
 
-	if state.HTMLContent != "" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprint(w, state.HTMLContent)
-	} else {
-		m.renderDefaultMaintenance(w, domain, state)
-	}
-}
-
-// renderDefaultMaintenance renders the default maintenance page
-func (m *Manager) renderDefaultMaintenance(w http.ResponseWriter, domain string, state *MaintenanceState) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusServiceUnavailable)
-
 	endTime := ""
 	if !state.ScheduledEnd.IsZero() {
 		endTime = state.ScheduledEnd.Format(time.RFC1123)
 	}
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Maintenance Mode</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 0; }
-        .container { max-width: 720px; margin: 60px auto; background: white; padding: 32px; border-radius: 12px; box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12); }
-        h1 { font-size: 28px; margin-bottom: 12px; }
-        p { margin: 8px 0; line-height: 1.6; }
-        .badge { display: inline-block; padding: 6px 12px; background: #2563eb; color: white; border-radius: 9999px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
-        .meta { margin-top: 20px; padding: 16px; background: #f1f5f9; border-radius: 8px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="badge">Maintenance in Progress</div>
-        <h1>%s is temporarily unavailable</h1>
-        <p>We're performing maintenance to keep our services running smoothly. Thank you for your patience.</p>
-        <div class="meta">
-            <p><strong>Reason:</strong> %s</p>
-            <p><strong>Expected completion:</strong> %s</p>
-        </div>
-    </div>
-</body>
-</html>`, domain, state.Reason, endTime)
+	// Use centralized staticpages package
+	pageData := staticpages.PageData{
+		Domain:        domain,
+		Reason:        state.Reason,
+		ScheduledEnd:  endTime,
+		CustomContent: state.HTMLContent,
+	}
 
+	status, html := staticpages.GetPage(staticpages.PageMaintenanceDefault, pageData)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	fmt.Fprint(w, html)
+}
+
+// renderDefaultMaintenance is deprecated - kept for backward compatibility
+// Use RenderMaintenancePage instead
+func (m *Manager) renderDefaultMaintenance(w http.ResponseWriter, domain string, state *MaintenanceState) {
+	endTime := ""
+	if !state.ScheduledEnd.IsZero() {
+		endTime = state.ScheduledEnd.Format(time.RFC1123)
+	}
+
+	pageData := staticpages.PageData{
+		Domain:       domain,
+		Reason:       state.Reason,
+		ScheduledEnd: endTime,
+	}
+
+	status, html := staticpages.GetPage(staticpages.PageMaintenanceDefault, pageData)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	fmt.Fprint(w, html)
 }
 
