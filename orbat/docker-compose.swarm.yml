@@ -59,7 +59,7 @@ services:
       DISCORD_CLIENT_ID: ""  # Will be populated from secret
       DISCORD_CLIENT_SECRET: ""  # Will be populated from secret
       DISCORD_REDIRECT_URI: "https://orbat.chilla55.de/api/auth/callback/discord"
-      DISCORD_OAUTH_URL: "https://discord.com/oauth2/authorize?client_id=1342882316716085318&response_type=code&redirect_uri=https%3A%2F%2Forbat.chilla55.de%3A8443%2Fapi%2Fauth%2Fcallback%2Fdiscord&scope=identify"
+      DISCORD_OAUTH_URL: "https://discord.com/oauth2/authorize?client_id=1342882316716085318&response_type=code&redirect_uri=https%3A%2F%2Forbat.chilla55.de%2Fapi%2Fauth%2Fcallback%2Fdiscord&scope=identify"
       
       # Steam OAuth (from secrets)
       STEAM_API_KEY: ""  # Will be populated from secret
