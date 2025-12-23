@@ -1,0 +1,87 @@
+package main
+
+// Example showing both usage patterns for RegistryClientV2
+
+func example_old_pattern() error {
+	// OLD PATTERN: All-in-one (still works, backward compatible)
+	client, err := NewRegistryClientV2(
+		"go-proxy:81",
+		"my-service",
+		"",
+		3001,
+		map[string]interface{}{"version": "1.0.0"},
+	)
+	if err != nil {
+		return err
+	}
+
+	// Configure event handlers after connection
+	client.On(EventConnected, func(event Event) {
+		// Handle event
+	})
+
+	// Add routes and start keepalive
+	client.AddRoute([]string{"example.com"}, "/", "http://10.2.2.5:8080", 10)
+	client.ApplyConfig()
+	go client.StartKeepalive()
+
+	return nil
+}
+
+func example_new_pattern() error {
+	// NEW PATTERN: Init pattern (more flexible)
+	
+	// Step 1: Create client without connecting
+	registry := NewRegistryClient(
+		"go-proxy:81",
+		"my-service",
+		"",
+		3001,
+		map[string]interface{}{"version": "1.0.0"},
+	)
+
+	// Step 2: Configure event handlers BEFORE connecting
+	registry.On(EventConnected, func(event Event) {
+		// This will fire when Init() succeeds
+	})
+
+	registry.On(EventRetrying, func(event Event) {
+		// Handle retry events
+	})
+
+	// Step 3: Initialize connection
+	if err := registry.Init(); err != nil {
+		return err
+	}
+
+	// Step 4: Use all the methods on registry
+	registry.AddRoute([]string{"example.com"}, "/", "http://10.2.2.5:8080", 10)
+	registry.SetHealthCheck("route-1", "/", "30s", "5s")
+	registry.ApplyConfig()
+	
+	// Step 5: Start keepalive
+	go registry.StartKeepalive()
+
+	return nil
+}
+
+// Both patterns support the same methods:
+func common_usage(registry *RegistryClientV2) {
+	// Route management
+	registry.AddRoute([]string{"api.example.com"}, "/api", "http://backend:8080", 10)
+	registry.UpdateRoute("route-1", "priority", "20")
+	registry.RemoveRoute("route-1")
+	
+	// Configuration
+	registry.SetHealthCheck("route-1", "/health", "30s", "5s")
+	registry.SetRateLimit("route-1", 100, "1m")
+	registry.ApplyConfig()
+	
+	// Maintenance
+	registry.MaintenanceEnter("route-1", "Deploying update")
+	// ... do maintenance ...
+	registry.MaintenanceExit("route-1")
+	
+	// Keepalive (with automatic retry)
+	go registry.StartKeepalive()
+}
