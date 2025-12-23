@@ -132,11 +132,12 @@ func TestPageDataDefaults(t *testing.T) {
 func TestMaintenanceFallback(t *testing.T) {
 	status, html := GetPage(PageMaintenanceFallback, PageData{})
 
-	if status != 200 {
-		t.Errorf("Expected status 200 for maintenance fallback, got %d", status)
+	// Maintenance pages should return 503 (Service Unavailable)
+	if status != 503 {
+		t.Errorf("Expected status 503 for maintenance fallback, got %d", status)
 	}
 
-	expectedStrings := []string{"Maintenance", "Temporarily Unavailable"}
+	expectedStrings := []string{"Service Temporarily Unavailable", "maintenance"}
 	for _, expected := range expectedStrings {
 		if !strings.Contains(html, expected) {
 			t.Errorf("Expected HTML to contain '%s'", expected)
@@ -187,4 +188,186 @@ func BenchmarkGetPageByStatusCode(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, _ = GetPageByStatusCode(500, data)
 	}
+}
+
+func TestMaintenancePageVariations(t *testing.T) {
+	tests := []struct {
+		name           string
+		data           PageData
+		expectedStatus int
+		expectedInHTML []string
+		notInHTML      []string
+	}{
+		{
+			name:           "Simple maintenance (no details)",
+			data:           PageData{},
+			expectedStatus: 503,
+			expectedInHTML: []string{"Service Temporarily Unavailable", "maintenance"},
+			notInHTML:      []string{"Reason:", "Expected completion:"},
+		},
+		{
+			name:           "Detailed maintenance (with reason and schedule)",
+			data:           PageData{Domain: "example.com", Reason: "Database upgrade", ScheduledEnd: "2024-12-25 15:00"},
+			expectedStatus: 503,
+			expectedInHTML: []string{"Maintenance in Progress", "example.com", "Database upgrade", "2024-12-25 15:00", "badge"},
+			notInHTML:      []string{},
+		},
+		{
+			name:           "Service unavailable (domain only)",
+			data:           PageData{Domain: "api.example.com"},
+			expectedStatus: 503,
+			expectedInHTML: []string{"503", "Service Temporarily Unavailable", "api.example.com", "not currently configured"},
+			notInHTML:      []string{"Maintenance in Progress", "Reason:", "Expected completion:"},
+		},
+		{
+			name:           "Maintenance with domain but defaults (service unavailable pattern)",
+			data:           PageData{Domain: "test.com", Reason: "", ScheduledEnd: ""},
+			expectedStatus: 503,
+			expectedInHTML: []string{"503", "test.com", "Service Temporarily Unavailable"},
+			notInHTML:      []string{"Maintenance in Progress"},
+		},
+		{
+			name:           "Maintenance with only reason (detailed maintenance page)",
+			data:           PageData{Reason: "Emergency fix"},
+			expectedStatus: 503,
+			expectedInHTML: []string{"Maintenance in Progress", "Emergency fix", "Not specified", "badge"},
+			notInHTML:      []string{},
+		},
+		{
+			name:           "Maintenance with only scheduled end (detailed maintenance page)",
+			data:           PageData{ScheduledEnd: "2024-12-25 10:00"},
+			expectedStatus: 503,
+			expectedInHTML: []string{"Maintenance in Progress", "2024-12-25 10:00", "Scheduled maintenance", "badge"},
+			notInHTML:      []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, html := GetPage(PageMaintenanceDefault, tt.data)
+
+			if status != tt.expectedStatus {
+				t.Errorf("Expected status %d, got %d", tt.expectedStatus, status)
+			}
+
+			for _, expected := range tt.expectedInHTML {
+				if !strings.Contains(html, expected) {
+					t.Errorf("Expected HTML to contain '%s', but it didn't", expected)
+				}
+			}
+
+			for _, notExpected := range tt.notInHTML {
+				if strings.Contains(html, notExpected) {
+					t.Errorf("Expected HTML to NOT contain '%s', but it did", notExpected)
+				}
+			}
+		})
+	}
+}
+
+func TestDarkLightModeCSS(t *testing.T) {
+	_, html := GetPage(PageError404, PageData{Domain: "test.com"})
+
+	// Check for dark mode media query
+	if !strings.Contains(html, "@media (prefers-color-scheme: dark)") {
+		t.Error("Expected HTML to contain dark mode media query")
+	}
+
+	// Check for color-scheme meta
+	if !strings.Contains(html, "color-scheme: light dark") {
+		t.Error("Expected HTML to contain color-scheme declaration")
+	}
+}
+
+func TestErrorMessageDefaults(t *testing.T) {
+	tests := []struct {
+		statusCode      int
+		expectedMessage string
+	}{
+		{400, "malformed syntax"},
+		{401, "Authentication is required"},
+		{403, "permission"},
+		{404, "could not be found"},
+		{500, "internal error"},
+		{502, "Bad Gateway"},
+		{503, "temporarily unavailable"},
+		{504, "timely response"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(rune(tt.statusCode)), func(t *testing.T) {
+			_, html := GetPageByStatusCode(tt.statusCode, PageData{})
+
+			if !strings.Contains(strings.ToLower(html), strings.ToLower(tt.expectedMessage)) {
+				t.Errorf("Expected default message for %d to contain '%s'", tt.statusCode, tt.expectedMessage)
+			}
+		})
+	}
+}
+
+func TestCustomMessageOverride(t *testing.T) {
+	customMsg := "This is a custom error message for testing"
+	data := PageData{
+		Domain:  "test.com",
+		Message: customMsg,
+	}
+
+	_, html := GetPage(PageError404, data)
+
+	if !strings.Contains(html, customMsg) {
+		t.Error("Expected HTML to contain custom message")
+	}
+
+	// Should not contain the default 404 message
+	if strings.Contains(html, "could not be found on this server") {
+		t.Error("Expected default message to be overridden")
+	}
+}
+
+func TestEdgeCasesForFullCoverage(t *testing.T) {
+	t.Run("StatusCode zero defaults to 500", func(t *testing.T) {
+		data := PageData{
+			StatusCode: 0,
+			Domain:     "test.com",
+		}
+		status, html := GetPageByStatusCode(0, data)
+
+		if status != 500 {
+			t.Errorf("Expected status 500 when statusCode is 0, got %d", status)
+		}
+		if !strings.Contains(html, "500") {
+			t.Error("Expected HTML to contain 500 status code")
+		}
+	})
+
+	t.Run("Unknown status code with no http.StatusText", func(t *testing.T) {
+		// Use a very high status code that Go doesn't recognize
+		data := PageData{
+			StatusCode: 999999,
+			Domain:     "test.com",
+		}
+		status, html := GetPageByStatusCode(999999, data)
+
+		if status != 999999 {
+			t.Errorf("Expected status 999999, got %d", status)
+		}
+		// When http.StatusText returns empty, it should default to "Error"
+		if !strings.Contains(html, "Error") {
+			t.Error("Expected HTML to contain 'Error' for unknown status code")
+		}
+	})
+
+	t.Run("Custom StatusText is preserved", func(t *testing.T) {
+		customStatusText := "Custom Status Text"
+		data := PageData{
+			StatusCode: 404,
+			StatusText: customStatusText,
+			Domain:     "test.com",
+		}
+		_, html := GetPageByStatusCode(404, data)
+
+		if !strings.Contains(html, customStatusText) {
+			t.Error("Expected HTML to contain custom status text")
+		}
+	})
 }
