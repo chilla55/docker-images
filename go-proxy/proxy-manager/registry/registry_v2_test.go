@@ -27,6 +27,11 @@ type mockProxy struct {
 		domains []string
 		path    string
 	}
+	enableCalls []struct {
+		domains []string
+		path    string
+		enabled bool
+	}
 	maintenanceCalls []struct {
 		domains []string
 		path    string
@@ -64,6 +69,14 @@ func (m *mockProxy) RemoveRoute(domains []string, path string) {
 		domains []string
 		path    string
 	}{domains: domains, path: path})
+}
+
+func (m *mockProxy) SetRouteEnabled(domains []string, path string, enabled bool) {
+	m.enableCalls = append(m.enableCalls, struct {
+		domains []string
+		path    string
+		enabled bool
+	}{domains: domains, path: path, enabled: enabled})
 }
 
 func (m *mockProxy) GetBackendStatus(domain, path string) *proxy.BackendStatus {

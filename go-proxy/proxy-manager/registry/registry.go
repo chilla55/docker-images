@@ -21,6 +21,7 @@ import (
 type ProxyServer interface {
 	AddRoute(domains []string, path, backendURL string, headers map[string]string, websocket bool, options map[string]interface{}) error
 	RemoveRoute(domains []string, path string)
+	SetRouteEnabled(domains []string, path string, enabled bool)
 	GetBackendStatus(domain, path string) *proxy.BackendStatus
 	SetMaintenance(domains []string, path string, enabled bool, maintenancePageURL string) error
 	StartDrain(domains []string, path string, duration time.Duration) error
@@ -49,15 +50,17 @@ type ServiceV2 struct {
 	Connection      net.Conn
 	ConnectedAt     time.Time
 	LastActivity    time.Time
+	DisconnectedAt  *time.Time // When connection was lost (nil if connected)
 
 	// Active configuration
-	mu              sync.RWMutex
-	activeRoutes    map[RouteID]*RouteV2
-	activeHeaders   map[string]string
-	activeOptions   map[string]interface{}
-	activeHealth    map[RouteID]*HealthCheckV2
-	activeRateLimit map[RouteID]*RateLimitV2
-	activeCircuit   map[RouteID]*CircuitBreakerV2
+	mu                sync.RWMutex
+	activeRoutes      map[RouteID]*RouteV2
+	routesDeactivated bool // Routes removed from proxy but kept in session
+	activeHeaders     map[string]string
+	activeOptions     map[string]interface{}
+	activeHealth      map[RouteID]*HealthCheckV2
+	activeRateLimit   map[RouteID]*RateLimitV2
+	activeCircuit     map[RouteID]*CircuitBreakerV2
 
 	// Staged configuration (pending CONFIG_APPLY)
 	stagedRoutes    map[RouteID]*RouteV2
@@ -130,17 +133,18 @@ type StatsV2 struct {
 
 // RegistryV2 is the v2 protocol registry
 type RegistryV2 struct {
-	mu              sync.RWMutex
-	services        map[SessionID]*ServiceV2
-	sessionsByConn  map[net.Conn]SessionID
-	port            int
-	proxyServer     ProxyServer
-	healthChecker   HealthChecker
-	debug           bool
-	nextRouteID     int64
-	stats           map[RouteID]*StatsV2
-	stagedConfigTTL time.Duration
-	upstreamTimeout time.Duration
+	mu               sync.RWMutex
+	services         map[SessionID]*ServiceV2
+	sessionsByConn   map[net.Conn]SessionID
+	port             int
+	proxyServer      ProxyServer
+	healthChecker    HealthChecker
+	debug            bool
+	nextRouteID      int64
+	stats            map[RouteID]*StatsV2
+	stagedConfigTTL  time.Duration
+	upstreamTimeout  time.Duration
+	reconnectTimeout time.Duration // How long to keep routes after disconnect
 
 	// Maintenance verification tasks
 	maintTasks    chan *maintenanceTask
@@ -162,18 +166,19 @@ type maintenanceTask struct {
 // NewRegistryV2 creates a new v2 registry
 func NewRegistryV2(port int, proxyServer ProxyServer, debug bool, upstreamTimeout time.Duration, healthChecker HealthChecker) *RegistryV2 {
 	r := &RegistryV2{
-		services:        make(map[SessionID]*ServiceV2),
-		sessionsByConn:  make(map[net.Conn]SessionID),
-		port:            port,
-		proxyServer:     proxyServer,
-		healthChecker:   healthChecker,
-		debug:           debug,
-		nextRouteID:     1,
-		stats:           make(map[RouteID]*StatsV2),
-		stagedConfigTTL: 30 * time.Minute,
-		upstreamTimeout: upstreamTimeout,
-		maintTasks:      make(chan *maintenanceTask, 100),
-		maintCancel:     make(map[SessionID]context.CancelFunc),
+		services:         make(map[SessionID]*ServiceV2),
+		sessionsByConn:   make(map[net.Conn]SessionID),
+		port:             port,
+		proxyServer:      proxyServer,
+		healthChecker:    healthChecker,
+		debug:            debug,
+		nextRouteID:      1,
+		stats:            make(map[RouteID]*StatsV2),
+		stagedConfigTTL:  30 * time.Minute,
+		upstreamTimeout:  upstreamTimeout,
+		reconnectTimeout: 5 * time.Minute, // Grace period for reconnection (matches client retry strategy)
+		maintTasks:       make(chan *maintenanceTask, 100),
+		maintCancel:      make(map[SessionID]context.CancelFunc),
 	}
 
 	// Start maintenance verification workers
@@ -187,6 +192,7 @@ func NewRegistryV2(port int, proxyServer ProxyServer, debug bool, upstreamTimeou
 // StartV2 starts the v2 registry listener
 func (r *RegistryV2) StartV2(ctx context.Context) {
 	go r.cleanupExpiredStagedConfigs(ctx)
+	go r.cleanupDisconnectedSessions(ctx)
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", r.port))
 	if err != nil {
@@ -237,7 +243,24 @@ func (r *RegistryV2) handleConnectionV2(ctx context.Context, conn net.Conn) {
 			r.mu.RUnlock()
 
 			if exists {
-				log.Printf("[registry-v2] Connection closed for session %s (%s)", sid, svc.ServiceName)
+				// Mark as disconnected and deactivate routes (remove from proxy but keep in session)
+				now := time.Now()
+				svc.mu.Lock()
+				svc.DisconnectedAt = &now
+				svc.Connection = nil
+
+				// Deactivate routes - disable in proxy but keep in activeRoutes for potential reconnect
+				if !svc.routesDeactivated {
+					for routeID, route := range svc.activeRoutes {
+						r.proxyServer.SetRouteEnabled(route.Domains, route.Path, false)
+						log.Printf("[registry-v2] Deactivated route %s: %v%s", routeID, route.Domains, route.Path)
+					}
+					svc.routesDeactivated = true
+				}
+				svc.mu.Unlock()
+
+				log.Printf("[registry-v2] Connection lost for session %s (%s) - routes deactivated, session valid for %v",
+					sid, svc.ServiceName, r.reconnectTimeout)
 			}
 		} else {
 			r.mu.Unlock()
@@ -404,10 +427,14 @@ func (r *RegistryV2) handleRegisterV2(conn net.Conn, parts []string) (SessionID,
 		if exists {
 			oldSvc.mu.Lock()
 			log.Printf("[registry-v2] Cleaning up old session %s for %s/%s", oldSID, serviceName, instanceName)
-			// Remove all active routes from proxy
-			for routeID, route := range oldSvc.activeRoutes {
-				r.proxyServer.RemoveRoute(route.Domains, route.Path)
-				log.Printf("[registry-v2] Removed old route %s: %v%s", routeID, route.Domains, route.Path)
+			// Remove all active routes from proxy (only if not already deactivated)
+			if !oldSvc.routesDeactivated {
+				for routeID, route := range oldSvc.activeRoutes {
+					r.proxyServer.RemoveRoute(route.Domains, route.Path)
+					log.Printf("[registry-v2] Removed old route %s: %v%s", routeID, route.Domains, route.Path)
+				}
+			} else {
+				log.Printf("[registry-v2] Old session routes already deactivated, skipping removal")
 			}
 			oldSvc.mu.Unlock()
 
@@ -470,7 +497,7 @@ func (r *RegistryV2) handleRegisterV2(conn net.Conn, parts []string) (SessionID,
 func (r *RegistryV2) handleReconnectV2(conn net.Conn, sessionID SessionID, parts []string) {
 	_ = parts
 	r.mu.RLock()
-	_, exists := r.services[sessionID]
+	svc, exists := r.services[sessionID]
 	r.mu.RUnlock()
 
 	if !exists {
@@ -478,10 +505,27 @@ func (r *RegistryV2) handleReconnectV2(conn net.Conn, sessionID SessionID, parts
 		return
 	}
 
+	// Restore connection and clear disconnected state
+	svc.mu.Lock()
+	svc.Connection = conn
+	svc.DisconnectedAt = nil
+	svc.LastActivity = time.Now()
+
+	// Reactivate routes if they were deactivated
+	if svc.routesDeactivated {
+		for routeID, route := range svc.activeRoutes {
+			r.proxyServer.SetRouteEnabled(route.Domains, route.Path, true)
+			log.Printf("[registry-v2] Reactivated route %s: %v%s -> %s", routeID, route.Domains, route.Path, route.BackendURL)
+		}
+		svc.routesDeactivated = false
+	}
+	svc.mu.Unlock()
+
 	r.mu.Lock()
 	r.sessionsByConn[conn] = sessionID
 	r.mu.Unlock()
 
+	log.Printf("[registry-v2] Session %s (%s) reconnected successfully", sessionID, svc.ServiceName)
 	conn.Write([]byte("OK\n"))
 }
 
@@ -1893,6 +1937,58 @@ func (r *RegistryV2) cleanupExpiredStagedConfigs(ctx context.Context) {
 				svc.mu.Unlock()
 			}
 			r.mu.RUnlock()
+		}
+	}
+}
+
+func (r *RegistryV2) cleanupDisconnectedSessions(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second) // Check frequently for expired sessions
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now()
+			r.mu.RLock()
+			var expiredSessions []SessionID
+			for sid, svc := range r.services {
+				svc.mu.RLock()
+				if svc.DisconnectedAt != nil && now.Sub(*svc.DisconnectedAt) > r.reconnectTimeout {
+					expiredSessions = append(expiredSessions, sid)
+				}
+				svc.mu.RUnlock()
+			}
+			r.mu.RUnlock()
+
+			// Cleanup expired sessions
+			for _, sid := range expiredSessions {
+				r.mu.RLock()
+				svc, exists := r.services[sid]
+				r.mu.RUnlock()
+
+				if exists {
+					log.Printf("[registry-v2] Grace period expired for session %s (%s) - deleting session", sid, svc.ServiceName)
+
+					svc.mu.Lock()
+					// Remove routes from proxy only if they weren't already deactivated
+					if !svc.routesDeactivated {
+						for routeID, route := range svc.activeRoutes {
+							r.proxyServer.RemoveRoute(route.Domains, route.Path)
+							log.Printf("[registry-v2] Removed route %s: %v%s (grace period expired)", routeID, route.Domains, route.Path)
+						}
+					} else {
+						log.Printf("[registry-v2] Routes already deactivated, cleaning up session data only")
+					}
+					svc.mu.Unlock()
+
+					// Remove service from registry
+					r.mu.Lock()
+					delete(r.services, sid)
+					r.mu.Unlock()
+				}
+			}
 		}
 	}
 }

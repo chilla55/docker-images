@@ -111,7 +111,8 @@ type Route struct {
 	Backend         *Backend
 	Headers         map[string]string
 	WebSocket       bool
-	Priority        int // For sorting (longer paths = higher priority)
+	Enabled         bool // Route active/inactive state
+	Priority        int  // For sorting (longer paths = higher priority)
 	RateLimitReqs   int
 	RateLimitWindow time.Duration
 }
@@ -503,6 +504,7 @@ func (s *Server) AddRoute(domains []string, path, backendURL string, headers map
 		Backend:   backend,
 		Headers:   headers,
 		WebSocket: websocket,
+		Enabled:   true,      // Routes are enabled by default
 		Priority:  len(path), // Longer paths = higher priority
 	}
 
@@ -545,6 +547,25 @@ func (s *Server) RemoveRoute(domains []string, path string) {
 
 	if s.debug {
 		log.Debug().Strs("domains", domains).Str("path", path).Msg("Removed route")
+	}
+}
+
+// SetRouteEnabled enables or disables routes without removing them
+func (s *Server) SetRouteEnabled(domains []string, path string, enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, r := range s.routes {
+		if s.routeMatches(r, domains, path) {
+			r.Enabled = enabled
+			if s.debug {
+				state := "enabled"
+				if !enabled {
+					state = "disabled"
+				}
+				log.Debug().Strs("domains", domains).Str("path", path).Str("state", state).Msg("Route state changed")
+			}
+		}
 	}
 }
 
@@ -701,7 +722,7 @@ func (s *Server) findRoute(host, path string) *Route {
 
 	for _, route := range s.routes {
 		for _, domain := range route.Domains {
-			if domain == host && len(route.Path) <= len(path) {
+			if route.Enabled && domain == host && len(route.Path) <= len(path) {
 				if path[:len(route.Path)] == route.Path {
 					if len(route.Path) > longestMatch {
 						longestMatch = len(route.Path)
