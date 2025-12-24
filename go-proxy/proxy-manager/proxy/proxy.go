@@ -769,9 +769,35 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 	proxy.Director = func(req *http.Request) {
 		// Save original host before director changes it
 		originalHost := req.Host
-		clientIP := req.RemoteAddr
-		if idx := strings.LastIndex(clientIP, ":"); idx > 0 {
-			clientIP = clientIP[:idx]
+		
+		// Extract real client IP (handling Cloudflare proxy)
+		realClientIP := ""
+		// 1. Try CF-Connecting-IP (Cloudflare's real client IP header)
+		if cfIP := req.Header.Get("CF-Connecting-IP"); cfIP != "" {
+			realClientIP = cfIP
+		}
+		// 2. Try first IP in X-Forwarded-For (standard proxy chain)
+		if realClientIP == "" {
+			if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
+				if idx := strings.Index(xff, ","); idx > 0 {
+					realClientIP = strings.TrimSpace(xff[:idx])
+				} else {
+					realClientIP = strings.TrimSpace(xff)
+				}
+			}
+		}
+		// 3. Fallback to immediate connection IP
+		if realClientIP == "" {
+			realClientIP = req.RemoteAddr
+			if idx := strings.LastIndex(realClientIP, ":"); idx > 0 {
+				realClientIP = realClientIP[:idx]
+			}
+		}
+
+		// Get proxy IP (immediate connection, likely Cloudflare)
+		proxyIP := req.RemoteAddr
+		if idx := strings.LastIndex(proxyIP, ":"); idx > 0 {
+			proxyIP = proxyIP[:idx]
 		}
 
 		// Call original director (this sets req.Host to backend host)
@@ -785,13 +811,13 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 			req.Header.Set("X-Forwarded-Proto", "https")
 		}
 		if req.Header.Get("X-Real-IP") == "" {
-			req.Header.Set("X-Real-IP", clientIP)
+			req.Header.Set("X-Real-IP", realClientIP)
 		}
-		// Append to X-Forwarded-For if it exists (Cloudflare sets this)
+		// Append proxy IP to X-Forwarded-For chain (preserves Cloudflare chain + adds our proxy)
 		if existing := req.Header.Get("X-Forwarded-For"); existing != "" {
-			req.Header.Set("X-Forwarded-For", existing+", "+clientIP)
+			req.Header.Set("X-Forwarded-For", existing+", "+proxyIP)
 		} else {
-			req.Header.Set("X-Forwarded-For", clientIP)
+			req.Header.Set("X-Forwarded-For", realClientIP)
 		}
 	}
 
