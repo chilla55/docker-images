@@ -613,16 +613,16 @@ func parseDuration(s string) int {
 	fmt.Sscanf(s, "%d", &i)
 	return i
 }
-// Don't auto-restart if an update is in progress
+
+func startNPMServer() {
+	go func() {
+		for {
+			// Don't auto-restart if an update is in progress
 			if updating {
 				time.Sleep(1 * time.Second)
 				continue
 			}
 
-			
-func startNPMServer() {
-	go func() {
-		for {
 			log("Launching Next.js...")
 			cmd := exec.Command("npm", "start")
 			cmd.Stdout = os.Stdout
