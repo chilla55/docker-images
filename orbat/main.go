@@ -34,6 +34,7 @@ var (
 	maintenancePID   int
 	updateChkPID     int
 	npmStartPID      int
+	updating         bool // Flag to prevent auto-restart during updates
 
 	done = make(chan os.Signal, 1)
 )
@@ -347,6 +348,10 @@ func performUpdate() error {
 	log("Starting zero-downtime update process")
 	log("========================================")
 
+	// Set updating flag to prevent auto-restart
+	updating = true
+	defer func() { updating = false }()
+
 	// Step 1: Enter maintenance mode
 	log("[Update 1/8] Entering maintenance mode...")
 	updateStatus("entering-maintenance", "Entering maintenance mode", 5, "Starting update process")
@@ -374,7 +379,7 @@ func performUpdate() error {
 		if err := syscall.Kill(npmStartPID, syscall.SIGTERM); err != nil {
 			log("Warning: failed to send SIGTERM to Next.js: %v", err)
 		}
-		
+
 		// Wait for process to actually exit (up to 10 seconds)
 		for i := 0; i < 20; i++ {
 			// Check if process still exists
@@ -386,7 +391,7 @@ func performUpdate() error {
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
-		
+
 		// Force kill if still running
 		if npmStartPID > 0 {
 			log("[Update] Process still running after 10s, forcing SIGKILL...")
@@ -398,7 +403,6 @@ func performUpdate() error {
 		}
 	}
 	log("[Update] ✓ Next.js stopped")
-
 
 	// Step 3: Pull code
 	log("[Update 3/8] Pulling latest code...")
@@ -609,7 +613,13 @@ func parseDuration(s string) int {
 	fmt.Sscanf(s, "%d", &i)
 	return i
 }
+// Don't auto-restart if an update is in progress
+			if updating {
+				time.Sleep(1 * time.Second)
+				continue
+			}
 
+			
 func startNPMServer() {
 	go func() {
 		for {
