@@ -23,7 +23,7 @@ func TestHandleDashboard(t *testing.T) {
 	if contentType != "text/html; charset=utf-8" {
 		t.Errorf("Expected HTML content type, got %s", contentType)
 	}
-	
+
 	body := w.Body.String()
 	if len(body) == 0 {
 		t.Error("HTML body should not be empty")
@@ -143,7 +143,7 @@ func TestHandleMaintenanceStats(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
-	
+
 	var stats interface{}
 	if err := json.NewDecoder(w.Body).Decode(&stats); err != nil {
 		t.Errorf("Failed to decode response: %v", err)
@@ -161,7 +161,7 @@ func TestHandleDebug(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
-	
+
 	var debug interface{}
 	if err := json.NewDecoder(w.Body).Decode(&debug); err != nil {
 		t.Errorf("Failed to decode response: %v", err)
@@ -183,7 +183,7 @@ func TestHandleAIContext(t *testing.T) {
 	if w.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
 		t.Errorf("Expected text/plain content type")
 	}
-	
+
 	body := w.Body.String()
 	if len(body) == 0 {
 		t.Error("AI context should not be empty")
@@ -193,7 +193,7 @@ func TestHandleAIContext(t *testing.T) {
 func TestGetRouteStatuses(t *testing.T) {
 	d := New(nil, nil, nil, nil, true)
 	routes := d.getRouteStatuses()
-	
+
 	if routes == nil {
 		t.Error("getRouteStatuses should return empty slice, not nil")
 	}
@@ -202,11 +202,11 @@ func TestGetRouteStatuses(t *testing.T) {
 func TestGetHTMLReturnsContent(t *testing.T) {
 	d := New(nil, nil, nil, nil, true)
 	html := d.getHTML()
-	
+
 	if len(html) == 0 {
 		t.Error("getHTML should return non-empty string")
 	}
-	
+
 	if !contains(html, "<!DOCTYPE html>") {
 		t.Error("HTML should have DOCTYPE")
 	}
@@ -214,10 +214,10 @@ func TestGetHTMLReturnsContent(t *testing.T) {
 
 func TestStartWithEnabledDashboard(t *testing.T) {
 	d := New(nil, nil, nil, nil, true)
-	
+
 	mux := http.NewServeMux()
 	err := d.Start(nil, mux)
-	
+
 	if err != nil {
 		t.Errorf("Start should not return error: %v", err)
 	}
@@ -225,10 +225,10 @@ func TestStartWithEnabledDashboard(t *testing.T) {
 
 func TestStartWithDisabledDashboard(t *testing.T) {
 	d := New(nil, nil, nil, nil, false)
-	
+
 	mux := http.NewServeMux()
 	err := d.Start(nil, mux)
-	
+
 	if err != nil {
 		t.Errorf("Start should not return error even when disabled: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestStartWithDisabledDashboard(t *testing.T) {
 func TestGetDebugInfo(t *testing.T) {
 	d := New(nil, nil, nil, nil, true)
 	debug := d.getDebugInfo()
-	
+
 	if debug == nil {
 		t.Error("getDebugInfo should not return nil")
 	}
@@ -246,7 +246,7 @@ func TestGetDebugInfo(t *testing.T) {
 func TestGetMaintenanceStats(t *testing.T) {
 	d := New(nil, nil, nil, nil, true)
 	stats := d.getMaintenanceStats()
-	
+
 	if stats == nil {
 		t.Error("getMaintenanceStats should not return nil")
 	}
@@ -255,7 +255,7 @@ func TestGetMaintenanceStats(t *testing.T) {
 func TestGetRecentErrors(t *testing.T) {
 	d := New(nil, nil, nil, nil, true)
 	errors := d.getRecentErrors()
-	
+
 	if errors == nil {
 		t.Error("getRecentErrors should return empty slice, not nil")
 	}
@@ -264,7 +264,7 @@ func TestGetRecentErrors(t *testing.T) {
 func TestGetCertificateStatuses(t *testing.T) {
 	d := New(nil, nil, nil, nil, true)
 	certs := d.getCertificateStatuses()
-	
+
 	if certs == nil {
 		t.Error("getCertificateStatuses should return empty slice, not nil")
 	}

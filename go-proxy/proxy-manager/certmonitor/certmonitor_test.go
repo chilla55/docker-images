@@ -60,7 +60,7 @@ func TestAddCertificateFromTLSError(t *testing.T) {
 
 func TestGetAllCertificates(t *testing.T) {
 	m := NewMonitor()
-	
+
 	// Add multiple certificates
 	cert1 := &x509.Certificate{
 		NotBefore: time.Now().Add(-24 * time.Hour),
@@ -74,10 +74,10 @@ func TestGetAllCertificates(t *testing.T) {
 		Subject:   pkix.Name{CommonName: "example2.com"},
 		DNSNames:  []string{"example2.com"},
 	}
-	
+
 	m.AddCertificate("example1.com", cert1)
 	m.AddCertificate("example2.com", cert2)
-	
+
 	all := m.GetAllCertificates()
 	if len(all) != 2 {
 		t.Errorf("Expected 2 certificates, got %d", len(all))
@@ -86,7 +86,7 @@ func TestGetAllCertificates(t *testing.T) {
 
 func TestGetExpiredCertificates(t *testing.T) {
 	m := NewMonitor()
-	
+
 	// Add an expired certificate
 	expiredCert := &x509.Certificate{
 		NotBefore: time.Now().Add(-30 * 24 * time.Hour),
@@ -94,7 +94,7 @@ func TestGetExpiredCertificates(t *testing.T) {
 		Subject:   pkix.Name{CommonName: "expired.com"},
 		DNSNames:  []string{"expired.com"},
 	}
-	
+
 	// Add a valid certificate
 	validCert := &x509.Certificate{
 		NotBefore: time.Now().Add(-24 * time.Hour),
@@ -102,15 +102,15 @@ func TestGetExpiredCertificates(t *testing.T) {
 		Subject:   pkix.Name{CommonName: "valid.com"},
 		DNSNames:  []string{"valid.com"},
 	}
-	
+
 	m.AddCertificate("expired.com", expiredCert)
 	m.AddCertificate("valid.com", validCert)
-	
+
 	expired := m.GetExpiredCertificates()
 	if len(expired) != 1 {
 		t.Errorf("Expected 1 expired certificate, got %d", len(expired))
 	}
-	
+
 	if len(expired) > 0 && expired[0].Domain != "expired.com" {
 		t.Errorf("Expected expired.com, got %s", expired[0].Domain)
 	}
@@ -118,7 +118,7 @@ func TestGetExpiredCertificates(t *testing.T) {
 
 func TestCheckAll(t *testing.T) {
 	m := NewMonitor()
-	
+
 	// Add certificates
 	cert1 := &x509.Certificate{
 		NotBefore: time.Now().Add(-24 * time.Hour),
@@ -132,12 +132,12 @@ func TestCheckAll(t *testing.T) {
 		Subject:   pkix.Name{CommonName: "example2.com"},
 		DNSNames:  []string{"example2.com"},
 	}
-	
+
 	m.AddCertificate("example1.com", cert1)
 	m.AddCertificate("example2.com", cert2)
-	
+
 	m.CheckAll()
-	
+
 	// After CheckAll, should be able to get stats
 	stats := m.GetStats()
 	if stats.TotalCertificates != 2 {
