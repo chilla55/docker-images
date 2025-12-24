@@ -1969,17 +1969,18 @@ func (r *RegistryV2) cleanupDisconnectedSessions(ctx context.Context) {
 				r.mu.RUnlock()
 
 				if exists {
-					log.Printf("[registry-v2] Grace period expired for session %s (%s) - deleting session", sid, svc.ServiceName)
+					log.Printf("[registry-v2] Grace period expired for session %s (%s) - deleting session and removing routes", sid, svc.ServiceName)
 
 					svc.mu.Lock()
-					// Remove routes from proxy only if they weren't already deactivated
-					if !svc.routesDeactivated {
-						for routeID, route := range svc.activeRoutes {
-							r.proxyServer.RemoveRoute(route.Domains, route.Path)
-							log.Printf("[registry-v2] Removed route %s: %v%s (grace period expired)", routeID, route.Domains, route.Path)
-						}
-					} else {
-						log.Printf("[registry-v2] Routes already deactivated, cleaning up session data only")
+					// Remove all routes from proxy (they were disabled, now fully remove them)
+					for routeID, route := range svc.activeRoutes {
+						r.proxyServer.RemoveRoute(route.Domains, route.Path)
+						log.Printf("[registry-v2] Removed route %s: %v%s (grace period expired)", routeID, route.Domains, route.Path)
+					}
+					
+					// Remove health checks
+					for routeID := range svc.activeHealth {
+						r.healthChecker.RemoveService(string(routeID))
 					}
 					svc.mu.Unlock()
 
