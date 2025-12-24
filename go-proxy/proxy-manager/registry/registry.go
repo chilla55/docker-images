@@ -243,23 +243,23 @@ func (r *RegistryV2) handleConnectionV2(ctx context.Context, conn net.Conn) {
 			r.mu.RUnlock()
 
 			if exists {
-				// Mark as disconnected and deactivate routes (remove from proxy but keep in session)
+				// Mark as disconnected and disable routes (keep them but mark as disabled)
 				now := time.Now()
 				svc.mu.Lock()
 				svc.DisconnectedAt = &now
 				svc.Connection = nil
 
-				// Deactivate routes - disable in proxy but keep in activeRoutes for potential reconnect
+				// Disable routes in proxy but keep them in activeRoutes for potential reconnect
 				if !svc.routesDeactivated {
 					for routeID, route := range svc.activeRoutes {
 						r.proxyServer.SetRouteEnabled(route.Domains, route.Path, false)
-						log.Printf("[registry-v2] Deactivated route %s: %v%s", routeID, route.Domains, route.Path)
+						log.Printf("[registry-v2] Disabled route %s: %v%s (service disconnected)", routeID, route.Domains, route.Path)
 					}
 					svc.routesDeactivated = true
 				}
 				svc.mu.Unlock()
 
-				log.Printf("[registry-v2] Connection lost for session %s (%s) - routes deactivated, session valid for %v",
+				log.Printf("[registry-v2] Connection lost for session %s (%s) - routes disabled, session valid for %v for potential reconnect",
 					sid, svc.ServiceName, r.reconnectTimeout)
 			}
 		} else {
@@ -511,11 +511,11 @@ func (r *RegistryV2) handleReconnectV2(conn net.Conn, sessionID SessionID, parts
 	svc.DisconnectedAt = nil
 	svc.LastActivity = time.Now()
 
-	// Reactivate routes if they were deactivated
+	// Re-enable routes if they were deactivated
 	if svc.routesDeactivated {
 		for routeID, route := range svc.activeRoutes {
 			r.proxyServer.SetRouteEnabled(route.Domains, route.Path, true)
-			log.Printf("[registry-v2] Reactivated route %s: %v%s -> %s", routeID, route.Domains, route.Path, route.BackendURL)
+			log.Printf("[registry-v2] Re-enabled route %s: %v%s -> %s", routeID, route.Domains, route.Path, route.BackendURL)
 		}
 		svc.routesDeactivated = false
 	}
