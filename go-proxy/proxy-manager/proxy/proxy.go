@@ -767,11 +767,21 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 	// Customize director
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
+		// Save original host before director changes it
+		originalHost := req.Host
+		clientIP := req.RemoteAddr
+		if idx := strings.LastIndex(clientIP, ":"); idx > 0 {
+			clientIP = clientIP[:idx]
+		}
+
+		// Call original director (this sets req.Host to backend host)
 		originalDirector(req)
-		// Add X-Forwarded headers
-		req.Header.Set("X-Forwarded-Host", req.Host)
+
+		// Add X-Forwarded headers with original values
+		req.Header.Set("X-Forwarded-Host", originalHost)
 		req.Header.Set("X-Forwarded-Proto", "https")
-		req.Header.Set("X-Real-IP", req.RemoteAddr)
+		req.Header.Set("X-Real-IP", clientIP)
+		req.Header.Set("X-Forwarded-For", clientIP)
 	}
 
 	backend := &Backend{
