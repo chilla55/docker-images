@@ -1589,7 +1589,7 @@ func (s *Server) serviceUnavailable(w http.ResponseWriter, r *http.Request) {
 func (s *Server) blackhole(w http.ResponseWriter, r *http.Request) {
 	atomic.AddInt64(&s.blackholeMetric, 1)
 
-	// Try to drop the connection for HTTP/1.x; fall back to a short response for HTTP/2 where Hijack is unsupported.
+	// For HTTP/1.x: hijack and close connection immediately
 	if hj, ok := w.(http.Hijacker); ok {
 		if conn, _, err := hj.Hijack(); err == nil {
 			conn.Close()
@@ -1597,12 +1597,10 @@ func (s *Server) blackhole(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// HTTP/2 (or any non-hijackable writer): return a minimal response and close.
-	w.Header().Set("Connection", "close")
-	w.WriteHeader(http.StatusMisdirectedRequest)
-	if fl, ok := w.(http.Flusher); ok {
-		fl.Flush()
-	}
+	// For HTTP/2 and HTTP/3: just return without writing any response.
+	// This causes the connection to timeout naturally without disclosing any information.
+	// The client will see a connection reset or timeout (no 421/503 status code).
+	// We intentionally don't send any response to avoid information disclosure to scanners.
 }
 
 // redirectToHTTPS redirects HTTP to HTTPS
@@ -1645,12 +1643,9 @@ func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 		}
 	}
 
-	// Fallback to first certificate if available
-	if len(s.certificates) > 0 {
-		log.Warn().Str("domain", domain).Msg("No matching certificate, using fallback")
-		return &s.certificates[0].Cert, nil
-	}
-
+	// No matching certificate - reject TLS handshake
+	// This fails the connection before any HTTP protocol is established
+	atomic.AddInt64(&s.blackholeMetric, 1)
 	return nil, fmt.Errorf("no certificate available for %s", domain)
 }
 
