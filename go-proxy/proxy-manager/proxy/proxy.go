@@ -769,7 +769,7 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 	proxy.Director = func(req *http.Request) {
 		// Save original host before director changes it
 		originalHost := req.Host
-		
+
 		// Extract real client IP (handling Cloudflare proxy)
 		realClientIP := ""
 		// 1. Try CF-Connecting-IP (Cloudflare's real client IP header)
@@ -788,17 +788,11 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 		}
 		// 3. Fallback to immediate connection IP
 		if realClientIP == "" {
-			realClientIP = req.RemoteAddr
-			if idx := strings.LastIndex(realClientIP, ":"); idx > 0 {
-				realClientIP = realClientIP[:idx]
-			}
+			realClientIP = stripPort(req.RemoteAddr)
 		}
 
 		// Get proxy IP (immediate connection, likely Cloudflare)
-		proxyIP := req.RemoteAddr
-		if idx := strings.LastIndex(proxyIP, ":"); idx > 0 {
-			proxyIP = proxyIP[:idx]
-		}
+		proxyIP := stripPort(req.RemoteAddr)
 
 		// Call original director (this sets req.Host to backend host)
 		originalDirector(req)
@@ -1927,4 +1921,22 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 
 	return err
+}
+
+// stripPort removes the port from an address, handling both IPv4 and IPv6
+func stripPort(addr string) string {
+	// Handle IPv6 with port: [2001:db8::1]:8080 -> 2001:db8::1
+	if strings.HasPrefix(addr, "[") {
+		if idx := strings.LastIndex(addr, "]"); idx > 0 {
+			return addr[1:idx]
+		}
+	}
+	// Handle IPv4 with port: 192.0.2.1:8080 -> 192.0.2.1
+	if idx := strings.LastIndex(addr, ":"); idx > 0 {
+		// Make sure this is not an IPv6 address without brackets
+		if !strings.Contains(addr[:idx], ":") {
+			return addr[:idx]
+		}
+	}
+	return addr
 }
