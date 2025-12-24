@@ -777,11 +777,22 @@ func (s *Server) getOrCreateBackend(target *url.URL, options map[string]interfac
 		// Call original director (this sets req.Host to backend host)
 		originalDirector(req)
 
-		// Add X-Forwarded headers with original values
-		req.Header.Set("X-Forwarded-Host", originalHost)
-		req.Header.Set("X-Forwarded-Proto", "https")
-		req.Header.Set("X-Real-IP", clientIP)
-		req.Header.Set("X-Forwarded-For", clientIP)
+		// Add/preserve X-Forwarded headers (handling Cloudflare proxy)
+		if req.Header.Get("X-Forwarded-Host") == "" {
+			req.Header.Set("X-Forwarded-Host", originalHost)
+		}
+		if req.Header.Get("X-Forwarded-Proto") == "" {
+			req.Header.Set("X-Forwarded-Proto", "https")
+		}
+		if req.Header.Get("X-Real-IP") == "" {
+			req.Header.Set("X-Real-IP", clientIP)
+		}
+		// Append to X-Forwarded-For if it exists (Cloudflare sets this)
+		if existing := req.Header.Get("X-Forwarded-For"); existing != "" {
+			req.Header.Set("X-Forwarded-For", existing+", "+clientIP)
+		} else {
+			req.Header.Set("X-Forwarded-For", clientIP)
+		}
 	}
 
 	backend := &Backend{
