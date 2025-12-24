@@ -1977,7 +1977,7 @@ func (r *RegistryV2) cleanupDisconnectedSessions(ctx context.Context) {
 						r.proxyServer.RemoveRoute(route.Domains, route.Path)
 						log.Printf("[registry-v2] Removed route %s: %v%s (grace period expired)", routeID, route.Domains, route.Path)
 					}
-					
+
 					// Remove health checks
 					for routeID := range svc.activeHealth {
 						r.healthChecker.RemoveService(string(routeID))
