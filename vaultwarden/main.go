@@ -95,7 +95,7 @@ func setupDatabaseURL() {
 
 func setupKeysDirectory() {
 	keysDir := "/data/keys"
-	
+
 	// Check if keys directory is mounted
 	if info, err := os.Stat(keysDir); err != nil || !info.IsDir() {
 		log("INFO", "Storage Box keys directory not mounted")
@@ -115,11 +115,11 @@ func setupKeysDirectory() {
 	storageBoxKey := keysDir + "/rsa_key.pem"
 	if _, err := os.Stat(storageBoxKey); err == nil {
 		log("INFO", "Using existing RSA key from Storage Box")
-		
+
 		// Create symlinks
 		os.Remove(rsaKeyPath)
 		os.Remove("/data/rsa_key.pub.pem")
-		
+
 		if err := os.Symlink(storageBoxKey, rsaKeyPath); err != nil {
 			log("WARN", "Failed to create RSA key symlink: %v", err)
 		}
@@ -136,11 +136,11 @@ func setupKeysDirectory() {
 func runPostStartScript() {
 	// Wait a bit for Vaultwarden to generate keys
 	time.Sleep(10 * time.Second)
-	
+
 	cmd := exec.Command("/usr/local/bin/post-start.sh")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		log("WARN", "Post-start script failed: %v", err)
 	}
@@ -148,13 +148,13 @@ func runPostStartScript() {
 
 func cleanup() {
 	log("INFO", "Shutting down...")
-	
+
 	if registryClientV2 != nil {
 		log("INFO", "Closing registry connection...")
 		registryClientV2.Shutdown()
 		registryClientV2 = nil
 	}
-	
+
 	if vaultwardenPID > 0 {
 		log("INFO", "Stopping Vaultwarden server...")
 		syscall.Kill(vaultwardenPID, syscall.SIGTERM)
@@ -181,16 +181,10 @@ func registerWithProxy() error {
 		"service": "vaultwarden",
 	}
 
-	// Connect and register with V2 protocol
-	var err error
-	registryClientV2, err = NewRegistryClientV2(registryAddr, serviceName, "", 0, metadata)
-	if err != nil {
-		return fmt.Errorf("failed to register with V2: %w", err)
-	}
+	// Create client (doesn't connect yet)
+	registryClientV2 = NewRegistryClient(registryAddr, serviceName, "", 0, metadata)
 
-	log("INFO", "Using container IP: %s", registryClientV2.GetLocalIP())
-
-	// Register event handlers
+	// Register event handlers before connecting
 	registryClientV2.On(EventConnected, func(event Event) {
 		sessionID := event.Data["session_id"]
 		localIP := event.Data["local_ip"]
@@ -200,6 +194,22 @@ func registerWithProxy() error {
 	registryClientV2.On(EventDisconnected, func(event Event) {
 		reason := event.Data["reason"]
 		log("WARN", "⚠ Disconnected from registry - Reason: %v", reason)
+	})
+
+	registryClientV2.On(EventRetrying, func(event Event) {
+		attempt := event.Data["attempt"]
+		log("WARN", "⚠ Retrying connection (attempt %v)...", attempt)
+	})
+
+	registryClientV2.On(EventExtendedRetry, func(event Event) {
+		interval := event.Data["interval"]
+		log("WARN", "⚠ Switching to extended retry mode (interval: %v)", interval)
+	})
+
+	registryClientV2.On(EventReconnected, func(event Event) {
+		attempt := event.Data["attempt"]
+		sessionID := event.Data["session_id"]
+		log("INFO", "✓ Reconnected to registry after %v attempts - Session: %v", attempt, sessionID)
 	})
 
 	registryClientV2.On(EventRouteAdded, func(event Event) {
@@ -224,11 +234,18 @@ func registerWithProxy() error {
 		log("INFO", "✓ Configuration applied and active on proxy")
 	})
 
+	// Connect and register (with automatic cleanup of old routes)
+	if err := registryClientV2.Init(); err != nil {
+		return fmt.Errorf("failed to initialize registry client: %w", err)
+	}
+
+	log("INFO", "Using container IP: %s", registryClientV2.GetLocalIP())
+
 	// Build backend URL using the detected IP and configured port
 	backendURL := registryClientV2.BuildBackendURL(port)
 	domainList := strings.Split(strings.ReplaceAll(domains, " ", ""), ",")
 
-	routeID, err = registryClientV2.AddRoute(domainList, routePath, backendURL, 10)
+	routeID, err := registryClientV2.AddRoute(domainList, routePath, backendURL, 10)
 	if err != nil {
 		return fmt.Errorf("failed to add route: %w", err)
 	}
@@ -255,36 +272,10 @@ func registerWithProxy() error {
 
 	log("INFO", "Successfully registered with V2 protocol")
 
-	// Start keepalive pinger
-	go keepAliveLoop()
+	// Start automatic keepalive with retry logic
+	go registryClientV2.StartKeepalive()
 
 	return nil
-}
-
-func keepAliveLoop() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if registryClientV2 != nil {
-				err := registryClientV2.Ping()
-				if err != nil {
-					log("WARN", "Keepalive ping failed: %v", err)
-					// Try to reconnect
-					go func() {
-						time.Sleep(5 * time.Second)
-						if err := registerWithProxy(); err != nil {
-							log("WARN", "Reconnection failed: %v", err)
-						}
-					}()
-				}
-			}
-		case <-done:
-			return
-		}
-	}
 }
 
 func startVaultwarden() {
@@ -293,7 +284,7 @@ func startVaultwarden() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	
+
 	// Pass through all environment variables
 	cmd.Env = os.Environ()
 

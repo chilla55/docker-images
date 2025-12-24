@@ -130,7 +130,7 @@ func runMigrations() {
 
 	cmd := exec.Command("php", "artisan", "migrate", "--force", "--isolated")
 	cmd.Dir = appDir
-	
+
 	// Capture output
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -313,18 +313,10 @@ func registerWithProxy() {
 		"service": "pterodactyl-panel",
 	}
 
-	// Connect and register with V2 protocol
-	var err error
-	registryClientV2, err = NewRegistryClientV2(registryAddr, serviceName, "", 0, metadata)
-	if err != nil {
-		log("ERROR", "Failed to register with V2: %v", err)
-		// Don't fail - continue without registry
-		return
-	}
+	// Create client (doesn't connect yet)
+	registryClientV2 = NewRegistryClient(registryAddr, serviceName, "", 0, metadata)
 
-	log("INFO", "Using container IP: %s", registryClientV2.GetLocalIP())
-
-	// Register event handlers
+	// Register event handlers before connecting
 	registryClientV2.On(EventConnected, func(event Event) {
 		sessionID := event.Data["session_id"]
 		localIP := event.Data["local_ip"]
@@ -334,6 +326,22 @@ func registerWithProxy() {
 	registryClientV2.On(EventDisconnected, func(event Event) {
 		reason := event.Data["reason"]
 		log("WARN", "⚠ Disconnected from registry - Reason: %v", reason)
+	})
+
+	registryClientV2.On(EventRetrying, func(event Event) {
+		attempt := event.Data["attempt"]
+		log("WARN", "⚠ Retrying connection (attempt %v)...", attempt)
+	})
+
+	registryClientV2.On(EventExtendedRetry, func(event Event) {
+		interval := event.Data["interval"]
+		log("WARN", "⚠ Switching to extended retry mode (interval: %v)", interval)
+	})
+
+	registryClientV2.On(EventReconnected, func(event Event) {
+		attempt := event.Data["attempt"]
+		sessionID := event.Data["session_id"]
+		log("INFO", "✓ Reconnected to registry after %v attempts - Session: %v", attempt, sessionID)
 	})
 
 	registryClientV2.On(EventRouteAdded, func(event Event) {
@@ -358,11 +366,20 @@ func registerWithProxy() {
 		log("INFO", "✓ Configuration applied and active on proxy")
 	})
 
+	// Connect and register (with automatic cleanup of old routes)
+	if err := registryClientV2.Init(); err != nil {
+		log("ERROR", "Failed to initialize registry client: %v", err)
+		// Don't fail - continue without registry
+		return
+	}
+
+	log("INFO", "Using container IP: %s", registryClientV2.GetLocalIP())
+
 	// Build backend URL using the detected IP and configured port
 	backendURL := registryClientV2.BuildBackendURL(port)
 	domainList := strings.Split(strings.ReplaceAll(domains, " ", ""), ",")
 
-	routeID, err = registryClientV2.AddRoute(domainList, routePath, backendURL, 10)
+	routeID, err := registryClientV2.AddRoute(domainList, routePath, backendURL, 10)
 	if err != nil {
 		log("ERROR", "Failed to add route: %v", err)
 		return
@@ -389,33 +406,8 @@ func registerWithProxy() {
 		return
 	}
 
-	log("INFO", "Pterodactyl Panel successfully registered with V2 protocol")
+	log("INFO", "Successfully registered with V2 protocol")
 
-	// Start keepalive pinger
-	go keepAliveLoop()
+	// Start automatic keepalive with retry logic
+	go registryClientV2.StartKeepalive()
 }
-
-func keepAliveLoop() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if registryClientV2 != nil {
-				err := registryClientV2.Ping()
-				if err != nil {
-					log("WARN", "Keepalive ping failed: %v", err)
-					// Try to reconnect
-					go func() {
-						time.Sleep(5 * time.Second)
-						registerWithProxy()
-					}()
-				}
-			}
-		case <-done:
-			return
-		}
-	}
-}
-
