@@ -3,7 +3,17 @@
 FROM golang:1.21-alpine AS builder
 
 WORKDIR /build
-COPY main.go registry_client_v2.go go.mod ./
+
+# Copy go module files first for better caching
+COPY go.mod go.sum* ./
+
+# Download dependencies (including registry-client-v2 from GitHub)
+RUN go mod download
+
+# Copy source files
+COPY main.go ./
+
+# Build the entrypoint
 RUN go build -o entrypoint .
 
 FROM node:20-alpine

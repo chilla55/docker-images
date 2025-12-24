@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	registryclient "github.com/chilla55/registry-client/v2"
 )
 
 var (
@@ -27,7 +29,7 @@ var (
 	updateCheckIntvl   = getEnv("UPDATE_CHECK_INTERVAL", "300")
 	maintenancePageURL string // Will be set in main() if not provided via env
 
-	registryClientV2 *RegistryClientV2
+	registryClientV2 *registryclient.RegistryClientV2
 	routeID          string
 	maintenancePID   int
 	updateChkPID     int
@@ -160,116 +162,68 @@ func registerWithProxy() error {
 		"auto_update": true,
 	}
 
-	// Create registry client
-	registryClientV2 = NewRegistryClient(registryAddr, serviceName, "", 3001, metadata)
+	// Create registry client with debug logging enabled
+	registryClientV2 = registryclient.NewRegistryClient(registryAddr, serviceName, "", 3001, metadata, true) // debug=true
 
-	// Register comprehensive event handlers for all lifecycle events
-	// Configure event handlers before connecting
-	registryClientV2.On(EventConnected, func(event Event) {
-		sessionID := event.Data["session_id"]
-		localIP := event.Data["local_ip"]
-		log("✓ Connected to registry - Session: %v, IP: %v", sessionID, localIP)
+	// Register event handlers
+	// Main logging handler - all registry client logs come through here
+	registryClientV2.On(registryclient.EventLog, func(event registryclient.Event) {
+		level := strings.ToUpper(fmt.Sprintf("%v", event.Data["level"]))
+		message := event.Data["message"]
+		log("[Registry/%s] %v", level, message)
 	})
 
-	registryClientV2.On(EventDisconnected, func(event Event) {
-		reason := event.Data["reason"]
-		log("⚠ Disconnected from registry - Reason: %v", reason)
+	// Error handler
+	registryClientV2.On(registryclient.EventError, func(event registryclient.Event) {
+		message := event.Data["message"]
+		log("[Registry/ERROR] %v", message)
 	})
 
-	registryClientV2.On(EventRouteAdded, func(event Event) {
-		routeID := event.Data["route_id"]
-		domains := event.Data["domains"]
-		backendURL := event.Data["backend_url"]
-		log("✓ Route registered - ID: %v", routeID)
-		log("  Domains: %v", domains)
-		log("  Backend: %v", backendURL)
-	})
-
-	registryClientV2.On(EventHealthCheckSet, func(event Event) {
-		routeID := event.Data["route_id"]
-		path := event.Data["path"]
-		interval := event.Data["interval"]
-		timeout := event.Data["timeout"]
-		log("✓ Health check configured for route %v", routeID)
-		log("  Path: %v, Interval: %v, Timeout: %v", path, interval, timeout)
-	})
-
-	registryClientV2.On(EventConfigApplied, func(event Event) {
-		log("✓ Configuration applied and active on proxy")
-	})
-
-	registryClientV2.On(EventMaintenanceEnter, func(event Event) {
+	// Maintenance mode handlers - simplified, just track active/inactive state
+	registryClientV2.On(registryclient.EventMaintenanceEntered, func(event registryclient.Event) {
 		target := event.Data["target"]
-		url := event.Data["maintenance_page_url"]
-		log("→ Entering maintenance mode")
-		log("  Target: %v", target)
-		log("  Maintenance URL: %v", url)
-		updateStatus("maintenance", "Entering maintenance mode", 10, "Requesting proxy to enter maintenance")
+		mode := event.Data["mode"] // "proxy" or "local"
+		if mode == "proxy" {
+			log("✓ Maintenance mode active (proxy confirmed): %v", target)
+		} else {
+			log("⚠ Maintenance mode active (local only - proxy timeout): %v", target)
+		}
+		updateStatus("maintenance", "Maintenance mode active", 100, "Service in maintenance")
 	})
 
-	registryClientV2.On(EventMaintenanceOK, func(event Event) {
+	registryClientV2.On(registryclient.EventMaintenanceExited, func(event registryclient.Event) {
 		target := event.Data["target"]
-		eventStr := fmt.Sprintf("%v", event.Data["event"])
-
-		// MAINT_OK is sent for both enter and exit
-		// We can tell which by checking the event string or our state
-		log("✓ Maintenance mode confirmed by proxy")
-		log("  Target: %v", target)
-		log("  Event: %v", eventStr)
-
-		// If we see MAINT_OK and we're exiting, stop the maintenance server
-		if strings.Contains(eventStr, "MAINT_OK") {
-			// Check if this is an exit confirmation by seeing if npm is running
-			if npmStartPID > 0 {
-				log("✓ Detected maintenance exit confirmation")
-				updateStatus("running", "Application online", 100, "Service fully operational")
-				stopMaintenanceServer()
-			} else {
-				// This is maintenance enter confirmation
-				updateStatus("maintenance", "Maintenance mode active", 100, "Proxy confirmed maintenance mode")
-			}
+		log("✓ Exited maintenance mode: %v", target)
+		updateStatus("running", "Application online", 100, "Service fully operational")
+		if maintenancePID > 0 {
+			stopMaintenanceServer()
 		}
 	})
 
-	registryClientV2.On(EventMaintenanceExit, func(event Event) {
-		target := event.Data["target"]
-		log("→ Exiting maintenance mode")
-		log("  Target: %v", target)
-		updateStatus("running", "Exiting maintenance", 90, "Requesting proxy to exit maintenance")
+	// IP change event handler
+	registryClientV2.On(registryclient.EventIPChanged, func(event registryclient.Event) {
+		oldIP := event.Data["old_ip"]
+		newIP := event.Data["new_ip"]
+		log("⚠ IP address changed: %v → %v (cleaning up stale routes)", oldIP, newIP)
 	})
 
-	registryClientV2.On(EventDisconnected, func(event Event) {
-		log("⚠ Disconnected from registry: %v", event.Data["reason"])
-	})
-
-	registryClientV2.On(EventRetrying, func(event Event) {
-		attempt := event.Data["attempt"]
-		err := event.Data["error"]
-		log("⚠ Connection lost, retrying (attempt %v): %v", attempt, err)
-	})
-
-	registryClientV2.On(EventExtendedRetry, func(event Event) {
-		interval := event.Data["interval"]
-		log("⏱ Switching to extended retry mode (interval: %v)", interval)
-	})
-
-	registryClientV2.On(EventReconnected, func(event Event) {
+	registryClientV2.On(registryclient.EventReconnected, func(event registryclient.Event) {
 		attempt := event.Data["attempt"]
 		log("✓ Successfully reconnected after %v attempts", attempt)
 	})
 
-	registryClientV2.On(EventRetrying, func(event Event) {
+	registryClientV2.On(registryclient.EventRetrying, func(event registryclient.Event) {
 		attempt := event.Data["attempt"]
 		err := event.Data["error"]
 		log("⚠ Connection lost, retrying (attempt %v): %v", attempt, err)
 	})
 
-	registryClientV2.On(EventExtendedRetry, func(event Event) {
+	registryClientV2.On(registryclient.EventExtendedRetry, func(event registryclient.Event) {
 		interval := event.Data["interval"]
 		log("⏱ Switching to extended retry mode (interval: %v)", interval)
 	})
 
-	registryClientV2.On(EventReconnected, func(event Event) {
+	registryClientV2.On(registryclient.EventReconnected, func(event registryclient.Event) {
 		attempt := event.Data["attempt"]
 		log("✓ Successfully reconnected after %v attempts", attempt)
 	})

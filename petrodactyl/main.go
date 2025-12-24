@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	registryclient "github.com/chilla55/registry-client/v2"
 )
 
 const (
@@ -17,7 +19,7 @@ const (
 )
 
 var (
-	registryClientV2 *RegistryClientV2
+	registryClientV2 *registryclient.RegistryClientV2
 	routeID          string
 	done             = make(chan os.Signal, 1)
 )
@@ -313,57 +315,28 @@ func registerWithProxy() {
 		"service": "pterodactyl-panel",
 	}
 
-	// Create client (doesn't connect yet)
-	registryClientV2 = NewRegistryClient(registryAddr, serviceName, "", 0, metadata)
+	// Create client with debug logging enabled
+	registryClientV2 = registryclient.NewRegistryClient(registryAddr, serviceName, "", 0, metadata, true) // debug=true
 
-	// Register event handlers before connecting
-	registryClientV2.On(EventConnected, func(event Event) {
-		sessionID := event.Data["session_id"]
-		localIP := event.Data["local_ip"]
-		log("INFO", "✓ Connected to registry - Session: %v, IP: %v", sessionID, localIP)
+	// Register event handlers
+	// Main logging handler - all registry client logs come through here
+	registryClientV2.On(registryclient.EventLog, func(event registryclient.Event) {
+		level := strings.ToUpper(fmt.Sprintf("%v", event.Data["level"]))
+		message := event.Data["message"]
+		log(level, "[Registry] %v", message)
 	})
 
-	registryClientV2.On(EventDisconnected, func(event Event) {
-		reason := event.Data["reason"]
-		log("WARN", "⚠ Disconnected from registry - Reason: %v", reason)
+	// Error handler
+	registryClientV2.On(registryclient.EventError, func(event registryclient.Event) {
+		message := event.Data["message"]
+		log("ERROR", "[Registry] %v", message)
 	})
 
-	registryClientV2.On(EventRetrying, func(event Event) {
-		attempt := event.Data["attempt"]
-		log("WARN", "⚠ Retrying connection (attempt %v)...", attempt)
-	})
-
-	registryClientV2.On(EventExtendedRetry, func(event Event) {
-		interval := event.Data["interval"]
-		log("WARN", "⚠ Switching to extended retry mode (interval: %v)", interval)
-	})
-
-	registryClientV2.On(EventReconnected, func(event Event) {
-		attempt := event.Data["attempt"]
-		sessionID := event.Data["session_id"]
-		log("INFO", "✓ Reconnected to registry after %v attempts - Session: %v", attempt, sessionID)
-	})
-
-	registryClientV2.On(EventRouteAdded, func(event Event) {
-		routeID := event.Data["route_id"]
-		domains := event.Data["domains"]
-		backendURL := event.Data["backend_url"]
-		log("INFO", "✓ Route registered - ID: %v", routeID)
-		log("INFO", "  Domains: %v", domains)
-		log("INFO", "  Backend: %v", backendURL)
-	})
-
-	registryClientV2.On(EventHealthCheckSet, func(event Event) {
-		routeID := event.Data["route_id"]
-		path := event.Data["path"]
-		interval := event.Data["interval"]
-		timeout := event.Data["timeout"]
-		log("INFO", "✓ Health check configured for route %v", routeID)
-		log("INFO", "  Path: %v, Interval: %v, Timeout: %v", path, interval, timeout)
-	})
-
-	registryClientV2.On(EventConfigApplied, func(event Event) {
-		log("INFO", "✓ Configuration applied and active on proxy")
+	// IP change event handler
+	registryClientV2.On(registryclient.EventIPChanged, func(event registryclient.Event) {
+		oldIP := event.Data["old_ip"]
+		newIP := event.Data["new_ip"]
+		log("WARN", "⚠ IP address changed: %v → %v (cleaning up stale routes)", oldIP, newIP)
 	})
 
 	// Connect and register (with automatic cleanup of old routes)
