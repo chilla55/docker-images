@@ -370,12 +370,35 @@ func performUpdate() error {
 	log("[Update 2/8] Stopping Next.js...")
 	updateStatus("stopping-app", "Stopping application", 10, "Gracefully shutting down Next.js")
 	if npmStartPID > 0 {
+		log("[Update] Sending SIGTERM to Next.js (PID: %d)...", npmStartPID)
 		if err := syscall.Kill(npmStartPID, syscall.SIGTERM); err != nil {
-			log("Warning: failed to kill Next.js: %v", err)
+			log("Warning: failed to send SIGTERM to Next.js: %v", err)
 		}
-		time.Sleep(2 * time.Second)
+		
+		// Wait for process to actually exit (up to 10 seconds)
+		for i := 0; i < 20; i++ {
+			// Check if process still exists
+			if err := syscall.Kill(npmStartPID, 0); err != nil {
+				// Process is gone (err means signal delivery failed because process doesn't exist)
+				log("[Update] Next.js process exited successfully")
+				npmStartPID = 0
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		
+		// Force kill if still running
+		if npmStartPID > 0 {
+			log("[Update] Process still running after 10s, forcing SIGKILL...")
+			if err := syscall.Kill(npmStartPID, syscall.SIGKILL); err != nil {
+				log("Warning: failed to SIGKILL: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+			npmStartPID = 0
+		}
 	}
 	log("[Update] ✓ Next.js stopped")
+
 
 	// Step 3: Pull code
 	log("[Update 3/8] Pulling latest code...")
