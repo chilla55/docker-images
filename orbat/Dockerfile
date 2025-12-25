@@ -19,7 +19,7 @@ RUN go build -o entrypoint .
 FROM node:20-alpine
 
 # Install dependencies only when needed
-RUN apk add --no-cache git curl bash
+RUN apk add --no-cache git curl bash netcat-openbsd
 
 WORKDIR /app
 

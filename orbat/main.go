@@ -137,7 +137,15 @@ func cleanup() {
 	log("Shutting down, closing persistent connection...")
 	if registryClientV2 != nil {
 		log("Shutting down registry connection...")
-		registryClientV2.Shutdown()
+		// Use a deferred recover to prevent panic on shutdown
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log("Warning: registry shutdown panic (ignored): %v", r)
+				}
+			}()
+			registryClientV2.Shutdown()
+		}()
 		registryClientV2 = nil
 	}
 	if maintenancePID > 0 {
@@ -307,7 +315,30 @@ func runCommand(name string, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Dir = appDir
+	// Pass through all environment variables
+	cmd.Env = os.Environ()
 	return cmd.Run()
+}
+
+func waitForDatabase(timeout time.Duration) error {
+	log("Checking database connectivity...")
+	deadline := time.Now().Add(timeout)
+
+	dbHost := getEnv("DATABASE_HOST", "postgresql")
+	dbPort := getEnv("DATABASE_PORT", "5432")
+
+	for time.Now().Before(deadline) {
+		// Try to connect using pg_isready equivalent (nc for basic TCP check)
+		cmd := exec.Command("nc", "-z", "-w", "2", dbHost, dbPort)
+		if err := cmd.Run(); err == nil {
+			log("✓ Database is accessible at %s:%s", dbHost, dbPort)
+			return nil
+		}
+		log("Database not ready yet, retrying in 2s...")
+		time.Sleep(2 * time.Second)
+	}
+
+	return fmt.Errorf("database at %s:%s did not become accessible within %v", dbHost, dbPort, timeout)
 }
 
 func cloneRepo() error {
@@ -412,29 +443,29 @@ func performUpdate() error {
 	}
 	log("[Update] ✓ Code updated")
 
-	// Step 4-7: Build
+	// Step 4-8: Build
 	if err := buildApp(); err != nil {
 		return fmt.Errorf("build failed: %w", err)
 	}
 
-	// Step 8: Start Next.js (if not already running)
-	log("[Update 8/9] Starting Next.js...")
-	updateStatus("starting-app", "Starting application", 85, "Launching Next.js server")
+	// Step 9: Start Next.js (if not already running)
+	log("[Update 9/10] Starting Next.js...")
+	updateStatus("starting-app", "Starting application", 90, "Launching Next.js server")
 	if npmStartPID <= 0 {
 		startNPMServer()
 	}
 
-	// Step 9: Wait for Next.js to be healthy
-	log("[Update 9/9] Waiting for Next.js to be healthy...")
-	updateStatus("waiting-healthy", "Waiting for app to start", 90, "Verifying service is responding")
+	// Step 10: Wait for Next.js to be healthy
+	log("[Update 10/10] Waiting for Next.js to be healthy...")
+	updateStatus("waiting-healthy", "Waiting for app to start", 95, "Verifying service is responding")
 	if err := waitForNextJSHealthy(60 * time.Second); err != nil {
 		return fmt.Errorf("Next.js not healthy after update: %w", err)
 	}
 	log("[Update] ✓ Next.js is healthy")
 
-	// Step 10: Exit maintenance mode
-	log("[Update 10/10] Exiting maintenance mode...")
-	updateStatus("exiting-maintenance", "Exiting maintenance mode", 95, "Switching back to main service")
+	// Step 11: Exit maintenance mode
+	log("[Update 11/11] Exiting maintenance mode...")
+	updateStatus("exiting-maintenance", "Exiting maintenance mode", 98, "Switching back to main service")
 	if err := exitProxyMaintenance(); err != nil {
 		log("Warning: failed to exit maintenance: %v", err)
 	}
@@ -448,29 +479,40 @@ func performUpdate() error {
 }
 
 func buildApp() error {
-	log("[Update 4/8] Installing dependencies...")
-	updateStatus("dependencies", "Installing dependencies", 25, "Running npm ci to install packages")
+	// First, ensure database is accessible
+	log("[Update 4/9] Checking database connectivity...")
+	updateStatus("database-check", "Verifying database connection", 20, "Ensuring database is accessible")
+	if err := waitForDatabase(30 * time.Second); err != nil {
+		return fmt.Errorf("database check failed: %w", err)
+	}
+
+	log("[Update 5/9] Installing dependencies...")
+	updateStatus("dependencies", "Installing dependencies", 30, "Running npm ci to install packages")
 	if err := runCommand("npm", "ci", "--production=false"); err != nil {
 		return fmt.Errorf("npm ci failed: %w", err)
 	}
 	log("[Update] ✓ Dependencies installed")
 
-	log("[Update 5/8] Generating Prisma client...")
-	updateStatus("prisma-generate", "Generating Prisma client", 45, "Creating database client from schema")
+	log("[Update 6/9] Generating Prisma client...")
+	updateStatus("prisma-generate", "Generating Prisma client", 50, "Creating database client from schema")
 	if err := runCommand("npx", "prisma", "generate"); err != nil {
 		return fmt.Errorf("prisma generate failed: %w", err)
 	}
 	log("[Update] ✓ Prisma client generated")
 
-	log("[Update 6/8] Running database migrations...")
-	updateStatus("migrations", "Running database migrations", 60, "Applying schema changes to database")
+	log("[Update 7/9] Running database migrations...")
+	updateStatus("migrations", "Running database migrations", 65, "Applying schema changes to database")
 	if err := runCommand("npx", "prisma", "migrate", "deploy"); err != nil {
 		return fmt.Errorf("prisma migrate deploy failed: %w", err)
 	}
 	log("[Update] ✓ Migrations applied")
 
-	log("[Update 7/8] Building Next.js application...")
-	updateStatus("building", "Building Next.js application", 75, "Compiling TypeScript and optimizing assets")
+	log("[Update 8/9] Building Next.js application...")
+	updateStatus("building", "Building Next.js application", 80, "Compiling TypeScript and optimizing assets")
+	// Set environment variables to prevent build-time database checks and static optimization
+	os.Setenv("SKIP_ENV_VALIDATION", "1")
+	os.Setenv("SKIP_STATIC_GENERATION", "1")
+	os.Setenv("NEXT_PRIVATE_SKIP_STATIC_OPTIMIZATION", "1")
 	if err := runCommand("npm", "run", "build"); err != nil {
 		return fmt.Errorf("npm run build failed: %w", err)
 	}
@@ -489,11 +531,12 @@ func isMaintenanceServerRunning() bool {
 }
 
 func waitForNextJSHealthy(timeout time.Duration) error {
-	backendURL := fmt.Sprintf("http://%s:%s/", backendHost, port)
+	// Check localhost since we're checking from within the same container
+	healthURL := fmt.Sprintf("http://localhost:%s/", port)
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		cmd := exec.Command("curl", "-sf", "-o", "/dev/null", backendURL)
+		cmd := exec.Command("curl", "-sf", "-o", "/dev/null", healthURL)
 		if err := cmd.Run(); err == nil {
 			return nil
 		}
