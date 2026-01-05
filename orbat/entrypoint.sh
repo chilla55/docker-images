@@ -287,6 +287,10 @@ perform_update() {
     enter_proxy_maintenance
     
     update_status "pulling" "Pulling latest changes" 10 "Downloading updated code from repository"
+    # Reset any local changes before pulling
+    echo "[Orbat] Resetting local changes..."
+    git reset --hard HEAD
+    git clean -fd
     git pull origin main
     
     # Install dependencies
@@ -377,6 +381,10 @@ else
         if [ ! -z "$LOCAL" ] && [ ! -z "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
             echo "[Orbat] Updates detected - pulling changes..."
             update_status "pulling" "Pulling latest changes" 15 "Downloading updated code from repository"
+            # Reset any local changes before pulling
+            echo "[Orbat] Resetting local changes..."
+            git reset --hard HEAD
+            git clean -fd
             if ! git pull origin main 2>&1 | tee -a /tmp/orbat.log; then
                 echo "[Orbat] WARNING: git pull failed, continuing with current version"
             fi
