@@ -438,6 +438,16 @@ func performUpdate() error {
 	// Step 3: Pull code
 	log("[Update 3/8] Pulling latest code...")
 	updateStatus("pulling", "Pulling latest changes", 15, "Downloading updated code from repository")
+
+	// Reset any local changes before pulling
+	log("[Update] Resetting local changes...")
+	if err := runCommand("git", "reset", "--hard", "HEAD"); err != nil {
+		log("Warning: git reset failed: %v", err)
+	}
+	if err := runCommand("git", "clean", "-fd"); err != nil {
+		log("Warning: git clean failed: %v", err)
+	}
+
 	if err := runCommand("git", "pull", "origin", "main"); err != nil {
 		return fmt.Errorf("git pull failed: %w", err)
 	}
