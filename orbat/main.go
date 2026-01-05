@@ -793,6 +793,16 @@ func main() {
 				log("WARNING: Failed to check updates: %v", err)
 			} else if updateAvailable {
 				log("Updates found, pulling latest code...")
+
+				// Reset any local changes before pulling
+				log("Resetting local changes...")
+				if err := runCommand("git", "reset", "--hard", "HEAD"); err != nil {
+					log("WARNING: git reset failed: %v", err)
+				}
+				if err := runCommand("git", "clean", "-fd"); err != nil {
+					log("WARNING: git clean failed: %v", err)
+				}
+
 				if err := runCommand("git", "pull", "origin", "main"); err != nil {
 					log("WARNING: git pull failed: %v", err)
 				}
