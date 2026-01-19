@@ -39,6 +39,8 @@ type config struct {
 	EnableWebsocket bool
 	BackendHTTP2    bool
 	PreserveHost     bool
+	EnableSocketIORoute bool
+	SocketIOPath        string
 }
 
 func main() {
@@ -124,6 +126,8 @@ func loadConfig() config {
 		EnableWebsocket: getBool("ENABLE_WEBSOCKET", true),
 		BackendHTTP2:    getBool("BACKEND_HTTP2", false),
 		PreserveHost:    getBool("PRESERVE_HOST", true),
+		EnableSocketIORoute: getBool("ENABLE_SOCKETIO_ROUTE", true),
+		SocketIOPath:        getEnv("SOCKETIO_PATH", "/socket.io/"),
 	}
 }
 
@@ -243,6 +247,18 @@ func startRegistry(cfg config) (*registryclient.RegistryClientV2, string) {
 	}
 	if cfg.PreserveHost {
 		_ = client.SetOptions("preserve_host", "true")
+	}
+
+	// Optionally register a dedicated Socket.IO websocket path
+	var sioRouteID string
+	if cfg.EnableSocketIORoute {
+		sioPath := ensureTrailingSlash(cfg.SocketIOPath)
+		sioRouteID, err = client.AddRoute(cfg.Domains, sioPath, backendURL, 10)
+		if err != nil {
+			log("warning: failed to add Socket.IO route: %v", err)
+		} else {
+			log("registered Socket.IO route %s on %s", sioRouteID, sioPath)
+		}
 	}
 
 	if err := client.ApplyConfig(); err != nil {
@@ -488,4 +504,14 @@ func log(format string, args ...interface{}) {
 func fatal(format string, args ...interface{}) {
 	log(format, args...)
 	os.Exit(1)
+}
+
+func ensureTrailingSlash(p string) string {
+	if p == "" {
+		return "/"
+	}
+	if !strings.HasSuffix(p, "/") {
+		return p + "/"
+	}
+	return p
 }

@@ -2,15 +2,15 @@ version: '3.8'
 
 services:
   node-runner:
-    image: node-runner:local # build and push your own tag/registry
+    image: ghcr.io/chilla55/node-runner:latest # build and push your own tag/registry
     environment:
-      ENTRY_COMMAND: "node server.js"          # required: what to run
+      ENTRY_COMMAND: "npm i classic-level && node main.js --dataPath=/workspace/data"          # required: what to run
       ENTRY_INSTALL: "1"                       # run npm install/ci when package.json present
       ENTRY_BUILD: "0"                         # set to 1 to run npm run build when lockfile exists
       APP_DIR: "/workspace/app"                # where code is extracted/mounted
       APP_PORT: "30000"                        # port your app listens on
-      SERVICE_NAME: "nodeapp"                  # registry service name
-      DOMAINS: "nodeapp.example.com"           # comma-separated domains
+      SERVICE_NAME: "foundryvtt"                  # registry service name
+      DOMAINS: "foundry.chilla55.de"           # comma-separated domains
       ROUTE_PATH: "/"                         # path prefix
       HEALTH_PATH: "/"                        # health endpoint for registry checks
       REGISTRY_HOST: "tasks.go-proxy_proxy"   # go-proxy registry service in Swarm
@@ -19,6 +19,8 @@ services:
       ENABLE_WEBSOCKET: "true"               # allow WS upgrades
       BACKEND_HTTP2: "false"                 # force HTTP/1.1 upstream for WS compatibility
       PRESERVE_HOST: "true"                  # keep original Host header
+      ENABLE_SOCKETIO_ROUTE: "true"          # register dedicated /socket.io/ route
+      SOCKETIO_PATH: "/socket.io/"          # path used for Socket.IO/ws
       WAIT_FOR_PORT: "true"                   # wait for APP_PORT before registering
       PORT_WAIT_TIMEOUT: "30s"
       ZIP_PATH: "/workspace/app.zip"          # host-mounted zip file (optional)
@@ -27,9 +29,9 @@ services:
     volumes:
       - nodeapp-app:/workspace/app               # persistent app code
       - nodeapp-data:/workspace/data             # user data (your app should write here)
-      - /srv/bundles/app.zip:/workspace/app.zip:ro # mount your zip bundle
+      - /mnt/storagebox/nodezip/foundryvtt_13.350.zip:/workspace/app.zip:rslave # mount your zip bundle
     networks:
-      - web
+      - web-net
     deploy:
       mode: replicated
       replicas: 1
@@ -48,7 +50,7 @@ services:
           - node.labels.web.node == web
 
 networks:
-  web:
+  web-net:
     external: true
 
 volumes:

@@ -53,6 +53,8 @@ services:
 			ENABLE_WEBSOCKET: "true"             # enable WebSocket upgrades
 			BACKEND_HTTP2: "false"               # force HTTP/1.1 upstream
 			PRESERVE_HOST: "true"                # keep original Host header
+			ENABLE_SOCKETIO_ROUTE: "true"        # register dedicated /socket.io/ route
+			SOCKETIO_PATH: "/socket.io/"        # path used for Socket.IO/ws
 		volumes:
 			- /srv/nodeapp:/workspace
 			- /srv/bundles/bundle.zip:/workspace/bundle.zip:ro
@@ -76,6 +78,8 @@ networks:
 - `ROUTE_PATH` (default `/`): Path prefix for the route.
 - `HEALTH_PATH` (default `/`): Health endpoint for registry checks.
 - `ENABLE_WEBSOCKET` (default `true`): Enable WebSocket upgrade handling.
+- `ENABLE_SOCKETIO_ROUTE` (default `true`): Adds a dedicated route for Socket.IO at `SOCKETIO_PATH` (defaults to `/socket.io/`). This can help proxies recognize and handle websocket upgrades reliably.
+- `SOCKETIO_PATH` (default `/socket.io/`): Path prefix for the Socket.IO route; a trailing slash is enforced.
 - `BACKEND_HTTP2` (default `false`): Use HTTP/2 to backend when true; default off for WS.
 - `PRESERVE_HOST` (default `true`): Keep original Host header to backend.
 - `REGISTRY_HOST` / `REGISTRY_PORT` (defaults `proxy` / `81`): go-proxy registry endpoint.
