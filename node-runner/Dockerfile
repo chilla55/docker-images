@@ -15,8 +15,8 @@ ARG GID=1000
 ARG USERNAME=nodeapp
 
 RUN apk add --no-cache git curl netcat-openbsd tzdata \
-  && addgroup -g ${GID} ${USERNAME} \
-  && adduser -D -G ${USERNAME} -u ${UID} ${USERNAME} \
+  && (addgroup -S -g ${GID} ${USERNAME} 2>/dev/null || addgroup -S ${USERNAME}) \
+  && (adduser -S -D -G ${USERNAME} -u ${UID} ${USERNAME} 2>/dev/null || adduser -S -D -G ${USERNAME} ${USERNAME}) \
   && mkdir -p /workspace \
   && chown ${USERNAME}:${USERNAME} /workspace
 
