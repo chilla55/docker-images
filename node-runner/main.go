@@ -242,6 +242,8 @@ func startRegistry(cfg config) (*registryclient.RegistryClientV2, string) {
 	} else {
 		_ = client.SetOptions("http2", "false")
 	}
+	// Disable HTTP/3 for WebSocket compatibility (hijacking requires HTTP/1.1)
+	_ = client.SetOptions("http3", "false")
 	if cfg.EnableWebsocket {
 		_ = client.SetOptions("websocket", "true")
 	}
