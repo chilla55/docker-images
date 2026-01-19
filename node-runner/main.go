@@ -228,7 +228,6 @@ func startRegistry(cfg config) (*registryclient.RegistryClientV2, string) {
 
 	_ = client.SetOptions("compression", "true")
 	_ = client.SetOptions("http2", "true")
-	_ = client.SetRouteOption(routeID, "websocket", "true")
 
 	if err := client.ApplyConfig(); err != nil {
 		log("failed to apply registry config: %v", err)
