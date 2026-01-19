@@ -12,10 +12,13 @@ services:
       SERVICE_NAME: "nodeapp"                  # registry service name
       DOMAINS: "nodeapp.example.com"           # comma-separated domains
       ROUTE_PATH: "/"                         # path prefix
-      HEALTH_PATH: "/health"                  # health endpoint for registry checks
+      HEALTH_PATH: "/"                        # health endpoint for registry checks
       REGISTRY_HOST: "tasks.go-proxy_proxy"   # go-proxy registry service in Swarm
       REGISTRY_PORT: "81"                     # registry TCP port
       ENABLE_REGISTRY: "true"                 # set false to skip registration
+      ENABLE_WEBSOCKET: "true"               # allow WS upgrades
+      BACKEND_HTTP2: "false"                 # force HTTP/1.1 upstream for WS compatibility
+      PRESERVE_HOST: "true"                  # keep original Host header
       WAIT_FOR_PORT: "true"                   # wait for APP_PORT before registering
       PORT_WAIT_TIMEOUT: "30s"
       ZIP_PATH: "/workspace/app.zip"          # host-mounted zip file (optional)

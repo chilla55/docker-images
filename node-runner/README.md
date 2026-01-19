@@ -44,12 +44,15 @@ services:
 			SERVICE_NAME: "nodeapp"
 			DOMAINS: "nodeapp.example.com"
 			ROUTE_PATH: "/"
-			HEALTH_PATH: "/health"
+			HEALTH_PATH: "/"
 			REGISTRY_HOST: "proxy"
 			REGISTRY_PORT: "81"
 			ZIP_PATH: "/workspace/bundle.zip"   # host-mounted zip file
 			ZIP_STRIP_COMPONENTS: "1"            # drop leading dirs inside the zip
 			ZIP_CLEAN: "1"                       # wipe APP_DIR before extract
+			ENABLE_WEBSOCKET: "true"             # enable WebSocket upgrades
+			BACKEND_HTTP2: "false"               # force HTTP/1.1 upstream
+			PRESERVE_HOST: "true"                # keep original Host header
 		volumes:
 			- /srv/nodeapp:/workspace
 			- /srv/bundles/bundle.zip:/workspace/bundle.zip:ro
@@ -71,7 +74,10 @@ networks:
 - `SERVICE_NAME` (default `nodeapp`): Name used when registering with go-proxy.
 - `DOMAINS` (default `example.com`): Comma-separated list for routing.
 - `ROUTE_PATH` (default `/`): Path prefix for the route.
-- `HEALTH_PATH` (default `/health`): Health endpoint for registry checks.
+- `HEALTH_PATH` (default `/`): Health endpoint for registry checks.
+- `ENABLE_WEBSOCKET` (default `true`): Enable WebSocket upgrade handling.
+- `BACKEND_HTTP2` (default `false`): Use HTTP/2 to backend when true; default off for WS.
+- `PRESERVE_HOST` (default `true`): Keep original Host header to backend.
 - `REGISTRY_HOST` / `REGISTRY_PORT` (defaults `proxy` / `81`): go-proxy registry endpoint.
 - `ENABLE_REGISTRY` (default `true`): Set to `false` to skip registration.
 - `WAIT_FOR_PORT` (default `true`): Wait for `APP_PORT` to accept TCP before registering.

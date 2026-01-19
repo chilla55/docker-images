@@ -36,6 +36,9 @@ type config struct {
 	ZipPath        string
 	ZipStrip       int
 	ZipClean       bool
+	EnableWebsocket bool
+	BackendHTTP2    bool
+	PreserveHost     bool
 }
 
 func main() {
@@ -111,13 +114,16 @@ func loadConfig() config {
 		RegistryPort:   getEnv("REGISTRY_PORT", "81"),
 		Domains:        splitAndTrim(getEnv("DOMAINS", "example.com")),
 		RoutePath:      getEnv("ROUTE_PATH", "/"),
-		HealthPath:     getEnv("HEALTH_PATH", "/health"),
+		HealthPath:     getEnv("HEALTH_PATH", "/"),
 		EnableRegistry: getBool("ENABLE_REGISTRY", true),
 		WaitForPort:    getBool("WAIT_FOR_PORT", true),
 		PortWaitTime:   getDuration("PORT_WAIT_TIMEOUT", 30*time.Second),
 		ZipPath:        getEnv("ZIP_PATH", ""),
 		ZipStrip:       getInt("ZIP_STRIP_COMPONENTS", 1),
 		ZipClean:       getBool("ZIP_CLEAN", true),
+		EnableWebsocket: getBool("ENABLE_WEBSOCKET", true),
+		BackendHTTP2:    getBool("BACKEND_HTTP2", false),
+		PreserveHost:    getBool("PRESERVE_HOST", true),
 	}
 }
 
@@ -227,8 +233,17 @@ func startRegistry(cfg config) (*registryclient.RegistryClientV2, string) {
 	}
 
 	_ = client.SetOptions("compression", "true")
-	_ = client.SetOptions("http2", "true")
-	_ = client.SetOptions("websocket", "true")
+	if cfg.BackendHTTP2 {
+		_ = client.SetOptions("http2", "true")
+	} else {
+		_ = client.SetOptions("http2", "false")
+	}
+	if cfg.EnableWebsocket {
+		_ = client.SetOptions("websocket", "true")
+	}
+	if cfg.PreserveHost {
+		_ = client.SetOptions("preserve_host", "true")
+	}
 
 	if err := client.ApplyConfig(); err != nil {
 		log("failed to apply registry config: %v", err)
