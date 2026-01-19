@@ -1190,7 +1190,15 @@ func (r *RegistryV2) handleConfigApplyV2(conn net.Conn, sessionID SessionID) {
 			opts["rate_limit_window"] = rl.Window.String()
 		}
 
-		if err := r.proxyServer.AddRoute(route.Domains, route.Path, route.BackendURL, svc.stagedHeaders, false, opts); err != nil {
+		// Extract websocket flag from options
+		websocketEnabled := false
+		if wsVal, found := opts["websocket"]; found {
+			if wsBool, ok := wsVal.(bool); ok {
+				websocketEnabled = wsBool
+			}
+		}
+
+		if err := r.proxyServer.AddRoute(route.Domains, route.Path, route.BackendURL, svc.stagedHeaders, websocketEnabled, opts); err != nil {
 			svc.mu.Unlock()
 			conn.Write([]byte(fmt.Sprintf("ERROR|failed to add route %s: %s\n", routeID, err)))
 			return
