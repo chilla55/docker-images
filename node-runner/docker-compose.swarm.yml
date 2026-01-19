@@ -8,7 +8,7 @@ services:
       ENTRY_INSTALL: "1"                       # run npm install/ci when package.json present
       ENTRY_BUILD: "0"                         # set to 1 to run npm run build when lockfile exists
       APP_DIR: "/workspace/app"                # where code is extracted/mounted
-      APP_PORT: "3000"                         # port your app listens on
+      APP_PORT: "30000"                        # port your app listens on
       SERVICE_NAME: "nodeapp"                  # registry service name
       DOMAINS: "nodeapp.example.com"           # comma-separated domains
       ROUTE_PATH: "/"                         # path prefix

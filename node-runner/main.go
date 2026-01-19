@@ -105,7 +105,7 @@ func loadConfig() config {
 		NodeEnv:        getEnv("NODE_ENV", "production"),
 		EntryInstall:   getBool("ENTRY_INSTALL", true),
 		EntryBuild:     getBool("ENTRY_BUILD", false),
-		AppPort:        getEnv("APP_PORT", "3000"),
+		AppPort:        getEnv("APP_PORT", "30000"),
 		ServiceName:    getEnv("SERVICE_NAME", "nodeapp"),
 		RegistryHost:   getEnv("REGISTRY_HOST", "proxy"),
 		RegistryPort:   getEnv("REGISTRY_PORT", "81"),

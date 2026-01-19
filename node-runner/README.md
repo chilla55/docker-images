@@ -40,7 +40,7 @@ services:
 			ENTRY_INSTALL: "1"   # npm install if package.json is present
 			ENTRY_BUILD: "0"     # set to 1 to run npm run build when lockfile exists
 			APP_DIR: /workspace   # override if you mount elsewhere
-			APP_PORT: "3000"      # port your app listens on
+			APP_PORT: "30000"     # port your app listens on
 			SERVICE_NAME: "nodeapp"
 			DOMAINS: "nodeapp.example.com"
 			ROUTE_PATH: "/"
@@ -67,7 +67,7 @@ networks:
 - `ENTRY_INSTALL` (default `1`): When `1` and `package.json` exists, run `npm install` on start.
 - `ENTRY_BUILD` (default `0`): When `1` and lockfile exists, run `npm run build` after install.
 - `NODE_ENV` (default `production`): Passed through to Node processes.
-- `APP_PORT` (default `3000`): Backend port exposed to go-proxy.
+- `APP_PORT` (default `30000`): Backend port exposed to go-proxy.
 - `SERVICE_NAME` (default `nodeapp`): Name used when registering with go-proxy.
 - `DOMAINS` (default `example.com`): Comma-separated list for routing.
 - `ROUTE_PATH` (default `/`): Path prefix for the route.
@@ -82,5 +82,5 @@ networks:
 
 ## Notes
 - Mount your app (including `package.json`) via a volume; it is not baked into the image or the repo.
-- For go-proxy, add a site pointing to `http://nodeapp:3000` (or your app port) once this container is on the shared `web` network.
+- For go-proxy, add a site pointing to `http://nodeapp:30000` (or your app port) once this container is on the shared `web` network.
 - For Docker Swarm, set `REGISTRY_HOST` to the go-proxy service DNS (e.g., `tasks.go-proxy_proxy`) and attach to the same overlay network.
