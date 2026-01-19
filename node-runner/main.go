@@ -45,9 +45,14 @@ func main() {
         fatal("ENTRY_COMMAND env variable is required")
     }
 
+    // Ensure app dir exists and is readable/writable
     log("app dir: %s", cfg.AppDir)
-    if err := os.MkdirAll(cfg.AppDir, 0755); err != nil {
+    appDirClean := filepath.Clean(cfg.AppDir)
+    if err := os.MkdirAll(appDirClean, 0755); err != nil {
         fatal("cannot create APP_DIR: %v", err)
+    }
+    if err := os.Chmod(appDirClean, 0755); err != nil {
+        log("warning: could not chmod app dir: %v", err)
     }
 
     if cfg.ZipPath != "" {
@@ -323,6 +328,14 @@ func fetchAndExtractZip(cfg config) error {
         }
     }
 
+    // Ensure app dir and all parents are writable
+    if err := os.MkdirAll(appDirClean, 0755); err != nil {
+        return fmt.Errorf("mkdir app dir failed: %w", err)
+    }
+    if err := os.Chmod(appDirClean, 0755); err != nil {
+        return fmt.Errorf("chmod app dir failed: %w", err)
+    }
+
     f, err := os.Open(zipFile)
     if err != nil {
         return fmt.Errorf("open zip failed: %w", err)
@@ -351,11 +364,18 @@ func fetchAndExtractZip(cfg config) error {
             if err := os.MkdirAll(destPath, 0755); err != nil {
                 return fmt.Errorf("mkdir failed: %w", err)
             }
+            if err := os.Chmod(destPath, 0755); err != nil {
+                return fmt.Errorf("chmod dir failed: %w", err)
+            }
             continue
         }
 
-        if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+        parentDir := filepath.Dir(destPath)
+        if err := os.MkdirAll(parentDir, 0755); err != nil {
             return fmt.Errorf("mkdir parents failed: %w", err)
+        }
+        if err := os.Chmod(parentDir, 0755); err != nil {
+            return fmt.Errorf("chmod parent failed: %w", err)
         }
 
         rc, err := zf.Open()
@@ -379,7 +399,12 @@ func fetchAndExtractZip(cfg config) error {
         out.Close()
     }
 
-    log("zip extracted into %s", cfg.AppDir)
+    // Final chmod to ensure all perms are correct
+    if err := os.Chmod(appDirClean, 0755); err != nil {
+        log("warning: could not chmod final app dir: %v", err)
+    }
+
+    log("zip extracted into %s", appDirClean)
     return nil
 }
 

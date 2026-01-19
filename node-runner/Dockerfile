@@ -27,6 +27,4 @@ ENV APP_DIR=/workspace \
 
 COPY --from=builder /entrypoint /entrypoint
 
-USER ${USERNAME}
-
 ENTRYPOINT ["/entrypoint"]
