@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  node-runner:
+    image: node-runner:local # build and push your own tag/registry
+    environment:
+      ENTRY_COMMAND: "node server.js"          # required: what to run
+      ENTRY_INSTALL: "1"                       # run npm install/ci when package.json present
+      ENTRY_BUILD: "0"                         # set to 1 to run npm run build when lockfile exists
+      APP_DIR: "/workspace/app"                # where code is extracted/mounted
+      APP_PORT: "3000"                         # port your app listens on
+      SERVICE_NAME: "nodeapp"                  # registry service name
+      DOMAINS: "nodeapp.example.com"           # comma-separated domains
+      ROUTE_PATH: "/"                         # path prefix
+      HEALTH_PATH: "/health"                  # health endpoint for registry checks
+      REGISTRY_HOST: "tasks.go-proxy_proxy"   # go-proxy registry service in Swarm
+      REGISTRY_PORT: "81"                     # registry TCP port
+      ENABLE_REGISTRY: "true"                 # set false to skip registration
+      WAIT_FOR_PORT: "true"                   # wait for APP_PORT before registering
+      PORT_WAIT_TIMEOUT: "30s"
+      ZIP_PATH: "/workspace/app.zip"          # host-mounted zip file (optional)
+      ZIP_STRIP_COMPONENTS: "1"                # drop leading dirs inside the zip
+      ZIP_CLEAN: "1"                          # wipe APP_DIR before extract
+    volumes:
+      - nodeapp-app:/workspace/app               # persistent app code
+      - nodeapp-data:/workspace/data             # user data (your app should write here)
+      - /srv/bundles/app.zip:/workspace/app.zip:ro # mount your zip bundle
+    networks:
+      - web
+    deploy:
+      mode: replicated
+      replicas: 1
+      endpoint_mode: dnsrr
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 300s
+      update_config:
+        parallelism: 1
+        delay: 5s
+        order: start-first
+      placement:
+        constraints:
+          - node.labels.web.node == web
+
+networks:
+  web:
+    external: true
+
+volumes:
+  nodeapp-app:
+    driver: local
+  nodeapp-data:
+    driver: local
