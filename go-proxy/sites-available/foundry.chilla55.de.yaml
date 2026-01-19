@@ -1,0 +1,13 @@
+domains:
+  - foundry.chilla55.de
+
+options:
+  http2: false      # Disable HTTP/2 for WebSocket compatibility
+  http3: false      # Disable HTTP/3 for WebSocket compatibility
+  compression: true
+  timeout: 60s      # Longer timeout for WebSocket connections
+  health_check_interval: 30s
+  health_check_timeout: 10s
+
+# Routes are registered dynamically via registry-client by node-runner
+# This config only sets domain-specific options to ensure WebSocket works
