@@ -1378,6 +1378,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, route *
 	outbound.Header.Set("Upgrade", "websocket")
 	outbound.Header.Set("X-Request-ID", requestID)
 	outbound.Header.Set("X-Forwarded-For", r.RemoteAddr)
+	// Preserve WebSocket handshake headers
+	if key := r.Header.Get("Sec-WebSocket-Key"); key != "" {
+		outbound.Header.Set("Sec-WebSocket-Key", key)
+	}
+	if version := r.Header.Get("Sec-WebSocket-Version"); version != "" {
+		outbound.Header.Set("Sec-WebSocket-Version", version)
+	}
+	if extensions := r.Header.Get("Sec-WebSocket-Extensions"); extensions != "" {
+		outbound.Header.Set("Sec-WebSocket-Extensions", extensions)
+	}
+	if protocol := r.Header.Get("Sec-WebSocket-Protocol"); protocol != "" {
+		outbound.Header.Set("Sec-WebSocket-Protocol", protocol)
+	}
 
 	if err := outbound.Write(backendConn); err != nil {
 		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
