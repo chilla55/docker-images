@@ -18,27 +18,27 @@ import (
 )
 
 type config struct {
-	AppDir         string
-	EntryCommand   string
-	NodeEnv        string
-	EntryInstall   bool
-	EntryBuild     bool
-	AppPort        string
-	ServiceName    string
-	RegistryHost   string
-	RegistryPort   string
-	Domains        []string
-	RoutePath      string
-	HealthPath     string
-	EnableRegistry bool
-	WaitForPort    bool
-	PortWaitTime   time.Duration
-	ZipPath        string
-	ZipStrip       int
-	ZipClean       bool
-	EnableWebsocket bool
-	BackendHTTP2    bool
-	PreserveHost     bool
+	AppDir              string
+	EntryCommand        string
+	NodeEnv             string
+	EntryInstall        bool
+	EntryBuild          bool
+	AppPort             string
+	ServiceName         string
+	RegistryHost        string
+	RegistryPort        string
+	Domains             []string
+	RoutePath           string
+	HealthPath          string
+	EnableRegistry      bool
+	WaitForPort         bool
+	PortWaitTime        time.Duration
+	ZipPath             string
+	ZipStrip            int
+	ZipClean            bool
+	EnableWebsocket     bool
+	BackendHTTP2        bool
+	PreserveHost        bool
 	EnableSocketIORoute bool
 	SocketIOPath        string
 }
@@ -105,27 +105,27 @@ func main() {
 
 func loadConfig() config {
 	return config{
-		AppDir:         getEnv("APP_DIR", "/workspace"),
-		EntryCommand:   os.Getenv("ENTRY_COMMAND"),
-		NodeEnv:        getEnv("NODE_ENV", "production"),
-		EntryInstall:   getBool("ENTRY_INSTALL", true),
-		EntryBuild:     getBool("ENTRY_BUILD", false),
-		AppPort:        getEnv("APP_PORT", "30000"),
-		ServiceName:    getEnv("SERVICE_NAME", "nodeapp"),
-		RegistryHost:   getEnv("REGISTRY_HOST", "proxy"),
-		RegistryPort:   getEnv("REGISTRY_PORT", "81"),
-		Domains:        splitAndTrim(getEnv("DOMAINS", "example.com")),
-		RoutePath:      getEnv("ROUTE_PATH", "/"),
-		HealthPath:     getEnv("HEALTH_PATH", "/"),
-		EnableRegistry: getBool("ENABLE_REGISTRY", true),
-		WaitForPort:    getBool("WAIT_FOR_PORT", true),
-		PortWaitTime:   getDuration("PORT_WAIT_TIMEOUT", 30*time.Second),
-		ZipPath:        getEnv("ZIP_PATH", ""),
-		ZipStrip:       getInt("ZIP_STRIP_COMPONENTS", 1),
-		ZipClean:       getBool("ZIP_CLEAN", true),
-		EnableWebsocket: getBool("ENABLE_WEBSOCKET", true),
-		BackendHTTP2:    getBool("BACKEND_HTTP2", false),
-		PreserveHost:    getBool("PRESERVE_HOST", true),
+		AppDir:              getEnv("APP_DIR", "/workspace"),
+		EntryCommand:        os.Getenv("ENTRY_COMMAND"),
+		NodeEnv:             getEnv("NODE_ENV", "production"),
+		EntryInstall:        getBool("ENTRY_INSTALL", true),
+		EntryBuild:          getBool("ENTRY_BUILD", false),
+		AppPort:             getEnv("APP_PORT", "30000"),
+		ServiceName:         getEnv("SERVICE_NAME", "nodeapp"),
+		RegistryHost:        getEnv("REGISTRY_HOST", "proxy"),
+		RegistryPort:        getEnv("REGISTRY_PORT", "81"),
+		Domains:             splitAndTrim(getEnv("DOMAINS", "example.com")),
+		RoutePath:           getEnv("ROUTE_PATH", "/"),
+		HealthPath:          getEnv("HEALTH_PATH", "/"),
+		EnableRegistry:      getBool("ENABLE_REGISTRY", true),
+		WaitForPort:         getBool("WAIT_FOR_PORT", true),
+		PortWaitTime:        getDuration("PORT_WAIT_TIMEOUT", 30*time.Second),
+		ZipPath:             getEnv("ZIP_PATH", ""),
+		ZipStrip:            getInt("ZIP_STRIP_COMPONENTS", 1),
+		ZipClean:            getBool("ZIP_CLEAN", true),
+		EnableWebsocket:     getBool("ENABLE_WEBSOCKET", true),
+		BackendHTTP2:        getBool("BACKEND_HTTP2", false),
+		PreserveHost:        getBool("PRESERVE_HOST", true),
 		EnableSocketIORoute: getBool("ENABLE_SOCKETIO_ROUTE", true),
 		SocketIOPath:        getEnv("SOCKETIO_PATH", "/socket.io/"),
 	}
