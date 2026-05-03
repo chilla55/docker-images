@@ -200,6 +200,28 @@ func registerWithProxy() error {
 		log("ERROR", "[Registry] %v", message)
 	})
 
+	registryClientV2.On(registryclient.EventDisconnected, func(event registryclient.Event) {
+		reason := event.Data["reason"]
+		log("WARN", "[Registry] Control connection disconnected: %v", reason)
+	})
+
+	registryClientV2.On(registryclient.EventConnected, func(event registryclient.Event) {
+		sessionID := event.Data["session_id"]
+		localIP := event.Data["local_ip"]
+		log("INFO", "[Registry] Control connection active: session=%v ip=%v", sessionID, localIP)
+	})
+
+	registryClientV2.On(registryclient.EventRetrying, func(event registryclient.Event) {
+		attempt := event.Data["attempt"]
+		err := event.Data["error"]
+		log("WARN", "[Registry] Connection lost, retrying (attempt %v): %v", attempt, err)
+	})
+
+	registryClientV2.On(registryclient.EventReconnected, func(event registryclient.Event) {
+		attempt := event.Data["attempt"]
+		log("INFO", "[Registry] Reconnected to proxy after %v attempts", attempt)
+	})
+
 	// IP change event handler
 	registryClientV2.On(registryclient.EventIPChanged, func(event registryclient.Event) {
 		oldIP := event.Data["old_ip"]
@@ -211,6 +233,9 @@ func registerWithProxy() error {
 	if err := registryClientV2.Init(); err != nil {
 		return fmt.Errorf("failed to initialize registry client: %w", err)
 	}
+
+	// Keep the control connection active immediately after registration.
+	go registryClientV2.StartKeepalive()
 
 	log("INFO", "Using container IP: %s", registryClientV2.GetLocalIP())
 
@@ -226,7 +251,7 @@ func registerWithProxy() error {
 	log("INFO", "Backend URL: %s", backendURL)
 
 	// Configure health check
-	err = registryClientV2.SetHealthCheck(routeID, "//api/alive", "30s", "5s")
+	err = registryClientV2.SetHealthCheck(routeID, "//alive", "30s", "5s")
 	if err != nil {
 		log("WARN", "Warning: failed to set health check: %v", err)
 	}
@@ -244,9 +269,6 @@ func registerWithProxy() error {
 	}
 
 	log("INFO", "Successfully registered with V2 protocol")
-
-	// Start automatic keepalive with retry logic
-	go registryClientV2.StartKeepalive()
 
 	return nil
 }
