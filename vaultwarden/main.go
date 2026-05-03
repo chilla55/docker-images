@@ -250,12 +250,6 @@ func registerWithProxy() error {
 	log("INFO", "Route added with ID: %s", routeID)
 	log("INFO", "Backend URL: %s", backendURL)
 
-	// Enable WebSocket support (required for Vaultwarden live sync / notifications)
-	err = registryClientV2.UpdateRoute(routeID, "websocket", "true")
-	if err != nil {
-		log("WARN", "Warning: failed to enable websocket: %v", err)
-	}
-
 	// Configure health check
 	err = registryClientV2.SetHealthCheck(routeID, "//alive", "30s", "5s")
 	if err != nil {
@@ -263,6 +257,11 @@ func registerWithProxy() error {
 	}
 
 	// Configure options
+	err = registryClientV2.SetOptions("websocket", "true")
+	if err != nil {
+		log("WARN", "Warning: failed to enable websocket: %v", err)
+	}
+
 	err = registryClientV2.SetOptions("compression", "true")
 	if err != nil {
 		log("WARN", "Warning: failed to set compression: %v", err)
