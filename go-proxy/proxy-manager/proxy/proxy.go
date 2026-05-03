@@ -469,7 +469,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply security headers
-	s.applyHeaders(rw, route)
+	s.applyHeaders(rw, r, route)
 
 	// Proxy request with slow-request tracking
 	start := time.Now()
@@ -1569,14 +1569,30 @@ func (s *Server) sendSlowAlert(route *Route, r *http.Request, duration time.Dura
 }
 
 // applyHeaders applies security headers to response
-func (s *Server) applyHeaders(w http.ResponseWriter, route *Route) {
+func shouldSkipXFrameOptionsHeader(r *http.Request) bool {
+	path := strings.ToLower(r.URL.Path)
+
+	// Vaultwarden intentionally omits X-Frame-Options for connector pages.
+	if strings.HasSuffix(path, "connector.html") {
+		return true
+	}
+
+	// Keep websocket upgrade responses free from extra frame headers.
+	if isWebSocketRequest(r) && (strings.HasSuffix(path, "/notifications/hub") || strings.HasSuffix(path, "/notifications/anonymous-hub")) {
+		return true
+	}
+
+	return false
+}
+
+func (s *Server) applyHeaders(w http.ResponseWriter, r *http.Request, route *Route) {
 	headers := w.Header()
 
 	// Apply global headers first
 	if s.globalHeaders.HSTS != "" {
 		headers.Set("Strict-Transport-Security", s.globalHeaders.HSTS)
 	}
-	if s.globalHeaders.XFrameOptions != "" {
+	if s.globalHeaders.XFrameOptions != "" && !shouldSkipXFrameOptionsHeader(r) {
 		headers.Set("X-Frame-Options", s.globalHeaders.XFrameOptions)
 	}
 	if s.globalHeaders.XContentType != "" {

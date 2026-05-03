@@ -51,7 +51,8 @@ func TestAddRemoveRouteAndFind(t *testing.T) {
 	// find route for headers
 	r := s.findRoute("example.com", "/api")
 	rr := httptest.NewRecorder()
-	s.applyHeaders(rr, r)
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api", nil)
+	s.applyHeaders(rr, req, r)
 	if rr.Header().Get("X-Test") != "1" {
 		t.Fatalf("route header not applied")
 	}
@@ -89,6 +90,18 @@ func TestBlackholeCounts(t *testing.T) {
 	s.ServeHTTP(rw, req)
 	if s.GetBlackholeCount() != 1 {
 		t.Fatalf("expected blackhole count=1")
+	}
+}
+
+func TestApplyHeadersSkipsXFrameForConnectorPath(t *testing.T) {
+	s := NewServer(Config{GlobalHeaders: SecurityHeaders{XFrameOptions: "DENY"}})
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://vault.example.com/webauthn-connector.html", nil)
+	s.applyHeaders(rr, req, nil)
+
+	if got := rr.Header().Get("X-Frame-Options"); got != "" {
+		t.Fatalf("expected X-Frame-Options to be omitted for connector path, got %q", got)
 	}
 }
 
