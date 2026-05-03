@@ -226,7 +226,7 @@ func registerWithProxy() error {
 	log("INFO", "Backend URL: %s", backendURL)
 
 	// Configure health check
-	err = registryClientV2.SetHealthCheck(routeID, "/", "30s", "5s")
+	err = registryClientV2.SetHealthCheck(routeID, "/api/alive", "30s", "5s")
 	if err != nil {
 		log("WARN", "Warning: failed to set health check: %v", err)
 	}
