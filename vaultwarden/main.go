@@ -234,9 +234,6 @@ func registerWithProxy() error {
 		return fmt.Errorf("failed to initialize registry client: %w", err)
 	}
 
-	// Keep the control connection active immediately after registration.
-	go registryClientV2.StartKeepalive()
-
 	log("INFO", "Using container IP: %s", registryClientV2.GetLocalIP())
 
 	// Build backend URL using the detected IP and configured port
@@ -272,6 +269,10 @@ func registerWithProxy() error {
 	if err != nil {
 		return fmt.Errorf("failed to apply config: %w", err)
 	}
+
+	// Start keepalive after all setup commands are complete.
+	// This avoids concurrent command/response reads on the same scanner.
+	go registryClientV2.StartKeepalive()
 
 	log("INFO", "Successfully registered with V2 protocol")
 
