@@ -21,6 +21,7 @@ import (
 type ProxyServer interface {
 	AddRoute(domains []string, path, backendURL string, headers map[string]string, websocket bool, options map[string]interface{}) error
 	RemoveRoute(domains []string, path string)
+	RemoveRouteExact(domains []string, path, backendURL string)
 	SetRouteEnabled(domains []string, path string, enabled bool)
 	GetBackendStatus(domain, path string) *proxy.BackendStatus
 	SetMaintenance(domains []string, path string, enabled bool, maintenancePageURL string) error
@@ -430,7 +431,7 @@ func (r *RegistryV2) handleRegisterV2(conn net.Conn, parts []string) (SessionID,
 			// Remove all active routes from proxy (only if not already deactivated)
 			if !oldSvc.routesDeactivated {
 				for routeID, route := range oldSvc.activeRoutes {
-					r.proxyServer.RemoveRoute(route.Domains, route.Path)
+					r.proxyServer.RemoveRouteExact(route.Domains, route.Path, route.BackendURL)
 					log.Printf("[registry-v2] Removed old route %s: %v%s", routeID, route.Domains, route.Path)
 				}
 			} else {
@@ -1225,7 +1226,7 @@ func (r *RegistryV2) handleConfigApplyV2(conn net.Conn, sessionID SessionID) {
 	// Apply removals
 	for routeID := range svc.stagedRemovals {
 		if route, found := svc.activeRoutes[routeID]; found {
-			r.proxyServer.RemoveRoute(route.Domains, route.Path)
+			r.proxyServer.RemoveRouteExact(route.Domains, route.Path, route.BackendURL)
 			delete(svc.activeRoutes, routeID)
 			// Remove health check
 			if r.healthChecker != nil {
@@ -1900,7 +1901,7 @@ func (r *RegistryV2) handleClientShutdownV2(conn net.Conn, sessionID SessionID) 
 	svc.mu.Lock()
 	// Remove all active routes
 	for routeID, route := range svc.activeRoutes {
-		r.proxyServer.RemoveRoute(route.Domains, route.Path)
+		r.proxyServer.RemoveRouteExact(route.Domains, route.Path, route.BackendURL)
 		delete(svc.activeRoutes, routeID)
 	}
 	svc.mu.Unlock()
@@ -1982,7 +1983,7 @@ func (r *RegistryV2) cleanupDisconnectedSessions(ctx context.Context) {
 					svc.mu.Lock()
 					// Remove all routes from proxy (they were disabled, now fully remove them)
 					for routeID, route := range svc.activeRoutes {
-						r.proxyServer.RemoveRoute(route.Domains, route.Path)
+						r.proxyServer.RemoveRouteExact(route.Domains, route.Path, route.BackendURL)
 						log.Printf("[registry-v2] Removed route %s: %v%s (grace period expired)", routeID, route.Domains, route.Path)
 					}
 

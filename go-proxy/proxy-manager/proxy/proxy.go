@@ -534,16 +534,11 @@ func (s *Server) AddRoute(domains []string, path, backendURL string, headers map
 	return nil
 }
 
-// RemoveRoute removes routes for given domains and path
+// RemoveRoute removes routes for given domains and path.
+// This removes all matching routes and is primarily used by static site watcher cleanup.
 func (s *Server) RemoveRoute(domains []string, path string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// Remove from route map
-	for _, domain := range domains {
-		key := s.routeKey(domain, path)
-		delete(s.routeMap, key)
-	}
 
 	// Remove from routes slice
 	filtered := make([]*Route, 0, len(s.routes))
@@ -553,9 +548,53 @@ func (s *Server) RemoveRoute(domains []string, path string) {
 		}
 	}
 	s.routes = filtered
+	s.rebuildRouteMapLocked()
 
 	if s.debug {
 		log.Debug().Strs("domains", domains).Str("path", path).Msg("Removed route")
+	}
+}
+
+// RemoveRouteExact removes a single route matching domains+path+backendURL.
+// This is used by registry session cleanup to avoid deleting a newer replacement route
+// that shares the same domain/path.
+func (s *Server) RemoveRouteExact(domains []string, path, backendURL string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	removeIdx := -1
+	for i, r := range s.routes {
+		if !s.routeMatches(r, domains, path) {
+			continue
+		}
+		if r.Backend == nil || r.Backend.URL == nil {
+			continue
+		}
+		if r.Backend.URL.String() != backendURL {
+			continue
+		}
+
+		// Prefer removing disabled routes first (usually stale/disconnected sessions).
+		if removeIdx == -1 || !r.Enabled {
+			removeIdx = i
+			if !r.Enabled {
+				break
+			}
+		}
+	}
+
+	if removeIdx == -1 {
+		if s.debug {
+			log.Debug().Strs("domains", domains).Str("path", path).Str("backend", backendURL).Msg("No exact route found to remove")
+		}
+		return
+	}
+
+	s.routes = append(s.routes[:removeIdx], s.routes[removeIdx+1:]...)
+	s.rebuildRouteMapLocked()
+
+	if s.debug {
+		log.Debug().Strs("domains", domains).Str("path", path).Str("backend", backendURL).Msg("Removed exact route")
 	}
 }
 
@@ -576,6 +615,7 @@ func (s *Server) SetRouteEnabled(domains []string, path string, enabled bool) {
 			}
 		}
 	}
+	s.rebuildRouteMapLocked()
 }
 
 // GetBlackholeCount returns the number of blackholed requests
@@ -696,19 +736,13 @@ func (s *Server) findBackend(host, path string) *Backend {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Try exact match first
-	key := s.routeKey(host, path)
-	if backend, ok := s.routeMap[key]; ok {
-		return backend
-	}
-
 	// Try longest prefix match
 	var bestMatch *Backend
 	longestMatch := 0
 
 	for _, route := range s.routes {
 		for _, domain := range route.Domains {
-			if domain == host && len(route.Path) <= len(path) {
+			if route.Enabled && domain == host && len(route.Path) <= len(path) {
 				if path[:len(route.Path)] == route.Path {
 					if len(route.Path) > longestMatch {
 						longestMatch = len(route.Path)
@@ -720,6 +754,19 @@ func (s *Server) findBackend(host, path string) *Backend {
 	}
 
 	return bestMatch
+}
+
+func (s *Server) rebuildRouteMapLocked() {
+	s.routeMap = make(map[string]*Backend)
+	for _, route := range s.routes {
+		if !route.Enabled || route.Backend == nil {
+			continue
+		}
+		for _, domain := range route.Domains {
+			key := s.routeKey(domain, route.Path)
+			s.routeMap[key] = route.Backend
+		}
+	}
 }
 
 // findRoute finds the route for header application

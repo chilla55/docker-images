@@ -13,6 +13,7 @@ import (
 type ProxyServer interface {
 	AddRoute(domains []string, path, backendURL string, headers map[string]string, websocket bool, options map[string]interface{}) error
 	RemoveRoute(domains []string, path string)
+	RemoveRouteExact(domains []string, path, backendURL string)
 }
 
 type SiteWatcher struct {

@@ -15,6 +15,9 @@ func (d *dummyProxy) AddRoute(domains []string, path, backendURL string, headers
 	return nil
 }
 func (d *dummyProxy) RemoveRoute(domains []string, path string) { d.removed++ }
+func (d *dummyProxy) RemoveRouteExact(domains []string, path, backendURL string) {
+	d.removed++
+}
 
 func TestLoadSite(t *testing.T) {
 	dir := t.TempDir()
