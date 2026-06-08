@@ -1,0 +1,336 @@
+# ============================================================================
+# Docker Swarm Stack for Pelican Panel
+# ============================================================================
+# Deploy: docker stack deploy -c docker-compose.swarm.yml pelican
+# ============================================================================
+
+version: "3.8"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Networks
+# ──────────────────────────────────────────────────────────────────────────
+networks:
+  web-net:
+    external: true
+  
+  mariadb-net:
+    external: true
+  
+  redis-net:
+    external: true
+  
+  pelican-net:
+    driver: overlay
+    attachable: true
+
+# ──────────────────────────────────────────────────────────────────────────
+# Secrets
+# ──────────────────────────────────────────────────────────────────────────
+secrets:
+  panel_app_key:
+    external: true
+    name: pelican_app_key
+  
+  panel_db_password:
+    external: true
+    name: pelican_db_password
+  
+  panel_mail_password:
+    external: true
+    name: vaultwarden_smtp_password
+
+# ──────────────────────────────────────────────────────────────────────────
+# Configs
+# ──────────────────────────────────────────────────────────────────────────
+configs:
+  caddy_config:
+    file: ./Caddyfile
+  
+  php_fpm_pool:
+    file: ./php-fpm-pool.conf
+  
+  php_ini_custom:
+    file: ./php-custom.ini
+
+# ──────────────────────────────────────────────────────────────────────────
+# Volumes
+# ──────────────────────────────────────────────────────────────────────────
+volumes:
+  pelican_app:
+    driver: local
+
+# ──────────────────────────────────────────────────────────────────────────
+# Shared Environment Configuration (YAML anchor)
+# ──────────────────────────────────────────────────────────────────────────
+x-pelican-env: &pelican-env
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_URL: https://panel.chilla55.de
+  APP_TIMEZONE: Europe/Berlin
+  APP_LOCALE: en
+  APP_KEY_FILE: /run/secrets/panel_app_key
+  
+  CACHE_DRIVER: redis
+  SESSION_DRIVER: redis
+  QUEUE_CONNECTION: redis
+  
+  DB_CONNECTION: mysql
+  DB_HOST: mariadb
+  DB_PORT: "3306"
+  DB_DATABASE: pelican
+  DB_USERNAME: pelican
+  DB_PASSWORD_FILE: /run/secrets/panel_db_password
+  
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ""
+  
+  MAIL_MAILER: smtp
+  MAIL_HOST: smtp.example.com
+  MAIL_PORT: "25"
+  MAIL_USERNAME: ""
+  MAIL_PASSWORD_FILE: /run/secrets/panel_mail_password
+  MAIL_ENCRYPTION: tls
+  MAIL_FROM_ADDRESS: no-reply@chilla55.de
+  MAIL_FROM_NAME: "Pelican Panel"
+  
+  SESSION_SECURE_COOKIE: "true"
+  TRUSTED_PROXIES: "*"
+  
+  RUN_MIGRATIONS_ON_START: "true"
+  RUN_SEED_ON_START: "false"
+  # Set to "true" to disable managed env/secret sync into .env on all launches
+  SKIP_ENV_INJECTION: "false"
+  # Set to "true" for first launch if you want Pelican to write its own .env format untouched
+  # After setup, set back to "false" to allow managed env/secret sync into .env
+  SKIP_ENV_INJECTION_ON_FIRST_LAUNCH: "false"
+  # Set to "true" to download and install the latest panel release on next startup
+  # Useful for updates — set to "true", redeploy, then set back to "false"
+  UPDATE_ON_START: "false"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Services
+# ──────────────────────────────────────────────────────────────────────────
+services:
+  # ────────────────────────────────────────────────────────────────────────
+  # PHP-FPM Service (FastCGI server on port 9000)
+  # ────────────────────────────────────────────────────────────────────────
+  php-fpm:
+    image: ghcr.io/chilla55/pelican-panel:latest
+    hostname: pelican-php-fpm
+    
+    command: ["php-fpm"]
+    
+    networks:
+      - pelican-net
+      - mariadb-net
+      - redis-net
+    
+    environment:
+      <<: *pelican-env
+    
+    secrets:
+      - panel_app_key
+      - panel_db_password
+      - panel_mail_password
+    
+    configs:
+      - source: php_fpm_pool
+        target: /etc/php85/php-fpm.d/pelican.conf
+        mode: 0444
+      - source: php_ini_custom
+        target: /etc/php85/conf.d/99-custom.ini
+        mode: 0444
+    
+    volumes:
+      - type: volume
+        source: pelican_app
+        target: /var/www/pelican
+      - type: bind
+        source: ${PELICAN_ENV_DIR:-/mnt/storagebox/pelican/env}
+        target: /pelican-env
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.web.node == web
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 300s
+      labels:
+        - "com.pelican.service=php-fpm"
+    
+    stop_grace_period: 10s
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Caddy HTTP Server (port 80, proxies to php-fpm:9000)
+  # ────────────────────────────────────────────────────────────────────────
+  caddy:
+    image: ghcr.io/chilla55/pelican-panel:latest
+    hostname: pelican-caddy
+    
+    command: ["caddy"]
+    
+    networks:
+      - pelican-net
+      - web-net
+    
+    volumes:
+      - type: volume
+        source: pelican_app
+        target: /var/www/pelican
+      - type: bind
+        source: ${PELICAN_ENV_DIR:-/mnt/storagebox/pelican/env}
+        target: /pelican-env
+    
+    configs:
+      - source: caddy_config
+        target: /etc/caddy/Caddyfile
+        mode: 0444
+    
+    environment:
+      # go-proxy registry v2
+      REGISTRY_HOST: proxy
+      REGISTRY_PORT: "81"
+      SERVICE_NAME: pelican
+      DOMAINS: panel.chilla55.de
+      ROUTE_PATH: /
+      PORT: "80"
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.web.node == web
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 300s
+      labels:
+        - "com.pelican.service=caddy"
+    
+    stop_grace_period: 10s
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Queue Worker Service
+  # ────────────────────────────────────────────────────────────────────────
+  queue:
+    image: ghcr.io/chilla55/pelican-panel:latest
+    hostname: pelican-queue
+    
+    command: ["queue"]
+    
+    networks:
+      - mariadb-net
+      - redis-net
+    
+    environment:
+      <<: *pelican-env
+    
+    secrets:
+      - panel_app_key
+      - panel_db_password
+      - panel_mail_password
+    
+    volumes:
+      - type: volume
+        source: pelican_app
+        target: /var/www/pelican
+      - type: bind
+        source: ${PELICAN_ENV_DIR:-/mnt/storagebox/pelican/env}
+        target: /pelican-env
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.web.node == web
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 300s
+      labels:
+        - "com.pelican.service=queue"
+    
+    stop_grace_period: 30s
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Cron/Scheduler Service
+  # ────────────────────────────────────────────────────────────────────────
+  cron:
+    image: ghcr.io/chilla55/pelican-panel:latest
+    hostname: pelican-cron
+    
+    command: ["cron"]
+    
+    networks:
+      - mariadb-net
+      - redis-net
+    
+    environment:
+      <<: *pelican-env
+    
+    secrets:
+      - panel_app_key
+      - panel_db_password
+      - panel_mail_password
+    
+    volumes:
+      - type: volume
+        source: pelican_app
+        target: /var/www/pelican
+      - type: bind
+        source: ${PELICAN_ENV_DIR:-/mnt/storagebox/pelican/env}
+        target: /pelican-env
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.web.node == web
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 300s
+      labels:
+        - "com.pelican.service=cron"
+    
+    stop_grace_period: 10s

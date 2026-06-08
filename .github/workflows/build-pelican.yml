@@ -1,0 +1,144 @@
+# ============================================================================
+# GitHub Actions Workflow: Build and Push Pelican Panel Docker Image
+# ============================================================================
+# Automatically builds when changes are made to pelican/
+# Supports multi-platform builds (amd64, arm64)
+# Part of monorepo with multiple Docker images
+# ============================================================================
+
+name: Build Pelican Panel Image
+
+on:
+  push:
+    branches:
+      - main
+      - '*'
+    paths:
+      - 'pelican/**'
+      - '.github/workflows/build-pelican.yml'
+    tags:
+      - 'pelican-v*.*.*'
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'pelican/**'
+      - '.github/workflows/build-pelican.yml'
+
+  workflow_dispatch:
+    inputs:
+      panel_version:
+        description: 'Pelican Panel version label (e.g., v1.0.0)'
+        required: false
+        default: ''
+      push_image:
+        description: 'Push image to registry'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/pelican-panel
+
+jobs:
+  detect-version:
+    name: Detect Version
+    runs-on: ubuntu-latest
+    outputs:
+      panel_version: ${{ steps.version.outputs.panel_version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ -n "${{ github.event.inputs.panel_version }}" ]]; then
+            PANEL_VERSION="${{ github.event.inputs.panel_version }}"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            # Extract version from tag (e.g., pelican-v1.0.0 -> v1.0.0)
+            PANEL_VERSION="${{ github.ref_name }}"
+            PANEL_VERSION="${PANEL_VERSION#pelican-}"
+          else
+            PANEL_VERSION=$(cat pelican/VERSION)
+          fi
+
+          echo "panel_version=${PANEL_VERSION}" >> $GITHUB_OUTPUT
+          echo "Building Pelican image with version label: ${PANEL_VERSION}"
+
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: detect-version
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.push_image == 'true')
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.detect-version.outputs.panel_version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=nightly,enable=${{ github.ref != 'refs/heads/main' && github.ref_type != 'tag' }}
+          labels: |
+            org.opencontainers.image.title=Pelican Panel
+            org.opencontainers.image.description=Pelican Panel container for Docker Swarm deployment
+            org.opencontainers.image.version=${{ needs.detect-version.outputs.panel_version }}
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./pelican
+          file: ./pelican/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.push_image == 'true') }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PANEL_VERSION=${{ needs.detect-version.outputs.panel_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      - name: Generate build summary
+        run: |
+          echo "## Pelican Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Version: ${{ needs.detect-version.outputs.panel_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "Platforms: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Tags:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
