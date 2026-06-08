@@ -42,6 +42,13 @@ LABEL maintainer="chilla55" \
       org.opencontainers.image.version="${PANEL_VERSION}" \
       org.opencontainers.image.source="https://github.com/chilla55/docker-images"
 
+# Ensure edge repositories are available (main/community/testing)
+RUN printf '%s\n' \
+    "https://dl-cdn.alpinelinux.org/alpine/edge/main" \
+    "https://dl-cdn.alpinelinux.org/alpine/edge/community" \
+    "https://dl-cdn.alpinelinux.org/alpine/edge/testing" \
+    > /etc/apk/repositories
+
 # Install runtime dependencies + Composer + download tools
 RUN apk add --no-cache \
     bash \
@@ -54,7 +61,6 @@ RUN apk add --no-cache \
     git \
     php85 \
     php85-fpm \
-    php85-opcache \
     php85-phar \
     php85-iconv \
     php85-session \

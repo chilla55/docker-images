@@ -44,6 +44,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/pelican-panel
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   detect-version:
