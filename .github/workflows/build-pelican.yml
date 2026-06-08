@@ -112,7 +112,7 @@ jobs:
 
       - name: Build and push Docker image
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./pelican
           file: ./pelican/Dockerfile
@@ -122,8 +122,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             PANEL_VERSION=${{ needs.detect-version.outputs.panel_version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           provenance: false
 
       - name: Generate build summary
