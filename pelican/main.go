@@ -509,7 +509,7 @@ func startQueue() {
 
 	for {
 		cmd := exec.Command("php", "artisan", "queue:work",
-			"--queue=high,standard,low",
+			"--queue=default,high,standard,low",
 			"--sleep=3",
 			"--tries=3",
 			"--max-time=3600")

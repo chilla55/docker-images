@@ -65,7 +65,7 @@ volumes:
 x-pelican-env: &pelican-env
   APP_ENV: production
   APP_DEBUG: "false"
-  APP_URL: https://panel.chilla55.de
+  APP_URL: https://gpanel.chilla55.de
   APP_TIMEZONE: Europe/Berlin
   APP_LOCALE: en
   APP_KEY_FILE: /run/secrets/panel_app_key
@@ -86,12 +86,12 @@ x-pelican-env: &pelican-env
   REDIS_PASSWORD: ""
   
   MAIL_MAILER: smtp
-  MAIL_HOST: smtp.example.com
-  MAIL_PORT: "25"
-  MAIL_USERNAME: ""
+  MAIL_HOST: mail.chilla55.de
+  MAIL_PORT: "465"
+  MAIL_USERNAME: noreply@chilla55.de
   MAIL_PASSWORD_FILE: /run/secrets/panel_mail_password
-  MAIL_ENCRYPTION: tls
-  MAIL_FROM_ADDRESS: no-reply@chilla55.de
+  MAIL_SCHEME: smtps
+  MAIL_FROM_ADDRESS: noreply@chilla55.de
   MAIL_FROM_NAME: "Pelican Panel"
   
   SESSION_SECURE_COOKIE: "true"
@@ -204,7 +204,7 @@ services:
       REGISTRY_HOST: proxy
       REGISTRY_PORT: "81"
       SERVICE_NAME: pelican
-      DOMAINS: panel.chilla55.de
+      DOMAINS: gpanel.chilla55.de
       ROUTE_PATH: /
       PORT: "80"
     
