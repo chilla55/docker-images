@@ -27,7 +27,7 @@
 
     file_server
 
-    php_fastcgi pelican_php-fpm:9000 {
+    php_fastcgi php-fpm:9000 {
         root /var/www/pelican/public
         index index.php
 
