@@ -84,6 +84,7 @@ RUN apk add --no-cache \
     php85-sodium \
     php85-intl \
     php85-sqlite3 \
+    php85-pdo_sqlite \
     caddy \
     mariadb-client && \
     ln -sf /usr/bin/php85 /usr/bin/php && \

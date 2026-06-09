@@ -47,7 +47,7 @@ func main() {
 	switch serviceType {
 	case "php-fpm":
 		// php-fpm is responsible for installing/updating the panel into the shared volume
-		firstLaunch := !fileExists(filepath.Join(appDir, "artisan"))
+		firstLaunch := !panelInstallComplete()
 		ensurePanelInstalled()
 		ensureEnvSymlink()
 		if os.Getenv("SKIP_ENV_INJECTION") == "true" {
@@ -246,10 +246,12 @@ func quoteEnvValue(value string) string {
 // ensurePanelInstalled checks if the panel is present in the volume.
 // If not, it installs it. If UPDATE_ON_START=true and panel already exists, it updates.
 func ensurePanelInstalled() {
-	artisan := filepath.Join(appDir, "artisan")
-
-	if !fileExists(artisan) {
-		log("INFO", "Panel not found in volume — running first-time install...")
+	if !panelInstallComplete() {
+		if fileExists(filepath.Join(appDir, "artisan")) {
+			log("WARN", "Panel files are incomplete (missing vendor/autoload.php) — repairing install...")
+		} else {
+			log("INFO", "Panel not found in volume — running first-time install...")
+		}
 		if err := installPanel(); err != nil {
 			log("ERROR", "Panel installation failed: %v", err)
 			os.Exit(1)
@@ -345,13 +347,12 @@ func runArtisan(args ...string) {
 // waitForPanel blocks until appDir/artisan exists (written by the php-fpm service).
 // Times out after 10 minutes to avoid an infinite hang.
 func waitForPanel() {
-	artisan := filepath.Join(appDir, "artisan")
 	timeout := 10 * time.Minute
 	deadline := time.Now().Add(timeout)
 
 	log("INFO", "Waiting for panel to be installed by php-fpm service...")
 	for {
-		if fileExists(artisan) {
+		if panelInstallComplete() {
 			log("INFO", "Panel ready — proceeding")
 			return
 		}
@@ -361,6 +362,10 @@ func waitForPanel() {
 		}
 		time.Sleep(5 * time.Second)
 	}
+}
+
+func panelInstallComplete() bool {
+	return fileExists(filepath.Join(appDir, "artisan")) && fileExists(filepath.Join(appDir, "vendor/autoload.php"))
 }
 
 func fileExists(path string) bool {
