@@ -77,7 +77,7 @@ x-common:
     REGISTRY_HOST: proxy
     REGISTRY_PORT: "81"
     SERVICE_NAME: pelican
-    DOMAINS: gpanel.chilla55.de
+    DOMAINS: panel.chilla55.de
     ROUTE_PATH: /
     PORT: "80"
     REGISTRY_LOCAL_HEALTH_URL: http://127.0.0.1:80/
