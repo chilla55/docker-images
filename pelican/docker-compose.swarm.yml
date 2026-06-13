@@ -33,6 +33,9 @@ configs:
   php_ini_custom:
     file: ./php-custom.ini
 
+volumes:
+  pelican-data:
+
 x-common:
   panel: &panel-environment
     APP_URL: https://panel.chilla55.de
@@ -109,9 +112,7 @@ services:
         mode: 0444
 
     volumes:
-      - type: bind
-        source: ${PELICAN_DATA_DIR:-/mnt/storagebox/pelican/data}
-        target: /pelican-data
+      - pelican-data:/pelican-data
 
     deploy:
       mode: replicated
