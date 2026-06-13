@@ -56,6 +56,61 @@ services:
       retries: 3
       start_period: 30s
 
+  pelican-mariadb:
+    image: ghcr.io/chilla55/mariadb-single:${VERSION:-latest}
+    hostname: pelican-mariadb.srv1.chilla55.de
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      BACKUP_ENABLED: "true"
+      BACKUP_AUTO_RESTORE: "true"
+      BACKUP_RETENTION_DAYS: "30"
+      BACKUP_FULL_SCHEDULE: "0 3 * * 0"
+      BACKUP_DIFFERENTIAL_SCHEDULE: "0 3 * * 3"
+      BACKUP_INCREMENTAL_SCHEDULE: "0 * * * *"
+    volumes:
+      - pelican-mariadb-data:/var/lib/mysql
+      - pelican-mariadb-logs:/var/log/mysql
+      - /mnt/storagebox/backups/pelican-mariadb:/backups:rslave
+    secrets:
+      - mysql_root_password
+    configs:
+      - source: mariadb_config
+        target: /etc/my.cnf.d/zz-custom.cnf
+    ports:
+      - target: 3306
+        published: 3307
+        protocol: tcp
+        mode: ingress
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.mariadb.node == srv1
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 5
+        window: 300s
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: stop-first
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
 networks:
   mariadb-net:
     external: true
@@ -64,6 +119,10 @@ volumes:
   mariadb-data:
     driver: local
   mariadb-logs:
+    driver: local
+  pelican-mariadb-data:
+    driver: local
+  pelican-mariadb-logs:
     driver: local
 
 secrets:
