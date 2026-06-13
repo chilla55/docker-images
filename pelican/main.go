@@ -22,12 +22,15 @@ type config struct {
 	routePath           string
 	backendPort         string
 	priority            int
+	cleanupOldRoutes    bool
 	proxyHealthPath     string
 	proxyHealthInterval string
 	proxyHealthTimeout  string
 	localHealthURL      string
 	localCheckInterval  time.Duration
 	localCheckTimeout   time.Duration
+	registerAfter       int
+	unregisterAfter     int
 	debug               bool
 }
 
@@ -37,6 +40,8 @@ type agent struct {
 	client     *registryclient.RegistryClientV2
 	routeID    string
 	registered bool
+	healthySeen int
+	unhealthySeen int
 }
 
 func main() {
@@ -72,26 +77,57 @@ func loadConfig() config {
 		routePath:           getEnv("ROUTE_PATH", "/"),
 		backendPort:         getEnv("PORT", "80"),
 		priority:            getEnvInt("REGISTRY_ROUTE_PRIORITY", 10),
+		cleanupOldRoutes:    getEnvBool("REGISTRY_CLEANUP_OLD_ROUTES", true),
 		proxyHealthPath:     getEnv("REGISTRY_PROXY_HEALTH_PATH", "/"),
 		proxyHealthInterval: getEnv("REGISTRY_PROXY_HEALTH_INTERVAL", "30s"),
 		proxyHealthTimeout:  getEnv("REGISTRY_PROXY_HEALTH_TIMEOUT", "5s"),
 		localHealthURL:      getEnv("REGISTRY_LOCAL_HEALTH_URL", "http://127.0.0.1:80/"),
 		localCheckInterval:  getEnvDuration("REGISTRY_LOCAL_CHECK_INTERVAL", 10*time.Second),
 		localCheckTimeout:   getEnvDuration("REGISTRY_LOCAL_CHECK_TIMEOUT", 3*time.Second),
+		registerAfter:       getEnvInt("REGISTRY_REGISTER_AFTER_HEALTHY", 1),
+		unregisterAfter:     getEnvInt("REGISTRY_UNREGISTER_AFTER_UNHEALTHY", 3),
 		debug:               getEnvBool("REGISTRY_DEBUG", true),
 	}
 }
 
 func (a *agent) reconcile() {
-	if !localEndpointHealthy(a.cfg.localHealthURL, a.cfg.localCheckTimeout) {
-		if a.isRegistered() {
-			log("WARN", "Local Caddy endpoint is unhealthy, removing route")
+	healthy := localEndpointHealthy(a.cfg.localHealthURL, a.cfg.localCheckTimeout)
+
+	a.mu.Lock()
+	if healthy {
+		a.healthySeen++
+		a.unhealthySeen = 0
+	} else {
+		a.unhealthySeen++
+		a.healthySeen = 0
+	}
+	healthySeen := a.healthySeen
+	unhealthySeen := a.unhealthySeen
+	registered := a.registered
+	a.mu.Unlock()
+
+	if healthy {
+		if a.cfg.debug {
+			log("DEBUG", "Local health OK at %s (%d/%d before register)", a.cfg.localHealthURL, healthySeen, a.cfg.registerAfter)
 		}
-		a.shutdown("local caddy endpoint unhealthy")
+		if healthySeen < a.cfg.registerAfter {
+			return
+		}
+		a.ensureRegistered()
 		return
 	}
 
-	a.ensureRegistered()
+	if registered {
+		log("WARN", "Local Caddy endpoint unhealthy at %s (%d/%d before unregister)", a.cfg.localHealthURL, unhealthySeen, a.cfg.unregisterAfter)
+	} else if a.cfg.debug {
+		log("DEBUG", "Local Caddy endpoint still unhealthy at %s", a.cfg.localHealthURL)
+	}
+
+	if unhealthySeen < a.cfg.unregisterAfter {
+		return
+	}
+
+	a.shutdown("local caddy endpoint unhealthy")
 }
 
 func (a *agent) ensureRegistered() {
@@ -110,18 +146,25 @@ func (a *agent) ensureRegistered() {
 	client := registryclient.NewRegistryClient(a.cfg.registryAddr, a.cfg.serviceName, "", 0, metadata, a.cfg.debug)
 	registerEventHandlers(client)
 
-	if err := client.Init(); err != nil {
+	log("INFO", "Connecting to registry at %s (cleanup_old_routes=%t)", a.cfg.registryAddr, a.cfg.cleanupOldRoutes)
+
+	if err := client.InitWithCleanup(a.cfg.cleanupOldRoutes); err != nil {
 		log("ERROR", "Registry init failed: %v", err)
 		return
 	}
 
+	log("INFO", "Using container IP: %s", client.GetLocalIP())
+
 	backendURL := client.BuildBackendURL(a.cfg.backendPort)
+	log("INFO", "Registering domains %s with backend %s", strings.Join(a.cfg.domains, ","), backendURL)
+
 	routeID, err := client.AddRoute(a.cfg.domains, a.cfg.routePath, backendURL, a.cfg.priority)
 	if err != nil {
 		log("ERROR", "Failed to add route: %v", err)
 		client.Close()
 		return
 	}
+	log("INFO", "Route staged with ID %s", routeID)
 
 	if err := client.SetHealthCheck(routeID, a.cfg.proxyHealthPath, a.cfg.proxyHealthInterval, a.cfg.proxyHealthTimeout); err != nil {
 		log("WARN", "Failed to set proxy health check: %v", err)
@@ -136,6 +179,7 @@ func (a *agent) ensureRegistered() {
 		client.Close()
 		return
 	}
+	log("INFO", "Registry config applied successfully")
 
 	a.client = client
 	a.routeID = routeID
@@ -192,6 +236,22 @@ func registerEventHandlers(client *registryclient.RegistryClientV2) {
 
 	client.On(registryclient.EventError, func(event registryclient.Event) {
 		log("ERROR", "[Registry] %v", event.Data["message"])
+	})
+
+	client.On(registryclient.EventConnected, func(event registryclient.Event) {
+		log("INFO", "[Registry] Control connection active: session=%v ip=%v", event.Data["session_id"], event.Data["local_ip"])
+	})
+
+	client.On(registryclient.EventDisconnected, func(event registryclient.Event) {
+		log("WARN", "[Registry] Control connection disconnected: %v", event.Data["reason"])
+	})
+
+	client.On(registryclient.EventRetrying, func(event registryclient.Event) {
+		log("WARN", "[Registry] Connection lost, retrying (attempt %v): %v", event.Data["attempt"], event.Data["error"])
+	})
+
+	client.On(registryclient.EventReconnected, func(event registryclient.Event) {
+		log("INFO", "[Registry] Reconnected to proxy after %v attempts", event.Data["attempt"])
 	})
 
 	client.On(registryclient.EventIPChanged, func(event registryclient.Event) {
