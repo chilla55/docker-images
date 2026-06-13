@@ -43,7 +43,7 @@ x-common:
     APP_DEBUG: "false"
     APP_ENV: production
     BEHIND_PROXY: "true"
-    TRUSTED_PROXIES: "*"
+    TRUSTED_PROXIES: "127.0.0.1,172.17.0.1,172.20.0.1"
     APP_TIMEZONE: Europe/Berlin
     APP_LOCALE: en
     XDG_DATA_HOME: /pelican-data
