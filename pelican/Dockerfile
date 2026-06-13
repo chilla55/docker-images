@@ -38,3 +38,4 @@ RUN chmod 0755 /usr/local/bin/pelican-registry-agent /usr/local/bin/pelican-entr
 USER www-data
 
 ENTRYPOINT ["/bin/ash", "/usr/local/bin/pelican-entrypoint-wrapper.sh"]
+CMD ["supervisord", "-n", "-c", "/etc/supervisord.conf"]
