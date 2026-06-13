@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -91,7 +93,7 @@ func loadConfig() config {
 }
 
 func (a *agent) reconcile() {
-	healthy := localEndpointHealthy(a.cfg.localHealthURL, a.cfg.localCheckTimeout)
+	healthy, detail := localEndpointHealthy(a.cfg.localHealthURL, a.cfg.localCheckTimeout)
 
 	a.mu.Lock()
 	if healthy {
@@ -108,7 +110,7 @@ func (a *agent) reconcile() {
 
 	if healthy {
 		if a.cfg.debug {
-			log("DEBUG", "Local health OK at %s (%d/%d before register)", a.cfg.localHealthURL, healthySeen, a.cfg.registerAfter)
+			log("DEBUG", "Local health OK at %s (%d/%d before register): %s", a.cfg.localHealthURL, healthySeen, a.cfg.registerAfter, detail)
 		}
 		if healthySeen < a.cfg.registerAfter {
 			return
@@ -118,9 +120,9 @@ func (a *agent) reconcile() {
 	}
 
 	if registered {
-		log("WARN", "Local Caddy endpoint unhealthy at %s (%d/%d before unregister)", a.cfg.localHealthURL, unhealthySeen, a.cfg.unregisterAfter)
+		log("WARN", "Local Caddy endpoint unhealthy at %s (%d/%d before unregister): %s", a.cfg.localHealthURL, unhealthySeen, a.cfg.unregisterAfter, detail)
 	} else if a.cfg.debug {
-		log("DEBUG", "Local Caddy endpoint still unhealthy at %s", a.cfg.localHealthURL)
+		log("DEBUG", "Local Caddy endpoint still unhealthy at %s: %s", a.cfg.localHealthURL, detail)
 	}
 
 	if unhealthySeen < a.cfg.unregisterAfter {
@@ -259,15 +261,45 @@ func registerEventHandlers(client *registryclient.RegistryClientV2) {
 	})
 }
 
-func localEndpointHealthy(url string, timeout time.Duration) bool {
+func localEndpointHealthy(rawURL string, timeout time.Duration) (bool, string) {
 	client := &http.Client{Timeout: timeout}
-	resp, err := client.Get(url)
-	if err != nil {
-		return false
+	resp, err := client.Get(rawURL)
+	if err == nil {
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+		return true, fmt.Sprintf("http status %d", resp.StatusCode)
 	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode < 500
+
+	parsed, parseErr := url.Parse(rawURL)
+	if parseErr != nil {
+		return false, fmt.Sprintf("http request failed: %v; url parse failed: %v", err, parseErr)
+	}
+
+	host := parsed.Host
+	if host == "" {
+		return false, fmt.Sprintf("http request failed: %v; empty host", err)
+	}
+
+	if _, _, splitErr := net.SplitHostPort(host); splitErr != nil {
+		port := parsed.Port()
+		if port == "" {
+			switch parsed.Scheme {
+			case "https":
+				port = "443"
+			default:
+				port = "80"
+			}
+		}
+		host = net.JoinHostPort(parsed.Hostname(), port)
+	}
+
+	conn, dialErr := net.DialTimeout("tcp", host, timeout)
+	if dialErr != nil {
+		return false, fmt.Sprintf("http request failed: %v; tcp dial to %s failed: %v", err, host, dialErr)
+	}
+	_ = conn.Close()
+
+	return true, fmt.Sprintf("http request failed but tcp listener is reachable on %s: %v", host, err)
 }
 
 func splitDomains(raw string) []string {
