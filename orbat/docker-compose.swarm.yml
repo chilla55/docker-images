@@ -41,7 +41,7 @@ services:
       SHOW_EXTENDED_INFO: "false"  # Set to "true" to show detailed progress info
       
       # Application URLs
-      NEXTAUTH_URL: "https://orbat.chilla55.de"
+      NEXTAUTH_URL: "https://6md.eu"
       
       # Database connection (constructed from individual components)
       DATABASE_HOST: "postgresql"
@@ -58,12 +58,12 @@ services:
       # Discord OAuth (from secrets)
       DISCORD_CLIENT_ID: ""  # Will be populated from secret
       DISCORD_CLIENT_SECRET: ""  # Will be populated from secret
-      DISCORD_REDIRECT_URI: "https://orbat.chilla55.de/api/auth/callback/discord"
-      DISCORD_OAUTH_URL: "https://discord.com/oauth2/authorize?client_id=1342882316716085318&response_type=code&redirect_uri=https%3A%2F%2Forbat.chilla55.de%2Fapi%2Fauth%2Fcallback%2Fdiscord&scope=identify"
+      DISCORD_REDIRECT_URI: "https://6md.eu/api/auth/callback/discord"
+      DISCORD_OAUTH_URL: "https://discord.com/oauth2/authorize?client_id=1342882316716085318&response_type=code&redirect_uri=https%3A%2F%2F6md.eu%2Fapi%2Fauth%2Fcallback%2Fdiscord&scope=identify"
       
       # Steam OAuth (from secrets)
       STEAM_API_KEY: ""  # Will be populated from secret
-      STEAM_REDIRECT_URI: "https://orbat.chilla55.de/api/auth/callback/steam"
+      STEAM_REDIRECT_URI: "https://6md.eu/api/auth/callback/steam"
       
       # Next.js configuration
       NEXT_TELEMETRY_DISABLED: "1"
@@ -71,7 +71,7 @@ services:
       # go-proxy TCP registry (port 81)
       REGISTRY_HOST: "tasks.go-proxy_proxy"
       REGISTRY_PORT: "81"
-      DOMAINS: "orbat.chilla55.de"
+      DOMAINS: "6md.eu"
       ROUTE_PATH: "/"
       BACKEND_HOST: "tasks.orbat_orbat"
     
