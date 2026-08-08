@@ -40,7 +40,7 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000
 
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5m --retries=3 \
   CMD ["/healthcheck.sh"]
 
 ENTRYPOINT ["/entrypoint"]
