@@ -20,11 +20,11 @@ This container hosts the 6th Maroon Division Homepage (Orbat system) with automa
 - ✅ Persistent data with Docker volumes
 - ✅ Deployed on web node with 1 replica
 - ✅ Health checks for container monitoring
-- ✅ Zero-downtime updates with graceful restarts
+- ✅ Maintenance-mode updates with coordinated web and scheduler restarts
 
 ## Architecture
 
-- **Base Image**: `node:20-alpine`
+- **Base Image**: `node:24-alpine`
 - **Repository**: https://github.com/6th-Maroon-Division/Homepage
 - **Framework**: Next.js 14+ with TypeScript
 - **Database**: PostgreSQL with Prisma ORM
@@ -76,9 +76,63 @@ make push
 make deploy
 ```
 
+## Scheduler lifecycle
+
+The active image entrypoint is built from `main.go` and `runtime.go`. The legacy
+`entrypoint.sh` and checked-in `entrypoint` binary are not used by the Dockerfile.
+
+After dependency installation, Prisma generation/migrations, and the Next.js
+build, the container runs `npm start` and `npm run scheduler` from `/app/repo`.
+Both inherit the same environment and loaded secrets, including `DATABASE_URL`.
+The reviewed branch runs `node --import tsx scripts/scheduler.ts`; `tsx` and
+`@next/env` are production dependencies. Development dependencies also remain
+installed for the Next.js build and Prisma CLI. The scheduler requires no extra
+secrets, ports, or volume beyond the existing database and application files.
+
+The supervisor restarts an exited process after five seconds without restarting
+its healthy sibling. Updates stop both process groups before changing files or
+running migrations; neither process restarts during the build. Shutdown sends
+SIGTERM to the entire npm process groups, waits up to 150 seconds, then kills
+remaining descendants. Tini reaps orphaned children. Swarm allows 180 seconds for
+container shutdown. Before changing application files and before starting the web
+server, the supervisor verifies that the configured web port can be bound. A
+leftover listener stops the update with an error instead of launching a competing
+Next.js server.
+
+Keep **one replica**. Swarm updates and rollbacks use `stop-first` to avoid overlap
+between old/new schedulers and concurrent writes to the shared application volume.
+This introduces deployment downtime. The reviewed scheduler uses a transaction-held
+database lock to serialize job execution, but that does not protect shared files
+from concurrent container builds. Keep the single-replica deployment.
+
+Health checks establish process liveness, not successful job execution. A scheduler
+heartbeat would be needed to detect a live but stuck worker. The deployed app must
+define a long-running `scheduler` npm script; set `SCHEDULER_ENABLED=false` when
+running an older revision without that script.
+
+### Release order
+
+The scheduler was verified on application `main` at commit
+`a5f85b55bf1f9bc307ecf1e2cebf525a0d9903bb` (PR #77). Its package manifest
+requires Node `^24.11.0`; the image uses Node 24 Alpine. The container continues
+cloning and updating **main**, with `SCHEDULER_ENABLED=true` in the stack.
+The existing `prisma migrate deploy` step creates `SchedulerState` and
+`SchedulerJob` before the scheduler starts.
+
+Build and publish this container image, then update the Swarm stack to use it.
+An application git pull inside an older container does not upgrade Node or add
+the scheduler supervisor. When rolling the application back to a revision without
+the scheduler script, set `SCHEDULER_ENABLED=false`.
+
+The worker ticks every 30 seconds. Each job transaction and its error-recovery
+transaction can take up to 60 seconds; the shutdown allowance accommodates both
+plus connection cleanup. Job failures are logged as `scheduler.tick_failed` or
+`scheduler.job_failed`; successful jobs log `scheduler.job_committed`.
+
 ## Environment Variables
 
 ### Required (in docker-compose.swarm.yml)
+- `SCHEDULER_ENABLED` - Run `npm run scheduler` alongside the web server (default: `true`; set exactly `false` to disable)
 - `NODE_ENV` - Set to "production"
 - `PORT` - Application port (default: 3000)
 - `UPDATE_CHECK_INTERVAL` - Seconds between update checks (default: 300 = 5 min, 0 = disabled)
@@ -130,7 +184,7 @@ When the container restarts:
     - Pulls latest code
     - Rebuilds application
     - Runs Prisma migrations
-  - If no updates: Starts immediately
+  - Reinstalls dependencies, applies migrations, and builds on every startup
 
 ### 2. Periodic Background Checks
 A background process runs continuously and:
@@ -140,7 +194,8 @@ A background process runs continuously and:
   - Shows maintenance page to users
   - Pulls and rebuilds application
   - Runs database migrations
-  - Gracefully restarts the Next.js server
+  - Stops both web server and scheduler before modifying code, dependencies, or the database
+  - Restarts both processes after a successful build
   - Returns to normal operation
 
 **Configure the check interval** by setting `UPDATE_CHECK_INTERVAL` in docker-compose.swarm.yml:
@@ -200,9 +255,11 @@ make clean
 ## Health Checks
 
 The container includes a health check script that:
-- Returns healthy during maintenance mode
-- Checks Next.js API or homepage availability
-- Runs every 30 seconds with 60s start period
+- Accepts the maintenance server only during intentional startup/build work
+- Requires live web and scheduler processes during normal operation (scheduler optional when disabled)
+- Checks Next.js API or homepage availability with bounded HTTP timeouts
+- Fails after a clone/build/update error, even if the maintenance page still responds
+- Runs every 30 seconds with a 5-minute start period
 
 ## Database Setup
 
@@ -289,7 +346,7 @@ make list-secrets
 
 ## Version
 
-Current version: `1.0.0`
+Current version: `1.1.0`
 
 ## Repository
 

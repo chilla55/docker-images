@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,12 +31,11 @@ var (
 	updateCheckIntvl   = getEnv("UPDATE_CHECK_INTERVAL", "300")
 	maintenancePageURL string // Will be set in main() if not provided via env
 
-	registryClientV2 *registryclient.RegistryClientV2
-	routeID          string
-	maintenancePID   int
-	updateChkPID     int
-	npmStartPID      int
-	updating         bool // Flag to prevent auto-restart during updates
+	registryClientV2               *registryclient.RegistryClientV2
+	routeID                        string
+	maintenancePID                 int
+	runtime                        = newAppRuntime()
+	commandContext, cancelCommands = context.WithCancel(context.Background())
 
 	done = make(chan os.Signal, 1)
 )
@@ -134,6 +135,8 @@ func updateStatus(step, message string, progress int, details string) {
 }
 
 func cleanup() {
+	cancelCommands()
+	runtime.close()
 	log("Shutting down, closing persistent connection...")
 	if registryClientV2 != nil {
 		log("Shutting down registry connection...")
@@ -150,12 +153,6 @@ func cleanup() {
 	}
 	if maintenancePID > 0 {
 		syscall.Kill(maintenancePID, syscall.SIGTERM)
-	}
-	if updateChkPID > 0 {
-		syscall.Kill(updateChkPID, syscall.SIGTERM)
-	}
-	if npmStartPID > 0 {
-		syscall.Kill(npmStartPID, syscall.SIGTERM)
 	}
 }
 
@@ -311,7 +308,7 @@ func exitProxyMaintenance() error {
 }
 
 func runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(commandContext, name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Dir = appDir
@@ -356,17 +353,23 @@ func checkForUpdates() (bool, error) {
 	// Get local and remote commits
 	localCmd := exec.Command("git", "rev-parse", "HEAD")
 	localCmd.Dir = appDir
-	local, _ := localCmd.Output()
+	local, err := localCmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("read local commit: %w", err)
+	}
 
 	remoteCmd := exec.Command("git", "rev-parse", "origin/main")
 	remoteCmd.Dir = appDir
-	remote, _ := remoteCmd.Output()
+	remote, err := remoteCmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("read remote commit: %w", err)
+	}
 
 	localHash := strings.TrimSpace(string(local))
 	remoteHash := strings.TrimSpace(string(remote))
 
 	if localHash != remoteHash {
-		log("Updates detected: %s -> %s", localHash[:7], remoteHash[:7])
+		log("Updates detected: %s -> %s", localHash, remoteHash)
 		return true, nil
 	}
 
@@ -374,14 +377,15 @@ func checkForUpdates() (bool, error) {
 	return false, nil
 }
 
-func performUpdate() error {
+func performUpdate() (updateErr error) {
+	defer func() {
+		if updateErr != nil {
+			runtime.fail()
+		}
+	}()
 	log("========================================")
-	log("Starting zero-downtime update process")
+	log("Starting maintenance-mode update process")
 	log("========================================")
-
-	// Set updating flag to prevent auto-restart
-	updating = true
-	defer func() { updating = false }()
 
 	// Step 1: Enter maintenance mode
 	log("[Update 1/8] Entering maintenance mode...")
@@ -403,37 +407,12 @@ func performUpdate() error {
 	log("[Update] ✓ Maintenance mode active, proxy confirmed")
 
 	// Step 2: Stop Next.js
-	log("[Update 2/8] Stopping Next.js...")
-	updateStatus("stopping-app", "Stopping application", 10, "Gracefully shutting down Next.js")
-	if npmStartPID > 0 {
-		log("[Update] Sending SIGTERM to Next.js (PID: %d)...", npmStartPID)
-		if err := syscall.Kill(npmStartPID, syscall.SIGTERM); err != nil {
-			log("Warning: failed to send SIGTERM to Next.js: %v", err)
-		}
-
-		// Wait for process to actually exit (up to 10 seconds)
-		for i := 0; i < 20; i++ {
-			// Check if process still exists
-			if err := syscall.Kill(npmStartPID, 0); err != nil {
-				// Process is gone (err means signal delivery failed because process doesn't exist)
-				log("[Update] Next.js process exited successfully")
-				npmStartPID = 0
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-
-		// Force kill if still running
-		if npmStartPID > 0 {
-			log("[Update] Process still running after 10s, forcing SIGKILL...")
-			if err := syscall.Kill(npmStartPID, syscall.SIGKILL); err != nil {
-				log("Warning: failed to SIGKILL: %v", err)
-			}
-			time.Sleep(1 * time.Second)
-			npmStartPID = 0
-		}
+	log("[Update 2/8] Stopping web server and scheduler...")
+	updateStatus("stopping-app", "Stopping application", 10, "Gracefully shutting down web server and scheduler")
+	if err := runtime.pause(); err != nil {
+		return err
 	}
-	log("[Update] ✓ Next.js stopped")
+	log("[Update] ✓ Web server and scheduler stopped")
 
 	// Step 3: Pull code
 	log("[Update 3/8] Pulling latest code...")
@@ -461,8 +440,8 @@ func performUpdate() error {
 	// Step 9: Start Next.js (if not already running)
 	log("[Update 9/10] Starting Next.js...")
 	updateStatus("starting-app", "Starting application", 90, "Launching Next.js server")
-	if npmStartPID <= 0 {
-		startNPMServer()
+	if err := runtime.start(); err != nil {
+		return err
 	}
 
 	// Step 10: Wait for Next.js to be healthy
@@ -483,7 +462,7 @@ func performUpdate() error {
 
 	updateStatus("complete", "Update complete", 100, "Service is now running with latest code")
 	log("========================================")
-	log("Zero-downtime update completed successfully")
+	log("Maintenance-mode update completed successfully")
 	log("========================================")
 	return nil
 }
@@ -498,7 +477,7 @@ func buildApp() error {
 
 	log("[Update 5/9] Installing dependencies...")
 	updateStatus("dependencies", "Installing dependencies", 30, "Running npm ci to install packages")
-	if err := runCommand("npm", "ci", "--production=false"); err != nil {
+	if err := runCommand("npm", "ci", "--include=dev"); err != nil {
 		return fmt.Errorf("npm ci failed: %w", err)
 	}
 	log("[Update] ✓ Dependencies installed")
@@ -546,7 +525,7 @@ func waitForNextJSHealthy(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		cmd := exec.Command("curl", "-sf", "-o", "/dev/null", healthURL)
+		cmd := exec.CommandContext(commandContext, "curl", "--max-time", "5", "-sf", "-o", "/dev/null", healthURL)
 		if err := cmd.Run(); err == nil {
 			return nil
 		}
@@ -561,7 +540,7 @@ func waitForMaintenanceServerHealthy(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		cmd := exec.Command("curl", "-sf", "-o", "/dev/null", maintenanceURL)
+		cmd := exec.CommandContext(commandContext, "curl", "--max-time", "5", "-sf", "-o", "/dev/null", maintenanceURL)
 		if err := cmd.Run(); err == nil {
 			log("Maintenance server is healthy and accepting connections")
 			return nil
@@ -621,6 +600,7 @@ func startMaintenanceServer() error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	go func() { _ = cmd.Wait() }()
 	maintenancePID = cmd.Process.Pid
 	log("Maintenance server ready on port %s (PID: %d)", maintenancePort, maintenancePID)
 	return nil
@@ -634,10 +614,19 @@ func stopMaintenanceServer() {
 }
 
 func startUpdateChecker() {
+	interval := parseDuration(updateCheckIntvl)
+	if interval <= 0 {
+		log("Periodic update checking disabled")
+		return
+	}
 	go func() {
 		log("Starting background update checker (interval: %ss)...", updateCheckIntvl)
 		for {
-			time.Sleep(time.Duration(parseDuration(updateCheckIntvl)) * time.Second)
+			select {
+			case <-commandContext.Done():
+				return
+			case <-time.After(time.Duration(interval) * time.Second):
+			}
 			log("[Update Check] Checking for updates...")
 
 			updateAvailable, err := checkForUpdates()
@@ -651,7 +640,7 @@ func startUpdateChecker() {
 				continue
 			}
 
-			log("[Update Check] Update available, starting zero-downtime update...")
+			log("[Update Check] Update available, starting maintenance-mode update...")
 			if err := performUpdate(); err != nil {
 				log("[Update Check] Update failed: %v", err)
 				continue
@@ -662,45 +651,26 @@ func startUpdateChecker() {
 }
 
 func parseDuration(s string) int {
-	var i int
-	fmt.Sscanf(s, "%d", &i)
-	return i
-}
-
-func startNPMServer() {
-	go func() {
-		for {
-			// Don't auto-restart if an update is in progress
-			if updating {
-				time.Sleep(1 * time.Second)
-				continue
-			}
-
-			log("Launching Next.js...")
-			cmd := exec.Command("npm", "start")
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			cmd.Dir = appDir
-
-			if err := cmd.Start(); err != nil {
-				log("Failed to start Next.js: %v (retrying in 5s)", err)
-				time.Sleep(5 * time.Second)
-				continue
-			}
-
-			npmStartPID = cmd.Process.Pid
-			if err := cmd.Wait(); err != nil {
-				log("Next.js exited (code: %v), restarting in 5s...", err)
-			}
-			time.Sleep(5 * time.Second)
-		}
-	}()
+	value, err := strconv.Atoi(s)
+	if err != nil || value < 0 {
+		log("Invalid UPDATE_CHECK_INTERVAL %q; using 300 seconds", s)
+		return 300
+	}
+	return value
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	defer cleanup()
 
+	if err := runtime.pause(); err != nil {
+		log("ERROR: %v", err)
+		return 1
+	}
 	log("Starting entrypoint...")
 	log("Service: %s, Port: %s, Maintenance: %s", serviceName, port, maintenancePort)
 
@@ -718,7 +688,7 @@ func main() {
 	// Setup all secrets (NEXTAUTH_SECRET, Discord, Steam, etc.)
 	if err := setupSecrets(); err != nil {
 		log("ERROR: Failed to setup secrets: %v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Ensure app directory exists
@@ -778,6 +748,12 @@ func main() {
 
 	// BACKGROUND: Clone/build app while maintenance page is visible
 	go func() {
+		success := false
+		defer func() {
+			if !success {
+				runtime.fail()
+			}
+		}()
 		log("BACKGROUND: Building application...")
 
 		// Clone or check updates
@@ -817,12 +793,12 @@ func main() {
 
 		log("Build complete, starting Next.js server...")
 
-		// Start update checker
-		startUpdateChecker()
-
 		// Start npm server
 		log("Starting application supervisor...")
-		startNPMServer()
+		if err := runtime.start(); err != nil {
+			log("ERROR: %v", err)
+			return
+		}
 
 		// Wait for Next.js to be healthy
 		log("Waiting for Next.js to be healthy...")
@@ -835,14 +811,15 @@ func main() {
 		if err := exitProxyMaintenance(); err != nil {
 			log("Warning: Failed to exit maintenance mode: %v", err)
 		}
-		// Maintenance server will be stopped by EventMaintenanceExitOK handler
+		success = true
+		startUpdateChecker()
 	}()
 
 	// Keep connection alive and wait for signals
 	for {
 		select {
 		case <-done:
-			return
+			return 0
 		case <-time.After(10 * time.Second):
 			// Keep-alive interval - handled by keepAliveLoop
 		}

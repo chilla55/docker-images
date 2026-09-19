@@ -17,7 +17,10 @@ services:
       update_config:
         parallelism: 1
         delay: 10s
-        order: start-first
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        order: stop-first
       restart_policy:
         condition: any
         delay: 5s
@@ -31,7 +34,12 @@ services:
           cpus: '0.5'
           memory: 512M
     
+    # Allow a 60s job plus recovery, disconnect, and entrypoint cleanup.
+    stop_grace_period: 180s
+
     environment:
+      # Run exactly one scheduler alongside the web server.
+      SCHEDULER_ENABLED: "true"
       # Node.js environment
       NODE_ENV: "production"
       PORT: "3000"

@@ -11,15 +11,15 @@ COPY go.mod go.sum* ./
 RUN go mod download
 
 # Copy source files
-COPY main.go ./
+COPY main.go runtime.go ./
 
 # Build the entrypoint
 RUN go build -o entrypoint .
 
-FROM node:20-alpine
+FROM node:24-alpine
 
 # Install dependencies only when needed
-RUN apk add --no-cache git curl bash netcat-openbsd
+RUN apk add --no-cache git curl bash netcat-openbsd tini openssl
 
 WORKDIR /app
 
@@ -43,4 +43,4 @@ ENV NODE_ENV=production \
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5m --retries=3 \
   CMD ["/healthcheck.sh"]
 
-ENTRYPOINT ["/entrypoint"]
+ENTRYPOINT ["/sbin/tini", "--", "/entrypoint"]
